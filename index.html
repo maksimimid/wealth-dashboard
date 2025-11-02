@@ -3,410 +3,215 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Stunning Investment Dashboard — Maksim</title>
-<!-- Chart.js v4 -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js"></script>
+<title>Stunning Wealth Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js" defer></script>
+<script src="./config.sample.js" defer></script>
+<script src="./config.local.js" defer></script>
+<script src="./app.js" defer></script>
 <style>
     :root{
-        --bg: linear-gradient(180deg,#0f172a 0%, #071129 100%);
-        --card: rgba(255,255,255,0.03);
-        --glass: rgba(255,255,255,0.04);
-        --accent: #60a5fa;
-        --accent-2: #34d399;
-        --muted: rgba(255,255,255,0.6);
-        --shadow: 0 8px 30px rgba(2,6,23,0.6); 
-
-        --success: #10b981;
-        --danger: #ef4444;
-        --error: #ef4444;
-        
+        --bg: radial-gradient(circle at top left,#1e3a8a 0%,rgba(15,23,42,1) 45%, #030712 100%);
+        --card: rgba(255,255,255,0.05);
+        --glass: rgba(255,255,255,0.08);
+        --muted: rgba(226,232,240,0.72);
+        --accent: #38bdf8;
+        --accent-2: #6366f1;
+        --success: #34d399;
+        --danger: #f87171;
+        --shadow: 0 24px 60px rgba(8,47,73,0.32);
     }
     *{box-sizing:border-box}
-    html,body{height:100%;margin:0;font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background:var(--bg); color:#e6eef8}
-    .wrap{max-width:1400px;margin:28px auto;padding:20px}
-    header{display:flex;align-items:center;justify-content:space-between;gap:12px}
-    h1{margin:0;font-weight:600;letter-spacing:-0.5px}
-    .controls{display:flex;gap:10px;align-items:center}
-    .btn{background:var(--glass);border:1px solid rgba(255,255,255,0.04);padding:8px 12px;border-radius:10px;color:var(--muted);cursor:pointer}
-    .btn.primary{background:linear-gradient(90deg,var(--accent),#7c3aed);color:white;border:0}
-    .search{padding:8px 12px;border-radius:12px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:inherit}
-
-    .top-summary{display:grid;grid-template-columns:1fr 380px;gap:18px;margin-top:18px;align-items:center}
-    .kpi{background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));padding:18px;border-radius:14px;box-shadow:var(--shadow);display:flex;align-items:center;gap:14px}
-    .kpi .big{font-size:1.5rem;font-weight:700}
-    .kpi .small{color:var(--muted);font-size:0.9rem}
-
-    .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;margin-top:18px}
-    .card{background:var(--card);border-radius:12px;padding:14px;box-shadow:var(--shadow);min-height:220px;display:flex;flex-direction:column}
+    html,body{height:100%;margin:0;font-family:'Inter',system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;background:var(--bg);color:#f8fafc;overflow-x:hidden}
+    body::before{content:'';position:fixed;inset:auto -160px 40%;height:340px;background:radial-gradient(circle,rgba(56,189,248,0.3),rgba(56,189,248,0));filter:blur(90px);z-index:-1;opacity:0.7}
+    .wrap{max-width:1400px;margin:0 auto;padding:36px 24px 80px;display:flex;flex-direction:column;gap:24px}
+    header{display:flex;justify-content:space-between;align-items:flex-start;gap:18px}
+    h1{margin:0;font-size:2.35rem;font-weight:600;letter-spacing:-0.8px}
+    .subtitle{color:var(--muted);font-size:14px;margin-top:6px;max-width:480px;line-height:1.6}
+    .controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .btn{padding:10px 16px;border-radius:14px;border:1px solid rgba(255,255,255,0.12);background:rgba(15,23,42,0.6);color:#eef2ff;cursor:pointer;font-weight:500;transition:transform 0.2s ease,box-shadow 0.2s ease}
+    .btn:hover{transform:translateY(-1px);box-shadow:0 12px 32px rgba(15,118,110,0.25)}
+    .btn.primary{background:linear-gradient(120deg,var(--accent),var(--accent-2));border:0;color:#f8fafc;box-shadow:0 12px 35px rgba(99,102,241,0.35)}
+    .top-summary{display:grid;grid-template-columns:1fr 360px;gap:18px}
+    .kpi{background:linear-gradient(160deg,rgba(255,255,255,0.09),rgba(15,23,42,0.4));padding:22px;border-radius:20px;box-shadow:var(--shadow);display:flex;align-items:center;gap:20px;position:relative;overflow:hidden}
+    .kpi::after{content:'';position:absolute;inset:auto -40px -40px auto;width:180px;height:180px;background:radial-gradient(circle,rgba(59,130,246,0.25),rgba(59,130,246,0));filter:blur(20px);opacity:0.9}
+    .kpi .label{font-size:13px;letter-spacing:0.2px;text-transform:uppercase;color:rgba(226,232,240,0.65);font-weight:600}
+    .kpi .big{font-size:2rem;font-weight:700;margin-top:4px}
+    .kpi small{color:var(--muted);font-size:12px}
+    .pill{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:rgba(15,118,110,0.12);color:var(--muted);font-size:12px}
+    .pill span{font-weight:600;color:#34d399}
+    .pnl-label-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+    .pnl-range-controls{display:flex;gap:8px;align-items:center}
+    .pnl-range-controls button{padding:6px 12px;border-radius:999px;border:1px solid rgba(255,255,255,0.12);background:rgba(15,23,42,0.5);color:var(--muted);cursor:pointer;font-size:12px;letter-spacing:0.4px;text-transform:uppercase;transition:all 0.2s ease}
+    .pnl-range-controls button.active{background:linear-gradient(120deg,var(--accent),var(--accent-2));color:#fff;border-color:transparent;box-shadow:0 10px 30px rgba(14,165,233,0.28)}
+    #pnl-range-label{text-transform:uppercase;font-weight:600;letter-spacing:0.4px}
+    .time-controls{display:flex;gap:10px;margin-top:-8px}
+    .time-controls button{padding:7px 14px;border-radius:999px;border:1px solid rgba(255,255,255,0.12);background:rgba(15,23,42,0.6);color:var(--muted);cursor:pointer;transition:all 0.2s ease}
+    .time-controls button.active{background:linear-gradient(120deg,var(--accent),var(--accent-2));color:#fff;border:0;box-shadow:0 10px 30px rgba(14,165,233,0.28)}
+    .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:20px}
+    .card{background:rgba(15,23,42,0.72);border:1px solid rgba(255,255,255,0.06);border-radius:20px;padding:20px;box-shadow:var(--shadow);display:flex;flex-direction:column;min-height:220px;position:relative;overflow:hidden}
+    .card::before{content:'';position:absolute;top:-120px;right:-80px;width:240px;height:240px;background:radial-gradient(circle,rgba(236,72,153,0.18),rgba(236,72,153,0));filter:blur(30px);opacity:0.9}
+    .card > strong{font-weight:600;letter-spacing:0.3px}
     .card.full{grid-column:1/-1;min-height:420px}
-    canvas{width:100% !important;height:100% !important;display:block}
-
-    .time-controls{display:flex;gap:8px}
-    .time-controls button{padding:6px 10px;border-radius:8px;border:0;background:rgba(255,255,255,0.03);color:var(--muted);cursor:pointer}
-    .time-controls button.active{background:linear-gradient(90deg,var(--accent),var(--accent-2));color:white}
-
-    .list{overflow:auto;flex:1;margin-top:10px}
-    .row{display:flex;justify-content:space-between;padding:8px 6px;border-radius:8px}
-    .row:hover{background:rgba(255,255,255,0.02)}
-    .symbol{font-weight:700}
-    .pos{color:var(--muted)}
-
-    footer{margin-top:18px;color:var(--muted);font-size:12px;display:flex;justify-content:space-between}
-
-    @media(max-width:900px){.top-summary{grid-template-columns:1fr} .grid{grid-template-columns:1fr}}
+    canvas{width:100% !important;height:100% !important}
+    .list{margin-top:12px;flex:1;overflow:auto;padding-right:6px}
+    .row{display:flex;justify-content:space-between;gap:20px;padding:12px 10px;border-radius:14px;transition:background 0.2s ease;align-items:flex-start}
+    .row:hover{background:rgba(15,118,110,0.08)}
+    .symbol{font-weight:600;font-size:15px}
+    .pos{color:var(--muted);font-size:13px}
+    .row-right{display:flex;flex-direction:column;align-items:flex-end;gap:6px;text-align:right}
+    .value-strong{font-weight:700;font-size:16px}
+    .price-row{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+    .price-label{text-transform:uppercase;letter-spacing:0.6px;font-weight:600;font-size:11px;opacity:0.7}
+    .price-value{font-weight:600;font-size:15px;color:#f8fafc;padding:2px 8px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;background:rgba(15,23,42,0.55);box-shadow:0 0 0 rgba(0,0,0,0)}
+    .pnl-value{font-weight:600}
+    .price-value.flash-up{animation:priceFlashUp 0.9s ease forwards}
+    .price-value.flash-down{animation:priceFlashDown 0.9s ease forwards}
+    .flash-up{animation:priceFlashUp 0.9s ease forwards}
+    .flash-down{animation:priceFlashDown 0.9s ease forwards}
+    footer{margin-top:12px;color:var(--muted);font-size:12px;display:flex;justify-content:space-between;align-items:center;gap:18px}
+    footer a{color:var(--muted);text-decoration:none}
+    .status-dot{width:9px;height:9px;border-radius:50%;background:#34d399;display:inline-block;margin-right:6px;box-shadow:0 0 6px rgba(52,211,153,0.8)}
+    body.light-theme{background:linear-gradient(180deg,#f9fafb 0%,#e2e8f0 100%);color:#0f172a}
+    body.light-theme .subtitle{color:#475569}
+    body.light-theme .card{background:rgba(255,255,255,0.82);border:1px solid rgba(15,23,42,0.08);box-shadow:0 18px 40px rgba(15,23,42,0.1)}
+    body.light-theme .kpi{background:linear-gradient(160deg,rgba(255,255,255,0.95),rgba(226,232,240,0.6));color:#0f172a}
+    body.light-theme .kpi .label{color:#475569}
+    body.light-theme .kpi small{color:#64748b}
+    body.light-theme .btn{background:rgba(255,255,255,0.85);color:#1e293b;border-color:rgba(148,163,184,0.4)}
+    body.light-theme .btn.primary{background:linear-gradient(120deg,#4f46e5,#14b8a6);color:#f8fafc}
+    body.light-theme .pos{color:#64748b}
+    body.light-theme .price-row{color:#64748b}
+    body.light-theme .price-value{background:rgba(226,232,240,0.9);color:#0f172a}
+    body.light-theme .price-value.flash-up{animation:priceFlashUpLight 0.9s ease forwards}
+    body.light-theme .price-value.flash-down{animation:priceFlashDownLight 0.9s ease forwards}
+    body.light-theme .flash-up{animation:priceFlashUpLight 0.9s ease forwards}
+    body.light-theme .flash-down{animation:priceFlashDownLight 0.9s ease forwards}
+    body.light-theme .pnl-range-controls button{background:rgba(255,255,255,0.9);color:#475569;border-color:rgba(148,163,184,0.4)}
+    body.light-theme .pnl-range-controls button.active{background:linear-gradient(120deg,#4f46e5,#14b8a6);color:#f8fafc;border-color:transparent}
+    body.light-theme footer{color:#64748b}
+    body.light-theme .status-dot{background:#22c55e;box-shadow:0 0 6px rgba(34,197,94,0.6)}
+    @keyframes priceFlashUp{0%{background:rgba(16,185,129,0.4);color:#bbf7d0;box-shadow:0 0 0 rgba(16,185,129,0.6)}100%{background:rgba(15,23,42,0.55);color:#f8fafc;box-shadow:0 0 0 rgba(0,0,0,0)}}
+    @keyframes priceFlashDown{0%{background:rgba(248,113,113,0.4);color:#fecaca;box-shadow:0 0 0 rgba(248,113,113,0.6)}100%{background:rgba(15,23,42,0.55);color:#f8fafc;box-shadow:0 0 0 rgba(0,0,0,0)}}
+    @keyframes priceFlashUpLight{0%{background:rgba(74,222,128,0.35);color:#15803d;box-shadow:0 0 0 rgba(74,222,128,0.5)}100%{background:rgba(226,232,240,0.9);color:#0f172a;box-shadow:0 0 0 rgba(0,0,0,0)}}
+    @keyframes priceFlashDownLight{0%{background:rgba(252,165,165,0.35);color:#b91c1c;box-shadow:0 0 0 rgba(248,113,133,0.5)}100%{background:rgba(226,232,240,0.9);color:#0f172a;box-shadow:0 0 0 rgba(0,0,0,0)}}
+    @media(max-width:1100px){.top-summary{grid-template-columns:1fr}}
+    @media(max-width:900px){.grid{grid-template-columns:1fr}.controls{width:100%}.search{flex:1}}
+    @media(max-width:600px){header{flex-direction:column;align-items:flex-start}.card{padding:18px}.kpi{flex-direction:column;align-items:flex-start}}
 </style>
 </head>
 <body>
 <div class="wrap">
     <header>
         <div>
-            <h1>Investment Dashboard</h1>
-            <div style="color:var(--muted);font-size:13px;margin-top:6px">Live prices via Finnhub · real-time P&L · responsive charts</div>
+            <div class="pill">Realtime Wealth Overview &middot; <span>Connected</span></div>
+            <h1>Wealth Intelligence Hub</h1>
+            <p class="subtitle">Live holdings pulled directly from Airtable Operations and enriched with Finnhub market data. Track allocations, intraday moves, and long-term performance in one glass dashboard.</p>
         </div>
         <div class="controls">
-            <input id="symbol-input" class="search" placeholder="Add ticker, e.g. AAPL, BTC-USD" />
-            <button class="btn" id="add-symbol">Add</button>
-            <button class="btn primary" id="theme-toggle">Toggle Theme</button>
+            <button class="btn primary" id="theme-toggle">Light Theme</button>
         </div>
     </header>
 
     <div class="top-summary">
         <div class="kpi" id="pnl-card">
             <div style="flex:1">
-                <div class="small">Total Daily P&amp;L</div>
+                <div class="pnl-label-row">
+                    <div class="label">Total P&L</div>
+                    <div id="pnl-range-controls" class="pnl-range-controls">
+                        <button data-range="1D" class="active">1D</button>
+                        <button data-range="1W">1W</button>
+                        <button data-range="1M">1M</button>
+                        <button data-range="1Y">1Y</button>
+                        <button data-range="ALL">All</button>
+                    </div>
+                </div>
                 <div class="big" id="total-pnl">$0.00</div>
-                <div style="color:var(--muted);font-size:13px;margin-top:6px">Updated: <span id="last-updated">—</span></div>
+                <small>Updated: <span id="last-updated">&mdash;</span> &middot; <span id="pnl-range-label">Daily</span></small>
             </div>
-            <div style="width:220px;height:90px">
+            <div style="width:220px;height:95px">
                 <canvas id="sparkline" aria-label="pnl sparkline"></canvas>
             </div>
         </div>
-        <div style="display:flex;gap:10px;align-items:center">
-            <div class="kpi" style="min-width:180px;text-align:center">
-                <div class="small">Equity</div>
-                <div class="big" id="equity">$0.00</div>
+        <div style="display:flex;flex-direction:column;gap:14px">
+            <div class="kpi" style="min-height:120px">
+                <div style="flex:1">
+                    <div class="label">Net Worth</div>
+                    <div class="big" id="equity">$0.00</div>
+                    <small>Includes all tracked asset market values</small>
+                </div>
             </div>
-            <div class="kpi" style="min-width:180px;text-align:center">
-                <div class="small">Buying Power</div>
-                <div class="big" id="buying-power">$0.00</div>
+            <div class="kpi" style="min-height:120px">
+                <div style="flex:1">
+                    <div class="label">Liquidity</div>
+                    <div class="big" id="buying-power">$0.00</div>
+                    <small>Cash & cash-equivalents from Operations</small>
+                </div>
             </div>
         </div>
-    </div>
-
-    <div class="time-controls" style="margin-top:12px">
-        <button data-range="7">1W</button>
-        <button data-range="30" class="active">1M</button>
-        <button data-range="90">3M</button>
-        <button data-range="365">1Y</button>
-        <button data-range="all">All</button>
     </div>
 
     <div class="grid">
         <div class="card full">
-            <div style="display:flex;justify-content:space-between;align-items:center">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;position:relative;z-index:1">
                 <div>
                     <strong>Profit & Loss by Asset</strong>
-                    <div style="color:var(--muted);font-size:13px">Click header to sort · scroll to see more</div>
+                    <div class="pos" style="margin-top:4px">Sortable insight powered by finnHub live prices and Airtable operations</div>
                 </div>
-                <div style="display:flex;gap:8px">
-                    <button class="btn" id="sort-pnl">Sort: High → Low</button>
+                <div style="display:flex;gap:10px">
+                    <button class="btn" id="sort-pnl">Sort: High ? Low</button>
                     <button class="btn" id="export-csv">Export CSV</button>
                 </div>
             </div>
-            <div style="flex:1;min-height:320px;margin-top:8px">
+            <div style="flex:1;margin-top:12px;min-height:320px;position:relative;z-index:1">
                 <canvas id="pnlChart"></canvas>
             </div>
         </div>
 
         <div class="card">
             <strong>Portfolio Composition</strong>
-            <div style="flex:1;min-height:200px;margin-top:8px">
+            <div class="pos" style="margin-top:4px">Market value weighting across holdings</div>
+            <div style="flex:1;min-height:220px;margin-top:10px">
                 <canvas id="compositionChart"></canvas>
             </div>
         </div>
 
         <div class="card">
-            <strong>Today's Performance (%)</strong>
-            <div style="flex:1;min-height:200px;margin-top:8px">
+            <strong>Intraday Performance</strong>
+            <div class="pos" style="margin-top:4px">Day-over-day moves using prev close data</div>
+            <div style="flex:1;min-height:220px;margin-top:10px">
                 <canvas id="dailyChangeChart"></canvas>
             </div>
         </div>
 
         <div class="card">
             <strong>Assets List (live)</strong>
-            <div class="list" id="assets-list" style="margin-top:10px"></div>
+            <div class="pos" style="margin-top:4px">Pulled from Airtable Operations ? aggregated positions</div>
+            <div class="list" id="assets-list"></div>
         </div>
 
         <div class="card">
-            <strong>Allocation by Type</strong>
-            <div style="flex:1;min-height:160px;margin-top:8px">
+            <strong>Allocation by Category</strong>
+            <div class="pos" style="margin-top:4px">Grouped by Airtable category tags</div>
+            <div style="flex:1;min-height:200px;margin-top:10px">
                 <canvas id="typeAllocationChart"></canvas>
             </div>
         </div>
 
         <div class="card">
-            <strong>Market Depth / Notes</strong>
-            <div style="flex:1;min-height:160px;margin-top:8px;color:var(--muted);font-size:14px">
-                Use Finnhub WebSocket for real-time quotes. REST is used only for initial snapshot (rate-limited). If you exceed limits Finnhub returns 429.
+            <strong>Notes</strong>
+            <div class="pos" style="margin-top:6px;line-height:1.6">
+                Data refreshes automatically from Airtable every load and tracks real-time quote streams via Finnhub WebSocket. Use the range toggles to pivot analytics when historical layers are added.
             </div>
         </div>
     </div>
 
     <footer>
-        <div>Powered by Chart.js · Finnhub</div>
-        <div id="status" style="color:var(--muted)"></div>
+        <div><span class="status-dot"></span><span id="status">Connecting?</span></div>
+        <div>Powered by Airtable ? Finnhub ? Chart.js</div>
     </footer>
 </div>
-
-<script>
-// ------------------ CONFIG ------------------
-const FINNHUB_KEY = ''; // provided
-const FINNHUB_REST = 'https://finnhub.io/api/v1';
-const MAX_REST_BATCH = 5; // keep REST bursts small to respect limits
-
-// Mock Airtable configuration preserved (if you have a key fill it)
-const AIRTABLE_API_KEY = '';
-const AIRTABLE_BASE_ID = 'appSxixo1i122KyBS';
-const AIRTABLE_TABLE_NAME = 'tblFCYfTpt1tIlWzQ';
-const AIRTABLE_URL = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}`;
-
-// ----------------- STATE --------------------
-let positions = []; // objects: {Name, Symbol, qty, avgPrice, currentPrice, change, pnl, type}
-let symbolSet = new Set();
-let charts = {};
-let sparkData = [];
-let ws;
-let lastUpdated = null;
-
-// ----------------- UTIL ---------------------
-function money(v){return (v===null||v===undefined)?'—':('$'+Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}))}
-function pct(v){return (v===null||v===undefined)?'—':(Number(v).toFixed(2)+'%')}
-
-// --------------- INITIAL MOCK/LOAD ---------------
-// If Airtable key not provided fallback to sample positions
-async function loadPositions(){
-    if(AIRTABLE_API_KEY){
-        try{
-            const res = await fetch(AIRTABLE_URL,{headers:{Authorization:`Bearer ${AIRTABLE_API_KEY}`}});
-            const json = await res.json();
-            positions = json.records.map(r=>({
-                Name:r.fields.Name||r.fields.Symbol||'Unknown',
-                Symbol:r.fields.Symbol||r.fields.Name||'',
-                qty: r.fields.Quantity||1,
-                avgPrice: r.fields.AvgPrice||r.fields['Average price']||0,
-                type: r.fields.Type||'Asset'
-            }));
-        }catch(e){console.warn('Airtable load failed',e); useFallback();}
-    }else{
-        useFallback();
-    }
-    function useFallback(){
-        positions = [
-            {Name:'Apple',Symbol:'AAPL',qty:10,avgPrice:150,type:'Stock'},
-            {Name:'Google',Symbol:'GOOGL',qty:2,avgPrice:110, type:'Stock'},
-            {Name:'Bitcoin',Symbol:'BINANCE:BTCUSDT',qty:0.05,avgPrice:30000,type:'Crypto'},
-            {Name:'Ethereum',Symbol:'BINANCE:ETHUSDT',qty:0.6,avgPrice:1800,type:'Crypto'}
-        ];
-    }
-    positions.forEach(p=>{ if(p.Symbol) symbolSet.add(p.Symbol); });
-}
-
-// ----------------- FINNHUB REST (snapshot) -----------------
-async function fetchSnapshotBatch(symbols){
-    // Finnhub has endpoints for quote and for crypto uses other endpoints. We'll attempt quote endpoint for stocks/forex and use crypto candles for crypto when needed.
-    const promises = symbols.map(sym => fetch(`${FINNHUB_REST}/quote?symbol=${encodeURIComponent(sym)}&token=${FINNHUB_KEY}`).then(r=> ({sym,ok:r.ok, json: r.json()})).catch(e=>({sym,ok:false,error:e})) );
-    const results = await Promise.all(promises);
-    const out = {};
-    for(const r of results){
-        if(r.ok){
-            const j = await r.json;
-            // Finnhub quote returns c (current), pc (prev close), o, h, l
-            out[r.sym] = {current: j.c || 0, prevClose: j.pc || 0};
-        }else{
-            out[r.sym] = null;
-        }
-    }
-    return out;
-}
-
-// ----------------- WEBSOCKET REAL-TIME -----------------
-function initFinnhubWS(){
-    try{
-        ws = new WebSocket(`wss://ws.finnhub.io?token=${FINNHUB_KEY}`);
-        ws.onopen = ()=>{ setStatus('Finnhub WS connected'); subscribeAll(); };
-        ws.onmessage = ev => {
-            const msg = JSON.parse(ev.data);
-            if(msg.type === 'trade'){
-                for(const t of msg.data){
-                    // example: {s: "AAPL", p: 173.34, t: 167253...}
-                    applyRealtime(t.s, t.p);
-                }
-            }
-            // other types ignored
-        };
-        ws.onclose = ()=> setStatus('Finnhub WS closed — reconnecting...') && setTimeout(initFinnhubWS,2000);
-        ws.onerror = (e)=>{ console.error('WS error',e); setStatus('Finnhub WS error'); ws.close(); };
-    }catch(e){console.error('WS init failed',e);}
-}
-
-function subscribeAll(){
-    if(!ws || ws.readyState !== WebSocket.OPEN) return;
-    symbolSet.forEach(sym=>{
-        try{ ws.send(JSON.stringify({type:'subscribe',symbol:sym})); }catch(e){console.warn('subscribe fail',e);} 
-    });
-}
-
-function applyRealtime(symbol, price){
-    const p = positions.find(x=>x.Symbol===symbol || x.Name===symbol);
-    if(p){
-        p.currentPrice = price;
-        p.change = p.prevClose ? ((price - p.prevClose)/p.prevClose) : ((price - (p.avgPrice||price))/ (p.avgPrice||price));
-        p.pnl = (price - p.avgPrice) * p.qty;
-    }
-    // update last updated & UI
-    lastUpdated = new Date();
-    updateAllUI();
-}
-
-// ----------------- RENDER CHARTS -----------------
-function createOrUpdateChart(id,type,data,options){
-    if(charts[id]){
-        charts[id].data = data;
-        charts[id].options = Object.assign(charts[id].options||{},options||{});
-        charts[id].update();
-        return charts[id];
-    }
-    const ctx = document.getElementById(id).getContext('2d');
-    const cfg = {type, data, options: Object.assign({responsive:true,maintainAspectRatio:false,animation:{duration:600},plugins:{legend:{display:true}},layout:{padding:12}}, options||{}) };
-    charts[id] = new Chart(ctx, cfg);
-    return charts[id];
-}
-
-function renderAllCharts(){
-    // P&L chart
-    const sorted = [...positions].sort((a,b)=> (b.pnl||0)-(a.pnl||0));
-    const labels = sorted.map(s=>s.Symbol||s.Name);
-    const data = sorted.map(s=>Number((s.pnl||0).toFixed(2)));
-    const bg = data.map(v=> v>=0 ? 'rgba(16,185,129,0.85)' : 'rgba(239,68,68,0.85)');
-    createOrUpdateChart('pnlChart','bar',{labels,datasets:[{label:'P&L',data,borderRadius:6,backgroundColor:bg}]},{indexAxis:'x',scales:{y:{beginAtZero:true}}});
-
-    // composition
-    const compLabels = Array.from(positions.map(p=>p.Symbol||p.Name));
-    const compData = positions.map(p=> (p.currentPrice||p.avgPrice||0) * (p.qty||1));
-    createOrUpdateChart('compositionChart','doughnut',{labels:compLabels,datasets:[{data:compData}]},{plugins:{legend:{position:'bottom'}}});
-
-    // daily change
-    const chLabels = positions.map(p=>p.Symbol||p.Name);
-    const chData = positions.map(p=> ((p.change||0)*100));
-    createOrUpdateChart('dailyChangeChart','bar',{labels:chLabels,datasets:[{label:"Daily Change (%)",data:chData,backgroundColor:chData.map(v=>v>=0? 'rgba(16,185,129,0.85)':'rgba(239,68,68,0.85)')}]},{indexAxis:'y',scales:{x:{ticks:{callback:v=>v+'%'}}}});
-
-    // type allocation
-    const byType = positions.reduce((acc,p)=>{acc[p.type]= (acc[p.type]||0) + ((p.currentPrice||p.avgPrice||0)*(p.qty||1)); return acc;},{})
-    createOrUpdateChart('typeAllocationChart','pie',{labels:Object.keys(byType),datasets:[{data:Object.values(byType)}]},{plugins:{legend:{position:'bottom'}}});
-
-    // sparkline
-    const spCfg = {labels: sparkData.map((_,i)=>i), datasets:[{data:sparkData,fill:true,tension:0.3}]};
-    createOrUpdateChart('sparkline','line',spCfg,{plugins:{legend:{display:false}},scales:{x:{display:false},y:{display:false}},elements:{point:{radius:0}}});
-}
-
-// ----------------- UI -----------------
-function setStatus(s){ document.getElementById('status').textContent = s; }
-
-function updateAssetsList(){
-    const el = document.getElementById('assets-list'); el.innerHTML='';
-    positions.forEach(p=>{
-        const row = document.createElement('div'); row.className='row';
-        row.innerHTML = `<div><div class="symbol">${p.Symbol||p.Name}</div><div class="pos" style="font-size:13px">${p.Name}</div></div><div style="text-align:right"><div style="font-weight:700">${money((p.currentPrice||p.avgPrice||0)*(p.qty||1))}</div><div class="pos">P&L ${money(p.pnl||0)} · ${pct((p.change||0)*100)}</div></div>`;
-        el.appendChild(row);
-    });
-}
-
-function updateKpis(){
-    const totalPnl = positions.reduce((s,p)=>s+(p.pnl||0),0);
-    const equity = positions.reduce((s,p)=>s + ((p.currentPrice||p.avgPrice||0)*(p.qty||1)),0);
-    document.getElementById('total-pnl').textContent = money(totalPnl);
-    document.getElementById('equity').textContent = money(equity);
-    document.getElementById('buying-power').textContent = money(equity*0.3);
-    document.getElementById('last-updated').textContent = lastUpdated ? lastUpdated.toLocaleTimeString() : '—';
-    sparkData.push(Number(totalPnl.toFixed(2)));
-    if(sparkData.length>40) sparkData.shift();
-}
-
-function updateAllUI(){
-    updateKpis();
-    updateAssetsList();
-    renderAllCharts();
-    setStatus('Live — ' + (new Date()).toLocaleTimeString());
-}
-
-// ----------------- BOOTSTRAP LOGIC -----------------
-async function bootstrap(){
-    await loadPositions();
-
-    // initial snapshot by batching
-    const syms = Array.from(symbolSet.size?symbolSet:positions.map(p=>p.Symbol||p.Name));
-    // ensure positions include symbols
-    positions.forEach(p=>{ if(!p.Symbol && p.Name) p.Symbol = p.Name; symbolSet.add(p.Symbol); });
-
-    // fetch in small batches to avoid rate limits
-    for(let i=0;i<syms.length;i+=MAX_REST_BATCH){
-        const batch = syms.slice(i,i+MAX_REST_BATCH);
-        try{
-            const snap = await fetchSnapshotBatch(batch);
-            for(const s of batch){
-                const res = snap[s];
-                const pos = positions.find(p=>p.Symbol===s||p.Name===s);
-                if(pos && res){ pos.currentPrice = res.current; pos.prevClose = res.prevClose; pos.change = res.prevClose ? (res.current - res.prevClose)/res.prevClose : 0; pos.pnl = (pos.currentPrice - pos.avgPrice) * (pos.qty||1); }
-            }
-        }catch(e){console.warn('snapshot batch error',e)}
-        // small delay to be friendly (100ms)
-        await new Promise(r=>setTimeout(r,120));
-    }
-
-    // initial UI
-    lastUpdated = new Date();
-    updateAllUI();
-
-    // init websocket for real-time updates and subscribe
-    initFinnhubWS();
-}
-
-// ---------- INTERACTIONS ----------
-document.getElementById('add-symbol').addEventListener('click', ()=>{
-    const v = document.getElementById('symbol-input').value.trim();
-    if(!v) return; if(symbolSet.has(v)) return alert('Already added');
-    const newPos = {Name:v,Symbol:v,qty:1,avgPrice:0,type:'Asset'};
-    positions.push(newPos); symbolSet.add(v);
-    // try to fetch snapshot for it (single)
-    fetchSnapshotBatch([v]).then(res=>{ const r = res[v]; if(r){ newPos.currentPrice=r.current; newPos.prevClose=r.prevClose; newPos.pnl=(newPos.currentPrice-newPos.avgPrice)*(newPos.qty||1); updateAllUI(); subscribeAll(); } }).catch(()=>{});
-});
-
-// sort PnL
-let pnlSortDesc = true;
-document.getElementById('sort-pnl').addEventListener('click', ()=>{ pnlSortDesc = !pnlSortDesc; positions.sort((a,b)=> pnlSortDesc? (b.pnl||0)-(a.pnl||0):(a.pnl||0)-(b.pnl||0)); renderAllCharts(); document.getElementById('sort-pnl').textContent = pnlSortDesc? 'Sort: High → Low':'Sort: Low → High'; });
-
-// export CSV
-document.getElementById('export-csv').addEventListener('click', ()=>{
-    const rows = [['Symbol','Name','Qty','AvgPrice','CurrentPrice','P&L','Change%']];
-    positions.forEach(p=>rows.push([p.Symbol||p.Name,p.Name,p.qty,p.avgPrice,p.currentPrice,p.pnl,(p.change||0)*100]));
-    const csv = rows.map(r=>r.map(c=>"\""+(c===undefined? '':String(c))+'\"').join(',')).join('\n');
-    const blob = new Blob([csv],{type:'text/csv'});
-    const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='positions.csv'; a.click(); URL.revokeObjectURL(url);
-});
-
-// timeframe buttons
-document.querySelectorAll('.time-controls button').forEach(b=>b.addEventListener('click', ()=>{ document.querySelectorAll('.time-controls button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); /* you can filter historical data here when available */ }));
-
-// theme toggle (simple invert of body class)
-document.getElementById('theme-toggle').addEventListener('click', ()=>{ document.body.classList.toggle('dark'); });
-
-// window resize fix — force chart.resize and update padding to avoid clipping
-let resizeTimer;
-window.addEventListener('resize', ()=>{ clearTimeout(resizeTimer); resizeTimer = setTimeout(()=>{ Object.values(charts).forEach(c=>c && c.resize()); },150); });
-
-// ---------------- START ----------------
-bootstrap().catch(e=>console.error(e));
-
-</script>
 </body>
 </html>
