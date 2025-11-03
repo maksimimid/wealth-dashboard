@@ -381,6 +381,14 @@ h1 {
     min-height: 300px;
 }
 
+.asset-dynamic-card {
+    min-height: 380px;
+}
+
+.asset-dynamic-card canvas {
+    min-height: 320px;
+}
+
 .card::before {
     content: '';
     position: absolute;

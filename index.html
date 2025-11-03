@@ -136,6 +136,18 @@
                 Data refreshes automatically from Airtable every load and tracks real-time quote streams via the Finnhub WebSocket. Use the range toggles to pivot analytics when historical layers are added.
             </div>
         </div>
+
+        <div class="card full asset-dynamic-card">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;position:relative;z-index:1">
+                <div>
+                    <strong>Asset Growth Over Years</strong>
+                    <div class="pos" style="margin-top:4px">Cumulative capital deployed per asset, aggregated by calendar year.</div>
+                </div>
+            </div>
+            <div style="flex:1;min-height:340px;margin-top:12px;position:relative;z-index:1">
+                <canvas id="assetDynamicChart"></canvas>
+            </div>
+        </div>
     </div>
 
     <footer>

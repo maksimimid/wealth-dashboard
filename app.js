@@ -39,6 +39,9 @@ const RANGE_LOOKBACK = { '1W': 7*86400, '1M': 30*86400, '1Y': 365*86400 };
 const RANGE_LABELS = { '1D': 'Daily', '1W': 'Weekly', '1M': 'Monthly', '1Y': 'Yearly', 'ALL': 'All Time' };
 const previousKpiValues = { totalPnl: null, netWorth: null, cashAvailable: null };
 const previousBestPerformer = { id: null, pnl: null, change: null };
+let assetYearSeries = { labels: [], datasets: [] };
+let assetYearSeriesDirty = true;
+const assetColorCache = new Map();
 let netContributionTotal = 0;
 let isRangeUpdateInFlight = false;
 const FLASH_DURATION = 1500;
@@ -513,6 +516,7 @@ async function loadPositions(){
         setTimeout(()=>setLoadingState('hidden'), 1400);
     }
     rangeDirty = true;
+    assetYearSeriesDirty = true;
 }
 
 // ----------------- FINNHUB REST (snapshot) -----------------
@@ -609,6 +613,70 @@ function applyRealtime(symbol, price){
 }
 
 // ----------------- RENDER CHARTS -----------------
+function computeAssetYearSeries(){
+    const yearAssetMap = new Map();
+    const yearSet = new Set();
+    const assetNames = new Set();
+
+    positions.forEach(position=>{
+        const ops = Array.isArray(position.operations) ? position.operations : [];
+        if(!ops.length) return;
+        const name = position.displayName || position.Symbol || position.Name;
+        if(!name) return;
+        ops.forEach(op=>{
+            if(!(op.date instanceof Date)) return;
+            const year = op.date.getFullYear();
+            yearSet.add(year);
+            assetNames.add(name);
+            if(!yearAssetMap.has(year)) yearAssetMap.set(year, new Map());
+            const assetMap = yearAssetMap.get(year);
+            const prev = Number(assetMap.get(name) || 0);
+            const delta = Number(op.spent || 0) || 0;
+            assetMap.set(name, prev + delta);
+        });
+    });
+
+    const years = Array.from(yearSet).sort((a,b)=>a-b);
+    if(!years.length || !assetNames.size){
+        assetYearSeries = { labels: [], datasets: [] };
+        assetYearSeriesDirty = false;
+        return;
+    }
+
+    const assets = Array.from(assetNames);
+    const cumulative = new Map(assets.map(name=>[name,0]));
+    const datasets = assets.map((name, idx)=>{
+        const data = years.map(year=>{
+            const assetMap = yearAssetMap.get(year);
+            const delta = assetMap && assetMap.has(name) ? Number(assetMap.get(name)) : 0;
+            const running = (cumulative.get(name) || 0) + delta;
+            cumulative.set(name, running);
+            return Number(running.toFixed(2));
+        });
+        if(!assetColorCache.has(name)){
+            const hue = (idx * 53) % 360;
+            assetColorCache.set(name, {
+                border: `hsl(${hue},70%,55%)`,
+                background: `hsla(${hue},70%,55%,0.25)`
+            });
+        }
+        const colors = assetColorCache.get(name);
+        return {
+            label: name,
+            data,
+            tension: 0.35,
+            borderWidth: 2,
+            fill: true,
+            stack: 'total',
+            borderColor: colors.border,
+            backgroundColor: colors.background
+        };
+    }).filter(ds => ds.data.some(value => Math.abs(value) > 0.5));
+
+    assetYearSeries = { labels: years.map(String), datasets };
+    assetYearSeriesDirty = false;
+}
+
 function mergeDeep(target, source){
     if(!source) return target;
     Object.keys(source).forEach(key=>{
@@ -695,6 +763,9 @@ function createOrUpdateChart(id,type,data,options){
 
 function renderAllCharts(){
     if(!positions.length) return;
+    if(assetYearSeriesDirty){
+        computeAssetYearSeries();
+    }
     const sortedForPnl = [...positions].sort((a,b)=> pnlSortDesc ? (b.rangePnl||0)-(a.rangePnl||0) : (a.rangePnl||0)-(b.rangePnl||0));
     const labels = sortedForPnl.map(p=>p.displayName || p.Symbol || p.Name);
     const pnlData = sortedForPnl.map(p=>Number((p.rangePnl||0).toFixed(2)));
@@ -716,6 +787,28 @@ function renderAllCharts(){
         return acc;
     },{});
     createOrUpdateChart('typeAllocationChart','pie',{labels:Object.keys(byType),datasets:[{data:Object.values(byType)}]},{plugins:{legend:{position:'bottom'}}});
+
+    if(assetYearSeries.labels.length && assetYearSeries.datasets.length){
+        createOrUpdateChart('assetDynamicChart','line', assetYearSeries, {
+            plugins: { legend: { position: 'bottom' } },
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                x: {
+                    ticks: { autoSkip: true, maxTicksLimit: 10 }
+                },
+                y: {
+                    stacked: true,
+                    ticks: {
+                        callback: value => money(value)
+                    }
+                }
+            },
+            elements: { point: { radius: 3, hoverRadius: 5 } }
+        });
+    }else if(charts['assetDynamicChart']){
+        charts['assetDynamicChart'].destroy();
+        delete charts['assetDynamicChart'];
+    }
 
     sparkData = sparkData.slice(-40);
     const sparkCfg = {labels: sparkData.map((_,i)=>i+1), datasets:[{data:sparkData,fill:true,tension:0.35,borderColor:'rgba(96,165,250,0.8)',backgroundColor:'rgba(96,165,250,0.18)'}]};
