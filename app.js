@@ -8,6 +8,8 @@ const DEFAULT_CONFIG = {
 
 const RUNTIME_CONFIG = (typeof window !== 'undefined' && window.DASHBOARD_CONFIG) ? window.DASHBOARD_CONFIG : {};
 
+const loadingOverlay = typeof document !== 'undefined' ? document.getElementById('loading-overlay') : null;
+
 const FINNHUB_KEY = RUNTIME_CONFIG.FINNHUB_KEY || DEFAULT_CONFIG.FINNHUB_KEY;
 const FINNHUB_REST = 'https://finnhub.io/api/v1';
 const MAX_REST_BATCH = 5;
@@ -36,14 +38,34 @@ const referencePriceCache = new Map();
 const RANGE_LOOKBACK = { '1W': 7*86400, '1M': 30*86400, '1Y': 365*86400 };
 const RANGE_LABELS = { '1D': 'Daily', '1W': 'Weekly', '1M': 'Monthly', '1Y': 'Yearly', 'ALL': 'All Time' };
 const previousKpiValues = { totalPnl: null, netWorth: null, cashAvailable: null };
+let netContributionTotal = 0;
 let isRangeUpdateInFlight = false;
 const FLASH_DURATION = 900;
+let pnlSortDesc = true;
 
 function applyRangeButtons(range){
     const buttons = document.querySelectorAll('#pnl-range-controls button');
     buttons.forEach(btn=>{
         btn.classList.toggle('active', btn.dataset.range === range);
     });
+}
+
+function setLoadingState(state, message){
+    if(!loadingOverlay) return;
+    const textEl = loadingOverlay.querySelector('.loading-text');
+    loadingOverlay.classList.remove('error');
+    if(state === 'error'){
+        loadingOverlay.classList.add('error');
+        if(textEl && message) textEl.textContent = message;
+        loadingOverlay.classList.remove('hidden');
+        return;
+    }
+    if(textEl && message) textEl.textContent = message;
+    if(state === 'hidden'){
+        loadingOverlay.classList.add('hidden');
+    }else{
+        loadingOverlay.classList.remove('hidden');
+    }
 }
 
 // ----------------- UTIL ---------------------
@@ -210,6 +232,7 @@ async function setPnlRange(range){
     isRangeUpdateInFlight = true;
     try{
         pnlRange = range;
+        applyRangeButtons(range);
         if(range !== 'ALL'){
             const tasks = positions.map(position => ensureRangeReference(position, range));
             await Promise.all(tasks);
@@ -441,10 +464,12 @@ async function loadPositions(){
     symbolSet = new Set();
     finnhubIndex = new Map();
     try{
+        setLoadingState('visible','Loading Airtable…');
         setStatus('Loading Airtable operations…');
         const records = await fetchAllAirtableOperations();
         operationsMeta = {count: records.length, fetchedAt: new Date()};
         positions = transformOperations(records);
+        netContributionTotal = positions.reduce((sum,p)=>sum + Number(p.cashflow || 0),0);
         positions.forEach(p=>{
             if(p.finnhubSymbol){
                 symbolSet.add(p.finnhubSymbol);
@@ -458,12 +483,15 @@ async function loadPositions(){
         console.warn('Airtable load failed, using fallback', err);
         setStatus('Airtable unavailable — showing demo data');
         positions = useFallbackPositions();
+        netContributionTotal = positions.reduce((sum,p)=>sum + Number(p.cashflow || 0),0);
         positions.forEach(p=>{
             if(p.finnhubSymbol){
                 symbolSet.add(p.finnhubSymbol);
                 finnhubIndex.set(p.finnhubSymbol, p);
             }
         });
+        setLoadingState('error','Airtable unavailable — showing demo data');
+        setTimeout(()=>setLoadingState('hidden'), 1400);
     }
     rangeDirty = true;
 }
@@ -563,21 +591,35 @@ function applyRealtime(symbol, price){
 
 // ----------------- RENDER CHARTS -----------------
 function createOrUpdateChart(id,type,data,options){
+    const defaultOptions = {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 600 },
+        plugins: { legend: { display: true } },
+        layout: { padding: 12 }
+    };
+
     if(charts[id]){
         charts[id].data = data;
-        charts[id].options = Object.assign(charts[id].options||{},options||{});
+        if(options){
+            charts[id].options = options;
+        }
         charts[id].update();
         return charts[id];
     }
     const ctx = document.getElementById(id).getContext('2d');
-    const cfg = {type, data, options: Object.assign({responsive:true,maintainAspectRatio:false,animation:{duration:600},plugins:{legend:{display:true}},layout:{padding:12}}, options||{}) };
+    const cfg = {
+        type,
+        data,
+        options: options ? Object.assign({}, defaultOptions, options) : defaultOptions
+    };
     charts[id] = new Chart(ctx, cfg);
     return charts[id];
 }
 
 function renderAllCharts(){
     if(!positions.length) return;
-    const sortedForPnl = [...positions].sort((a,b)=> (b.rangePnl||0)-(a.rangePnl||0));
+    const sortedForPnl = [...positions].sort((a,b)=> pnlSortDesc ? (b.rangePnl||0)-(a.rangePnl||0) : (a.rangePnl||0)-(b.rangePnl||0));
     const labels = sortedForPnl.map(p=>p.displayName || p.Symbol || p.Name);
     const pnlData = sortedForPnl.map(p=>Number((p.rangePnl||0).toFixed(2)));
     const pnlColors = pnlData.map(v=> v>=0 ? 'rgba(52,211,153,0.85)' : 'rgba(248,113,113,0.85)');
@@ -650,15 +692,13 @@ function updateAssetsList(){
 function updateKpis(){
     positions.forEach(recomputePositionMetrics);
     const totalPnl = currentRangeTotalPnl;
-    const totalEquity = positions.reduce((sum,p)=>sum + Number(p.marketValue||0),0);
     const cashAvailable = positions.filter(p=> (p.type||'').toLowerCase()==='cash').reduce((sum,p)=>sum + Number(p.marketValue||0),0);
-    const buyingPower = totalEquity * 0.3;
 
     const updatedEl = document.getElementById('last-updated');
 
     setMoneyWithFlash('total-pnl', totalPnl, 'totalPnl');
-    setMoneyWithFlash('equity', totalEquity, 'equity');
-    setMoneyWithFlash('buying-power', buyingPower, 'buyingPower');
+    setMoneyWithFlash('equity', netContributionTotal, 'netWorth');
+    setMoneyWithFlash('buying-power', cashAvailable, 'cashAvailable');
     if(updatedEl) updatedEl.textContent = lastUpdated ? lastUpdated.toLocaleTimeString() : '—';
 
     if(totalPnl || sparkData.length===0){
@@ -743,12 +783,14 @@ async function bootstrap(){
 
 // ---------- INTERACTIONS ----------
 document.addEventListener('DOMContentLoaded', ()=>{
+    if(loadingOverlay){
+        setLoadingState('visible','Loading Airtable…');
+    }
     const sortBtn = document.getElementById('sort-pnl');
     if(sortBtn){
-        let pnlSortDesc = true;
+        sortBtn.textContent = pnlSortDesc ? 'Sort: High → Low' : 'Sort: Low → High';
         sortBtn.addEventListener('click', ()=>{
             pnlSortDesc = !pnlSortDesc;
-            positions.sort((a,b)=> pnlSortDesc ? (b.rangePnl||0)-(a.rangePnl||0) : (a.rangePnl||0)-(b.rangePnl||0));
             scheduleUIUpdate({immediate:true});
             sortBtn.textContent = pnlSortDesc ? 'Sort: High → Low' : 'Sort: Low → High';
         });
@@ -761,9 +803,9 @@ document.addEventListener('DOMContentLoaded', ()=>{
             if(!button) return;
             const selected = button.dataset.range;
             if(!selected) return;
-            applyRangeButtons(selected);
             setPnlRange(selected).catch(err=>console.error('Failed to update P&L range', err));
         });
+        applyRangeButtons(pnlRange);
     }
 
     const exportBtn = document.getElementById('export-csv');
@@ -810,8 +852,15 @@ document.addEventListener('DOMContentLoaded', ()=>{
         }, 160);
     });
 
-    bootstrap().catch(err=>{
+    bootstrap().then(()=>{
+        if(loadingOverlay){
+            setLoadingState('hidden');
+        }
+    }).catch(err=>{
         console.error('Bootstrap failed', err);
         setStatus('Bootstrap failed — see console');
+        if(loadingOverlay){
+            setLoadingState('error','Bootstrap failed — see console');
+        }
     });
 });
