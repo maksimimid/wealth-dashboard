@@ -239,6 +239,58 @@ h1 {
     font-size: 12px;
 }
 
+.best-performer-card {
+    min-height: 150px;
+}
+
+.best-performer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.best-performer-range {
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.2);
+    color: var(--muted);
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    font-weight: 600;
+}
+
+.best-performer-name {
+    font-size: 1.4rem;
+    font-weight: 600;
+    margin-top: 6px;
+}
+
+.best-performer-metrics {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-top: 12px;
+}
+
+.best-performer-pnl {
+    font-size: 1.5rem;
+    font-weight: 700;
+}
+
+.best-performer-change {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--muted);
+}
+
+.best-performer-meta {
+    display: block;
+    margin-top: 12px;
+    color: var(--muted);
+}
+
 .pill {
     display: inline-flex;
     align-items: center;
@@ -499,6 +551,9 @@ body.light-theme .kpi {
 
 body.light-theme .kpi .label { color: #475569; }
 body.light-theme .kpi small { color: #64748b; }
+body.light-theme .best-performer-range { background: rgba(148, 163, 184, 0.25); color: #475569; }
+body.light-theme .best-performer-change { color: #475569; }
+body.light-theme .best-performer-meta { color: #64748b; }
 body.light-theme .btn { background: rgba(255, 255, 255, 0.85); color: #1e293b; border-color: rgba(148, 163, 184, 0.4); }
 body.light-theme .btn.primary { background: linear-gradient(120deg, #4f46e5, #14b8a6); color: #f8fafc; }
 body.light-theme .pos { color: #64748b; }

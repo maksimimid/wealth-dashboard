@@ -38,6 +38,7 @@ const referencePriceCache = new Map();
 const RANGE_LOOKBACK = { '1W': 7*86400, '1M': 30*86400, '1Y': 365*86400 };
 const RANGE_LABELS = { '1D': 'Daily', '1W': 'Weekly', '1M': 'Monthly', '1Y': 'Yearly', 'ALL': 'All Time' };
 const previousKpiValues = { totalPnl: null, netWorth: null, cashAvailable: null };
+const previousBestPerformer = { id: null, pnl: null, change: null };
 let netContributionTotal = 0;
 let isRangeUpdateInFlight = false;
 const FLASH_DURATION = 1500;
@@ -600,6 +601,36 @@ function applyRealtime(symbol, price){
 }
 
 // ----------------- RENDER CHARTS -----------------
+function mergeDeep(target, source){
+    if(!source) return target;
+    Object.keys(source).forEach(key=>{
+        const value = source[key];
+        if(Array.isArray(value)){
+            target[key] = value.slice();
+        }else if(value && typeof value === 'object' && !(value instanceof Date)){
+            if(!target[key] || typeof target[key] !== 'object'){
+                target[key] = {};
+            }
+            mergeDeep(target[key], value);
+        }else{
+            target[key] = value;
+        }
+    });
+    return target;
+}
+
+function applyDatasetChanges(target, source){
+    if(!source) return;
+    Object.keys(source).forEach(key=>{
+        const value = source[key];
+        if(Array.isArray(value)){
+            target[key] = value.slice();
+        }else{
+            target[key] = value;
+        }
+    });
+}
+
 function createOrUpdateChart(id,type,data,options){
     const defaultOptions = {
         responsive: true,
@@ -609,21 +640,48 @@ function createOrUpdateChart(id,type,data,options){
         layout: { padding: 12 }
     };
 
-    if(charts[id]){
-        charts[id].data = data;
+    const existing = charts[id];
+    if(existing){
+        existing.config.type = type;
+        existing.data.labels = Array.isArray(data.labels) ? data.labels.slice() : [];
+        const datasets = Array.isArray(data.datasets) ? data.datasets : [];
+        datasets.forEach((dataset, index)=>{
+            if(existing.data.datasets[index]){
+                applyDatasetChanges(existing.data.datasets[index], dataset);
+                if(Array.isArray(dataset.data)){
+                    existing.data.datasets[index].data = dataset.data.slice();
+                }
+            }else{
+                existing.data.datasets[index] = Object.assign({}, dataset);
+                if(Array.isArray(dataset.data)){
+                    existing.data.datasets[index].data = dataset.data.slice();
+                }
+                if(Array.isArray(dataset.backgroundColor)){
+                    existing.data.datasets[index].backgroundColor = dataset.backgroundColor.slice();
+                }
+            }
+        });
+        existing.data.datasets.length = datasets.length;
         if(options){
-            charts[id].options = options;
+            mergeDeep(existing.options, options);
         }
-        charts[id].update();
-        return charts[id];
+        existing.update('none');
+        return existing;
     }
-    const ctx = document.getElementById(id).getContext('2d');
-    const cfg = {
-        type,
-        data,
-        options: options ? Object.assign({}, defaultOptions, options) : defaultOptions
+    const canvas = document.getElementById(id);
+    if(!canvas) return null;
+    const ctx = canvas.getContext('2d');
+    const mergedOptions = mergeDeep(mergeDeep({}, defaultOptions), options || {});
+    const initialData = {
+        labels: Array.isArray(data.labels) ? data.labels.slice() : [],
+        datasets: Array.isArray(data.datasets) ? data.datasets.map(ds=>{
+            const clone = Object.assign({}, ds);
+            if(Array.isArray(ds.data)) clone.data = ds.data.slice();
+            if(Array.isArray(ds.backgroundColor)) clone.backgroundColor = ds.backgroundColor.slice();
+            return clone;
+        }) : []
     };
-    charts[id] = new Chart(ctx, cfg);
+    charts[id] = new Chart(ctx, { type, data: initialData, options: mergedOptions });
     return charts[id];
 }
 
@@ -710,6 +768,74 @@ function updateKpis(){
     setMoneyWithFlash('equity', netContributionTotal, 'netWorth');
     setMoneyWithFlash('buying-power', cashAvailable, 'cashAvailable');
     if(updatedEl) updatedEl.textContent = lastUpdated ? lastUpdated.toLocaleTimeString() : '—';
+
+    const bestNameEl = document.getElementById('best-performer-name');
+    const bestPnlEl = document.getElementById('best-performer-pnl');
+    const bestChangeEl = document.getElementById('best-performer-change');
+    const bestMetaEl = document.getElementById('best-performer-meta');
+    const bestRangeEl = document.getElementById('best-performer-range');
+    const rangeLabel = RANGE_LABELS[pnlRange] || pnlRange;
+
+    if(bestRangeEl){
+        bestRangeEl.textContent = rangeLabel;
+    }
+
+    if(bestNameEl || bestPnlEl || bestChangeEl || bestMetaEl){
+        const bestCandidate = positions.reduce((acc, position)=>{
+            const raw = position.rangePnl ?? position.pnl ?? Number.NEGATIVE_INFINITY;
+            const value = Number(raw);
+            const usable = Number.isFinite(value) ? value : Number.NEGATIVE_INFINITY;
+            if(acc === null) return { position, value: usable };
+            return usable > acc.value ? { position, value: usable } : acc;
+        }, null);
+
+        if(bestCandidate && bestCandidate.position && bestCandidate.value !== Number.NEGATIVE_INFINITY){
+            const best = bestCandidate.position;
+            const displayName = best.displayName || best.Symbol || best.Name || '—';
+            const bestChanged = previousBestPerformer.id && previousBestPerformer.id !== best.id;
+            if(bestNameEl){
+                bestNameEl.textContent = displayName;
+                if(bestChanged){
+                    flashElement(bestNameEl, 'up');
+                }
+            }
+            if(bestMetaEl){
+                bestMetaEl.textContent = `${best.type || '—'} · Qty ${formatQty(Number(best.qty || 0))}`;
+            }
+            if(bestPnlEl){
+                bestPnlEl.textContent = money(bestCandidate.value);
+                if(bestChanged){
+                    flashElement(bestPnlEl, 'up');
+                }else if(previousBestPerformer.pnl !== null){
+                    const direction = bestCandidate.value > previousBestPerformer.pnl ? 'up' : bestCandidate.value < previousBestPerformer.pnl ? 'down' : null;
+                    flashElement(bestPnlEl, direction);
+                }
+            }
+            if(bestChangeEl){
+                const changeRaw = best.rangeChangePct ?? best.changePct ?? 0;
+                const changeVal = Number(changeRaw);
+                const hasChange = Number.isFinite(changeVal);
+                bestChangeEl.textContent = hasChange ? `${changeVal >= 0 ? '+' : ''}${changeVal.toFixed(2)}%` : '—';
+                if(bestChanged && hasChange){
+                    flashElement(bestChangeEl, changeVal >= 0 ? 'up' : 'down');
+                }else if(hasChange && previousBestPerformer.change !== null){
+                    const direction = changeVal > previousBestPerformer.change ? 'up' : changeVal < previousBestPerformer.change ? 'down' : null;
+                    flashElement(bestChangeEl, direction);
+                }
+                previousBestPerformer.change = hasChange ? changeVal : null;
+            }
+            previousBestPerformer.id = best.id;
+            previousBestPerformer.pnl = bestCandidate.value;
+        }else{
+            if(bestNameEl) bestNameEl.textContent = '—';
+            if(bestPnlEl) bestPnlEl.textContent = '—';
+            if(bestChangeEl) bestChangeEl.textContent = '—';
+            if(bestMetaEl) bestMetaEl.textContent = 'Awaiting data…';
+            previousBestPerformer.id = null;
+            previousBestPerformer.pnl = null;
+            previousBestPerformer.change = null;
+        }
+    }
 
     if(totalPnl || sparkData.length===0){
         const rounded = Number(totalPnl.toFixed(2));
