@@ -34,6 +34,12 @@
     .btn{padding:10px 16px;border-radius:14px;border:1px solid rgba(255,255,255,0.12);background:rgba(15,23,42,0.6);color:#eef2ff;cursor:pointer;font-weight:500;transition:transform 0.2s ease,box-shadow 0.2s ease}
     .btn:hover{transform:translateY(-1px);box-shadow:0 12px 32px rgba(15,118,110,0.25)}
     .btn.primary{background:linear-gradient(120deg,var(--accent),var(--accent-2));border:0;color:#f8fafc;box-shadow:0 12px 35px rgba(99,102,241,0.35)}
+    #loading-overlay{position:fixed;inset:0;background:linear-gradient(180deg,#0f172a 0%,#020617 100%);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;z-index:9999;transition:opacity 0.35s ease,visibility 0.35s ease}
+    #loading-overlay.hidden{opacity:0;visibility:hidden;pointer-events:none}
+    #loading-overlay .spinner{width:52px;height:52px;border-radius:50%;border:4px solid rgba(148,163,184,0.25);border-top-color:var(--accent);animation:spin 1s linear infinite}
+    #loading-overlay .loading-text{margin-top:6px;font-size:13px;letter-spacing:0.35px;text-transform:uppercase;color:var(--muted)}
+    #loading-overlay.error .spinner{border-color:rgba(248,113,113,0.35);border-top-color:#f87171}
+    #loading-overlay.error .loading-text{color:#f87171}
     .top-summary{display:grid;grid-template-columns:1fr 360px;gap:18px}
     .kpi{background:linear-gradient(160deg,rgba(255,255,255,0.09),rgba(15,23,42,0.4));padding:22px;border-radius:20px;box-shadow:var(--shadow);display:flex;align-items:center;gap:20px;position:relative;overflow:hidden}
     .kpi::after{content:'';position:absolute;inset:auto -40px -40px auto;width:180px;height:180px;background:radial-gradient(circle,rgba(59,130,246,0.25),rgba(59,130,246,0));filter:blur(20px);opacity:0.9}
@@ -91,10 +97,14 @@
     body.light-theme .flash-down{animation:priceFlashDownLight 0.9s ease forwards}
     body.light-theme .pnl-range-controls button{background:rgba(255,255,255,0.9);color:#475569;border-color:rgba(148,163,184,0.4)}
     body.light-theme .pnl-range-controls button.active{background:linear-gradient(120deg,#4f46e5,#14b8a6);color:#f8fafc;border-color:transparent}
+    body.light-theme #loading-overlay{background:linear-gradient(180deg,#f8fafc 0%,#e2e8f0 100%)}
+    body.light-theme #loading-overlay .spinner{border-color:rgba(148,163,184,0.4);border-top-color:#4f46e5}
+    body.light-theme #loading-overlay .loading-text{color:#1e293b}
     body.light-theme footer{color:#64748b}
     body.light-theme .status-dot{background:#22c55e;box-shadow:0 0 6px rgba(34,197,94,0.6)}
     @keyframes priceFlashUp{0%{background:rgba(16,185,129,0.4);color:#bbf7d0;box-shadow:0 0 0 rgba(16,185,129,0.6)}100%{background:rgba(15,23,42,0.55);color:#f8fafc;box-shadow:0 0 0 rgba(0,0,0,0)}}
     @keyframes priceFlashDown{0%{background:rgba(248,113,113,0.4);color:#fecaca;box-shadow:0 0 0 rgba(248,113,113,0.6)}100%{background:rgba(15,23,42,0.55);color:#f8fafc;box-shadow:0 0 0 rgba(0,0,0,0)}}
+    @keyframes spin{to{transform:rotate(360deg);}}
     @keyframes priceFlashUpLight{0%{background:rgba(74,222,128,0.35);color:#15803d;box-shadow:0 0 0 rgba(74,222,128,0.5)}100%{background:rgba(226,232,240,0.9);color:#0f172a;box-shadow:0 0 0 rgba(0,0,0,0)}}
     @keyframes priceFlashDownLight{0%{background:rgba(252,165,165,0.35);color:#b91c1c;box-shadow:0 0 0 rgba(248,113,133,0.5)}100%{background:rgba(226,232,240,0.9);color:#0f172a;box-shadow:0 0 0 rgba(0,0,0,0)}}
     @media(max-width:1100px){.top-summary{grid-template-columns:1fr}}
@@ -103,6 +113,10 @@
 </style>
 </head>
 <body>
+<div id="loading-overlay">
+    <div class="spinner"></div>
+    <div class="loading-text">Loading portfolio?</div>
+</div>
 <div class="wrap">
     <header>
         <div>
