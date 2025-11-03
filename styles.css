@@ -66,6 +66,18 @@ body::before {
     line-height: 1;
 }
 
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
 #loading-overlay {
     position: fixed;
     inset: 0;
@@ -403,10 +415,13 @@ canvas {
     font-weight: 600;
 }
 
-.price-value.flash-up { animation: priceFlashUp 0.9s ease forwards; }
-.price-value.flash-down { animation: priceFlashDown 0.9s ease forwards; }
-.flash-up { animation: priceFlashUp 0.9s ease forwards; }
-.flash-down { animation: priceFlashDown 0.9s ease forwards; }
+.flash-up-text {
+    animation: flashUpText 1.2s ease-out forwards;
+}
+
+.flash-down-text {
+    animation: flashDownText 1.2s ease-out forwards;
+}
 
 footer {
     margin-top: 12px;
@@ -465,8 +480,8 @@ body.light-theme .btn.primary { background: linear-gradient(120deg, #4f46e5, #14
 body.light-theme .pos { color: #64748b; }
 body.light-theme .price-row { color: #64748b; }
 body.light-theme .price-value { background: rgba(226, 232, 240, 0.9); color: #0f172a; }
-body.light-theme .flash-up { animation: priceFlashUpLight 0.9s ease forwards; }
-body.light-theme .flash-down { animation: priceFlashDownLight 0.9s ease forwards; }
+body.light-theme .flash-up-text { animation: flashUpTextLight 1.2s ease-out forwards; }
+body.light-theme .flash-down-text { animation: flashDownTextLight 1.2s ease-out forwards; }
 body.light-theme .pnl-range-controls button { background: rgba(255, 255, 255, 0.9); color: #475569; border-color: rgba(148, 163, 184, 0.4); }
 body.light-theme .pnl-range-controls button.active { background: linear-gradient(120deg, #4f46e5, #14b8a6); color: #f8fafc; border-color: transparent; }
 body.light-theme #loading-overlay { background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%); }
@@ -475,24 +490,28 @@ body.light-theme #loading-overlay .loading-text { color: #1e293b; }
 body.light-theme footer { color: #64748b; }
 body.light-theme .status-dot { background: #22c55e; box-shadow: 0 0 6px rgba(34, 197, 94, 0.6); }
 
-@keyframes priceFlashUp {
-    0% { background: rgba(16, 185, 129, 0.4); color: #bbf7d0; box-shadow: 0 0 0 rgba(16, 185, 129, 0.6); }
-    100% { background: rgba(15, 23, 42, 0.55); color: #f8fafc; box-shadow: 0 0 0 rgba(0, 0, 0, 0); }
+@keyframes flashUpText {
+    0% { color: #34d399; }
+    70% { color: #34d399; }
+    100% { color: inherit; }
 }
 
-@keyframes priceFlashDown {
-    0% { background: rgba(248, 113, 113, 0.4); color: #fecaca; box-shadow: 0 0 0 rgba(248, 113, 113, 0.6); }
-    100% { background: rgba(15, 23, 42, 0.55); color: #f8fafc; box-shadow: 0 0 0 rgba(0, 0, 0, 0); }
+@keyframes flashDownText {
+    0% { color: #f87171; }
+    70% { color: #f87171; }
+    100% { color: inherit; }
 }
 
-@keyframes priceFlashUpLight {
-    0% { background: rgba(74, 222, 128, 0.35); color: #15803d; box-shadow: 0 0 0 rgba(74, 222, 128, 0.5); }
-    100% { background: rgba(226, 232, 240, 0.9); color: #0f172a; box-shadow: 0 0 0 rgba(0, 0, 0, 0); }
+@keyframes flashUpTextLight {
+    0% { color: #047857; }
+    70% { color: #047857; }
+    100% { color: inherit; }
 }
 
-@keyframes priceFlashDownLight {
-    0% { background: rgba(252, 165, 165, 0.35); color: #b91c1c; box-shadow: 0 0 0 rgba(248, 113, 133, 0.5); }
-    100% { background: rgba(226, 232, 240, 0.9); color: #0f172a; box-shadow: 0 0 0 rgba(0, 0, 0, 0); }
+@keyframes flashDownTextLight {
+    0% { color: #b91c1c; }
+    70% { color: #b91c1c; }
+    100% { color: inherit; }
 }
 
 @keyframes spin {

@@ -40,7 +40,7 @@ const RANGE_LABELS = { '1D': 'Daily', '1W': 'Weekly', '1M': 'Monthly', '1Y': 'Ye
 const previousKpiValues = { totalPnl: null, netWorth: null, cashAvailable: null };
 let netContributionTotal = 0;
 let isRangeUpdateInFlight = false;
-const FLASH_DURATION = 900;
+const FLASH_DURATION = 1200;
 let pnlSortDesc = true;
 
 function applyRangeButtons(range){
@@ -115,12 +115,12 @@ function applyLivePrice(position, price){
 
 function flashElement(element, direction){
     if(!element || !direction) return;
-    element.classList.remove('flash-up', 'flash-down');
+    element.classList.remove('flash-up','flash-down','flash-up-text','flash-down-text');
     void element.offsetWidth; // force reflow
     requestAnimationFrame(()=>{
-        element.classList.add(direction === 'up' ? 'flash-up' : 'flash-down');
+        element.classList.add(direction === 'up' ? 'flash-up-text' : 'flash-down-text');
         setTimeout(()=>{
-            element.classList.remove('flash-up', 'flash-down');
+            element.classList.remove('flash-up','flash-down','flash-up-text','flash-down-text');
         }, FLASH_DURATION);
     });
 }
@@ -134,6 +134,16 @@ function setMoneyWithFlash(elementId, value, key){
         flashElement(el, value > prev ? 'up' : 'down');
     }
     previousKpiValues[key] = value;
+}
+
+function updateThemeToggleIcon(button, isLight){
+    if(!button) return;
+    const icon = button.querySelector('.theme-icon');
+    const srOnly = button.querySelector('.sr-only');
+    const label = isLight ? 'Switch to dark mode' : 'Switch to light mode';
+    if(icon) icon.textContent = isLight ? '🌙' : '☀️';
+    button.setAttribute('aria-label', label);
+    if(srOnly) srOnly.textContent = label;
 }
 
 function getReferenceBucket(position){
@@ -838,9 +848,10 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
     const themeToggle = document.getElementById('theme-toggle');
     if(themeToggle){
+        updateThemeToggleIcon(themeToggle, document.body.classList.contains('light-theme'));
         themeToggle.addEventListener('click', ()=>{
             const isLight = document.body.classList.toggle('light-theme');
-            themeToggle.textContent = isLight ? 'Dark Theme' : 'Light Theme';
+            updateThemeToggleIcon(themeToggle, isLight);
         });
     }
 
