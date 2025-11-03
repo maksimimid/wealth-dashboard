@@ -147,6 +147,14 @@ function updateThemeToggleIcon(button, isLight){
     if(srOnly) srOnly.textContent = label;
 }
 
+function formatTime(date){
+    if(!(date instanceof Date)) return '—';
+    const hours = String(date.getHours()).padStart(2,'0');
+    const minutes = String(date.getMinutes()).padStart(2,'0');
+    const seconds = String(date.getSeconds()).padStart(2,'0');
+    return `${hours}:${minutes}:${seconds}`;
+}
+
 function getReferenceBucket(position){
     if(!position.referencePrices) position.referencePrices = {};
     return position.referencePrices;
@@ -767,7 +775,7 @@ function updateKpis(){
     setMoneyWithFlash('total-pnl', totalPnl, 'totalPnl');
     setMoneyWithFlash('equity', netContributionTotal, 'netWorth');
     setMoneyWithFlash('buying-power', cashAvailable, 'cashAvailable');
-    if(updatedEl) updatedEl.textContent = lastUpdated ? lastUpdated.toLocaleTimeString() : '—';
+    if(updatedEl) updatedEl.textContent = lastUpdated ? formatTime(lastUpdated) : '—';
 
     const bestNameEl = document.getElementById('best-performer-name');
     const bestPnlEl = document.getElementById('best-performer-pnl');

@@ -237,6 +237,10 @@ h1 {
 .kpi small {
     color: var(--muted);
     font-size: 12px;
+    display: block;
+    margin-top: 8px;
+    font-variant-numeric: tabular-nums;
+    min-height: 18px;
 }
 
 .best-performer-card {
