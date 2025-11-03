@@ -35,7 +35,7 @@ let rangeDirty = true;
 const referencePriceCache = new Map();
 const RANGE_LOOKBACK = { '1W': 7*86400, '1M': 30*86400, '1Y': 365*86400 };
 const RANGE_LABELS = { '1D': 'Daily', '1W': 'Weekly', '1M': 'Monthly', '1Y': 'Yearly', 'ALL': 'All Time' };
-const previousKpiValues = { totalPnl: null, equity: null, buyingPower: null };
+const previousKpiValues = { totalPnl: null, netWorth: null, cashAvailable: null };
 let isRangeUpdateInFlight = false;
 const FLASH_DURATION = 900;
 
