@@ -8,6 +8,13 @@
     --success: #34d399;
     --danger: #f87171;
     --shadow: 0 24px 60px rgba(8, 47, 73, 0.32);
+    --base-text-color: #f8fafc;
+    --flash-up-color: #34d399;
+    --flash-up-fade: rgba(52, 211, 153, 0.45);
+    --flash-up-shadow: rgba(52, 211, 153, 0.5);
+    --flash-down-color: #f87171;
+    --flash-down-fade: rgba(248, 113, 113, 0.45);
+    --flash-down-shadow: rgba(248, 113, 113, 0.5);
 }
 
 * { box-sizing: border-box; }
@@ -17,7 +24,7 @@ html, body {
     margin: 0;
     font-family: 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     background: var(--bg);
-    color: #f8fafc;
+    color: var(--base-text-color);
     overflow-x: hidden;
 }
 
@@ -415,12 +422,22 @@ canvas {
     font-weight: 600;
 }
 
+.flash-up-text,
+.flash-down-text {
+    display: inline-flex;
+    align-items: baseline;
+    animation-duration: 1.5s;
+    animation-timing-function: ease-out;
+    animation-fill-mode: forwards;
+    will-change: color, text-shadow;
+}
+
 .flash-up-text {
-    animation: flashUpText 1.2s ease-out forwards;
+    animation-name: flashUpText;
 }
 
 .flash-down-text {
-    animation: flashDownText 1.2s ease-out forwards;
+    animation-name: flashDownText;
 }
 
 footer {
@@ -449,8 +466,15 @@ footer a {
 }
 
 body.light-theme {
+    --base-text-color: #0f172a;
+    --flash-up-color: #047857;
+    --flash-up-fade: rgba(4, 120, 87, 0.5);
+    --flash-up-shadow: rgba(4, 120, 87, 0.45);
+    --flash-down-color: #b91c1c;
+    --flash-down-fade: rgba(185, 28, 28, 0.5);
+    --flash-down-shadow: rgba(185, 28, 28, 0.45);
     background: linear-gradient(180deg, #f9fafb 0%, #e2e8f0 100%);
-    color: #0f172a;
+    color: var(--base-text-color);
 }
 
 body.light-theme .theme-toggle {
@@ -480,8 +504,6 @@ body.light-theme .btn.primary { background: linear-gradient(120deg, #4f46e5, #14
 body.light-theme .pos { color: #64748b; }
 body.light-theme .price-row { color: #64748b; }
 body.light-theme .price-value { background: rgba(226, 232, 240, 0.9); color: #0f172a; }
-body.light-theme .flash-up-text { animation: flashUpTextLight 1.2s ease-out forwards; }
-body.light-theme .flash-down-text { animation: flashDownTextLight 1.2s ease-out forwards; }
 body.light-theme .pnl-range-controls button { background: rgba(255, 255, 255, 0.9); color: #475569; border-color: rgba(148, 163, 184, 0.4); }
 body.light-theme .pnl-range-controls button.active { background: linear-gradient(120deg, #4f46e5, #14b8a6); color: #f8fafc; border-color: transparent; }
 body.light-theme #loading-overlay { background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%); }
@@ -491,27 +513,41 @@ body.light-theme footer { color: #64748b; }
 body.light-theme .status-dot { background: #22c55e; box-shadow: 0 0 6px rgba(34, 197, 94, 0.6); }
 
 @keyframes flashUpText {
-    0% { color: #34d399; }
-    70% { color: #34d399; }
-    100% { color: inherit; }
+    0% {
+        color: var(--flash-up-color);
+        text-shadow: 0 0 18px var(--flash-up-shadow);
+    }
+    60% {
+        color: var(--flash-up-color);
+        text-shadow: 0 0 12px var(--flash-up-shadow);
+    }
+    75% {
+        color: var(--flash-up-fade);
+        text-shadow: 0 0 8px var(--flash-up-shadow);
+    }
+    100% {
+        color: var(--base-text-color);
+        text-shadow: 0 0 0 rgba(15, 23, 42, 0);
+    }
 }
 
 @keyframes flashDownText {
-    0% { color: #f87171; }
-    70% { color: #f87171; }
-    100% { color: inherit; }
-}
-
-@keyframes flashUpTextLight {
-    0% { color: #047857; }
-    70% { color: #047857; }
-    100% { color: inherit; }
-}
-
-@keyframes flashDownTextLight {
-    0% { color: #b91c1c; }
-    70% { color: #b91c1c; }
-    100% { color: inherit; }
+    0% {
+        color: var(--flash-down-color);
+        text-shadow: 0 0 18px var(--flash-down-shadow);
+    }
+    60% {
+        color: var(--flash-down-color);
+        text-shadow: 0 0 12px var(--flash-down-shadow);
+    }
+    75% {
+        color: var(--flash-down-fade);
+        text-shadow: 0 0 8px var(--flash-down-shadow);
+    }
+    100% {
+        color: var(--base-text-color);
+        text-shadow: 0 0 0 rgba(15, 23, 42, 0);
+    }
 }
 
 @keyframes spin {

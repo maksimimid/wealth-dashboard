@@ -40,7 +40,7 @@ const RANGE_LABELS = { '1D': 'Daily', '1W': 'Weekly', '1M': 'Monthly', '1Y': 'Ye
 const previousKpiValues = { totalPnl: null, netWorth: null, cashAvailable: null };
 let netContributionTotal = 0;
 let isRangeUpdateInFlight = false;
-const FLASH_DURATION = 1200;
+const FLASH_DURATION = 1500;
 let pnlSortDesc = true;
 
 function applyRangeButtons(range){
@@ -141,7 +141,7 @@ function updateThemeToggleIcon(button, isLight){
     const icon = button.querySelector('.theme-icon');
     const srOnly = button.querySelector('.sr-only');
     const label = isLight ? 'Switch to dark mode' : 'Switch to light mode';
-    if(icon) icon.textContent = isLight ? '🌙' : '☀️';
+    if(icon) icon.innerHTML = isLight ? '&#9790;' : '&#9728;';
     button.setAttribute('aria-label', label);
     if(srOnly) srOnly.textContent = label;
 }
