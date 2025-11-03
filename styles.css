@@ -245,6 +245,8 @@ h1 {
 
 .best-performer-card {
     min-height: 150px;
+    flex-direction: column;
+    align-items: flex-start;
 }
 
 .best-performer-header {
