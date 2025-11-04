@@ -49,6 +49,10 @@ const previousCategorySummaries = {
     crypto: { market: null, pnl: null, allocation: null },
     stock: { market: null, pnl: null, allocation: null }
 };
+const categorySectionState = {
+    crypto: { open: true, closed: false },
+    stock: { open: true, closed: false }
+};
 const CATEGORY_CONFIG = {
     crypto: {
         metricKey: 'crypto',
@@ -1127,8 +1131,6 @@ function updateRealEstateRentals(){
             <div class="realestate-metrics">
                 <div><span class="label">Final Asset Price</span><span class="value">${money(stat.finalAssetPrice)}</span></div>
                 <div><span class="label">Outstanding</span><span class="value">${money(stat.netOutstanding)}</span></div>
-                <div><span class="label">Value</span><span class="value">${money(stat.marketValue)}</span></div>
-                <div><span class="label">Allocation</span><span class="value">${formatPercent(stat.allocation)}</span></div>
                 <div><span class="label">Rent Collected</span><span class="value">${money(stat.rentCollected)}</span></div>
                 <div><span class="label">Rent YTD</span><span class="value">${money(stat.rentYtd)}</span></div>
                 <div><span class="label">Rent / Mo</span><span class="value">${money(stat.avgMonthlyRent)}</span></div>
@@ -1246,6 +1248,13 @@ function buildAnalyticsSection(categoryKey, title, positions, options){
                 ? createClosedPositionRow(position)
                 : createOpenPositionRow(position, options.totalPortfolioValue);
             content.appendChild(row);
+        });
+    }
+
+    if(categorySectionState[categoryKey] && options.sectionKey){
+        details.open = Boolean(options.open);
+        details.addEventListener('toggle', ()=>{
+            categorySectionState[categoryKey][options.sectionKey] = details.open;
         });
     }
 
@@ -1370,16 +1379,20 @@ function renderCategoryAnalytics(categoryKey, config){
     }
 
     if(listEl){
+        const state = categorySectionState[config.metricKey] || { open: true, closed: false };
+        categorySectionState[config.metricKey] = state;
         listEl.innerHTML = '';
         listEl.appendChild(buildAnalyticsSection(config.metricKey, 'Open positions', openPositions, {
-            open: true,
+            open: Boolean(state.open),
+            sectionKey: 'open',
             extra: `Total ${money(openMarketValue)}`,
             emptyMessage: `No ${config.emptyLabel} open positions yet.`,
             totalPortfolioValue
         }));
 
         listEl.appendChild(buildAnalyticsSection(config.metricKey, 'Closed positions', closedPositions, {
-            open: false,
+            open: Boolean(state.closed),
+            sectionKey: 'closed',
             extra: `Total realized ${money(closedRealizedValue)}`,
             emptyMessage: `No ${config.emptyLabel} closed positions yet.`,
             type: 'closed'
