@@ -34,6 +34,9 @@ let scheduledRender = null;
 let currentRangeTotalPnl = 0;
 let rangeDirty = true;
 const referencePriceCache = new Map();
+const RANGE_LOOKBACK = {};
+const RANGE_LABELS = { 'ALL': 'All Time' };
+let pnlRange = 'ALL';
 const previousKpiValues = { totalPnl: null, netWorth: null, cashAvailable: null };
 const previousBestPerformer = { id: null, pnl: null, change: null };
 let assetYearSeries = { labels: [], datasets: [] };
@@ -1260,7 +1263,7 @@ function buildAnalyticsSection(categoryKey, title, positions, options){
         positions.forEach(position=>{
             const row = options.type === 'closed'
                 ? createClosedPositionRow(position)
-                : createOpenPositionRow(position, options.totalPortfolioValue);
+                : createOpenPositionRow(position, options.totalCategoryValue);
             content.appendChild(row);
         });
     }
@@ -1276,13 +1279,13 @@ function buildAnalyticsSection(categoryKey, title, positions, options){
     return details;
 }
 
-function createOpenPositionRow(position, totalPortfolioValue){
+function createOpenPositionRow(position, totalCategoryValue){
     const row = document.createElement('div');
     row.className = 'analytics-row';
     const price = Number(position.displayPrice ?? position.currentPrice ?? position.lastKnownPrice ?? position.avgPrice ?? 0);
     const marketValue = Number(position.marketValue || 0);
     const pnlValue = Number((position.rangePnl ?? position.pnl) || 0);
-    const share = totalPortfolioValue ? (marketValue / totalPortfolioValue) * 100 : null;
+    const share = totalCategoryValue ? (marketValue / totalCategoryValue) * 100 : null;
     const shareText = Number.isFinite(share) ? `${share.toFixed(1)}%` : '—';
     row.innerHTML = `
         <div>
@@ -1292,7 +1295,7 @@ function createOpenPositionRow(position, totalPortfolioValue){
         <div class="analytics-values">
             <div class="value-strong">${money(marketValue)}</div>
             <div class="${pnlValue >= 0 ? 'delta-positive' : 'delta-negative'}">${money(pnlValue)}</div>
-            <div class="muted">Share ${shareText}</div>
+            <div class="muted">Category ${shareText}</div>
         </div>
     `;
     return row;
@@ -1340,11 +1343,11 @@ function renderCategoryAnalytics(categoryKey, config){
     const chartId = config.chartId;
     const items = positions.filter(p=> (p.type || '').toLowerCase() === normalized);
     const totalPortfolioValue = positions.reduce((sum,p)=> sum + Number(p.marketValue || 0), 0);
-    const totalMarketValue = items.reduce((sum,p)=> sum + Number(p.marketValue || 0), 0);
+    const totalCategoryValue = items.reduce((sum,p)=> sum + Number(p.marketValue || 0), 0);
     const totalPnl = items.reduce((sum,p)=> sum + Number((p.rangePnl ?? p.pnl) || 0), 0);
-    const allocation = totalPortfolioValue ? (totalMarketValue / totalPortfolioValue) * 100 : null;
+    const allocation = totalPortfolioValue ? (totalCategoryValue / totalPortfolioValue) * 100 : null;
 
-    setCategoryMetric(config.metricKey, 'market', totalMarketValue, config.summary.market, money);
+    setCategoryMetric(config.metricKey, 'market', totalCategoryValue, config.summary.market, money);
     setCategoryMetric(config.metricKey, 'pnl', totalPnl, config.summary.pnl, money);
     setCategoryMetric(config.metricKey, 'allocation', allocation, config.summary.allocation, value => {
         if(value === null) return '—';
@@ -1401,7 +1404,7 @@ function renderCategoryAnalytics(categoryKey, config){
             sectionKey: 'open',
             extra: `Total ${money(openMarketValue)}`,
             emptyMessage: `No ${config.emptyLabel} open positions yet.`,
-            totalPortfolioValue
+            totalCategoryValue
         }));
 
         listEl.appendChild(buildAnalyticsSection(config.metricKey, 'Closed positions', closedPositions, {
