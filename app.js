@@ -916,6 +916,7 @@ function computeRealEstateAnalytics(){
     const rentYearTotals = new Map();
     const rentYearTotalsByAsset = new Map();
     const rentYearSet = new Set();
+    const totalPortfolioValue = positions.reduce((sum,p)=> sum + Number(p.marketValue || 0), 0);
 
     positions.filter(p=> (p.type || '').toLowerCase() === 'real estate').forEach((position, idx)=>{
         const ops = Array.isArray(position.operations) ? position.operations : [];
@@ -1009,6 +1010,9 @@ function computeRealEstateAnalytics(){
             payoffMonths = outstanding / avgMonthlyRent;
         }
 
+        const marketValue = Number(position.marketValue || 0);
+        const allocation = totalPortfolioValue ? (marketValue / totalPortfolioValue) * 100 : null;
+
         results.push({
             name: position.displayName || position.Symbol || position.Name || `Asset ${idx+1}`,
             totalPurchase,
@@ -1019,7 +1023,9 @@ function computeRealEstateAnalytics(){
             avgMonthlyRent,
             utilization,
             netOutstanding: outstanding,
-            payoffMonths
+            payoffMonths,
+            marketValue,
+            allocation
         });
     });
 
@@ -1105,6 +1111,8 @@ function updateRealEstateRentals(){
             <div class="realestate-metrics">
                 <div><span class="label">Final Asset Price</span><span class="value">${money(stat.finalAssetPrice)}</span></div>
                 <div><span class="label">Outstanding</span><span class="value">${money(stat.netOutstanding)}</span></div>
+                <div><span class="label">Value</span><span class="value">${money(stat.marketValue)}</span></div>
+                <div><span class="label">Allocation</span><span class="value">${formatPercent(stat.allocation)}</span></div>
                 <div><span class="label">Rent Collected</span><span class="value">${money(stat.rentCollected)}</span></div>
                 <div><span class="label">Rent YTD</span><span class="value">${money(stat.rentYtd)}</span></div>
                 <div><span class="label">Rent / Mo</span><span class="value">${money(stat.avgMonthlyRent)}</span></div>
