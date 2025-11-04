@@ -428,7 +428,8 @@ function transformOperations(records){
         const isRentOp = (opTypeLower === 'profitloss' || opTypeLower.includes('rent')) && tagsNormalized.some(tag=>RENT_TAGS.includes(tag));
 
         if(!map.has(asset)){
-            const finnhubSymbol = mapFinnhubSymbol(asset, category);
+            const finnhubOverride = fields['Finnhub Symbol'] || fields['Finnhub symbol'] || fields['finnhubSymbol'] || fields['FINNHUB_SYMBOL'];
+            const finnhubSymbol = mapFinnhubSymbol(finnhubOverride || asset, category, Boolean(finnhubOverride));
             map.set(asset, {
                 id: asset,
                 Name: asset,
