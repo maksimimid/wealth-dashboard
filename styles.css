@@ -436,6 +436,119 @@ h1 {
     display: block;
 }
 
+.analytics-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.analytics-header {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 18px;
+}
+
+.analytics-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 18px;
+    align-items: center;
+}
+
+.metric {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    min-width: 120px;
+}
+
+.metric .label {
+    font-size: 11px;
+    letter-spacing: 0.35px;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 600;
+}
+
+.metric .value {
+    font-size: 1.25rem;
+    font-weight: 600;
+}
+
+.analytics-chart {
+    position: relative;
+    border-radius: 18px;
+    padding: 18px;
+    background: rgba(15, 23, 42, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    min-height: 240px;
+}
+
+.analytics-chart canvas {
+    width: 100% !important;
+    height: 100% !important;
+    display: block;
+}
+
+.analytics-list {
+    margin-top: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.analytics-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 14px 16px;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(15, 23, 42, 0.45);
+}
+
+.analytics-row:hover {
+    border-color: rgba(59, 130, 246, 0.35);
+}
+
+.analytics-row .pos {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.analytics-values {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+}
+
+.delta-positive {
+    color: #34d399;
+    font-weight: 600;
+}
+
+.delta-negative {
+    color: #f87171;
+    font-weight: 600;
+}
+
+.muted {
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.asset-dynamic-card .analytics-header {
+    margin-bottom: 4px;
+}
+
+.asset-dynamic-chart {
+    min-height: 320px;
+}
+
 .realestate-list {
     margin-top: 16px;
     display: flex;
@@ -696,6 +809,12 @@ body.light-theme .realestate-progress-bar { background: linear-gradient(120deg, 
 body.light-theme .realestate-chart { background: rgba(255, 255, 255, 0.9); border-color: rgba(148, 163, 184, 0.35); }
 body.light-theme .rent-filter { background: rgba(255, 255, 255, 0.92); color: #1e293b; border-color: rgba(148, 163, 184, 0.4); }
 body.light-theme .rent-filter:hover { border-color: rgba(79, 70, 229, 0.45); }
+body.light-theme .analytics-chart { background: rgba(255, 255, 255, 0.92); border-color: rgba(148, 163, 184, 0.35); }
+body.light-theme .analytics-row { background: rgba(255, 255, 255, 0.9); border-color: rgba(148, 163, 184, 0.4); }
+body.light-theme .analytics-row:hover { border-color: rgba(99, 102, 241, 0.45); }
+body.light-theme .metric .label { color: #64748b; }
+body.light-theme .metric .value { color: #0f172a; }
+body.light-theme .muted { color: #64748b; }
 body.light-theme .best-performer-range { background: rgba(148, 163, 184, 0.25); color: #475569; }
 body.light-theme .best-performer-change { color: #475569; }
 body.light-theme .best-performer-meta { color: #64748b; }

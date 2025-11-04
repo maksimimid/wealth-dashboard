@@ -45,10 +45,37 @@ const assetColorCache = new Map();
 let realEstateRentSeries = { labels: [], datasets: [] };
 let realEstateRentSeriesDirty = true;
 const realEstateRentFilters = new Map();
+const previousCategorySummaries = {
+    crypto: { market: null, pnl: null, allocation: null },
+    stock: { market: null, pnl: null, allocation: null }
+};
+const CATEGORY_CONFIG = {
+    crypto: {
+        metricKey: 'crypto',
+        chartId: 'cryptoPortfolioChart',
+        listId: 'crypto-positions',
+        summary: {
+            market: 'crypto-market-value',
+            pnl: 'crypto-pnl',
+            allocation: 'crypto-allocation'
+        },
+        emptyLabel: 'crypto'
+    },
+    stock: {
+        metricKey: 'stock',
+        chartId: 'stockPortfolioChart',
+        listId: 'stock-positions',
+        summary: {
+            market: 'stock-market-value',
+            pnl: 'stock-pnl',
+            allocation: 'stock-allocation'
+        },
+        emptyLabel: 'stock'
+    }
+};
 let netContributionTotal = 0;
 let isRangeUpdateInFlight = false;
 const FLASH_DURATION = 1500;
-let pnlSortDesc = true;
 const RENT_TAGS = ['rent', 'rental', 'lease', 'tenant', 'tenancy', 'airbnb', 'booking'];
 const EXPENSE_TAGS = ['expense', 'expenses', 'maintenance', 'repair', 'repairs', 'tax', 'taxes', 'property tax', 'property-tax', 'insurance', 'mortgage', 'mortgagepayment', 'hoa', 'hoa fees', 'utility', 'utilities', 'water', 'electric', 'electricity', 'gas', 'cleaning', 'management', 'interest', 'service', 'fee', 'fees'];
 
@@ -380,16 +407,16 @@ function transformOperations(records){
     const ordered = sortByDateAscending(records);
     const map = new Map();
     ordered.forEach(rec=>{
-        const fields = rec.fields || {};
-        const assetRaw = fields.Asset || fields.Name;
-        if(!assetRaw) return;
-        const asset = String(assetRaw).trim();
-        const category = normalizeCategory(fields.Category, asset);
-        const opType = fields['Operation type'] || fields.Operation || 'Unknown';
-        const amount = Number(fields.Amount ?? 0) || 0;
-        const price = Number(fields['Asset price on invest date'] ?? fields.Price ?? 0) || 0;
-        const spent = Number(fields['Spent on operation'] ?? (amount * (price || 0))) || 0;
-        const date = fields.Date ? new Date(fields.Date) : null;
+            const fields = rec.fields || {};
+            const assetRaw = fields.Asset || fields.Name;
+            if(!assetRaw) return;
+            const asset = String(assetRaw).trim();
+            const category = normalizeCategory(fields.Category, asset);
+            const opType = fields['Operation type'] || fields.Operation || 'Unknown';
+            const amount = Number(fields.Amount ?? 0) || 0;
+            const price = Number(fields['Asset price on invest date'] ?? fields.Price ?? 0) || 0;
+            const spent = Number(fields['Spent on operation'] ?? (amount * (price || 0))) || 0;
+            const date = fields.Date ? new Date(fields.Date) : null;
 
         if(!map.has(asset)){
             const finnhubSymbol = mapFinnhubSymbol(asset, category);
@@ -676,7 +703,7 @@ function computeAssetYearSeries(){
 
     const assets = Array.from(assetNames);
     const cumulative = new Map(assets.map(name=>[name,0]));
-    const datasets = assets.map((name, idx)=>{
+    const assetDatasets = assets.map((name, idx)=>{
         const data = years.map(year=>{
             const assetMap = yearAssetMap.get(year);
             const delta = assetMap && assetMap.has(name) ? Number(assetMap.get(name)) : 0;
@@ -688,7 +715,7 @@ function computeAssetYearSeries(){
             const hue = (idx * 53) % 360;
             assetColorCache.set(name, {
                 border: `hsl(${hue},70%,55%)`,
-                background: `hsla(${hue},70%,55%,0.25)`
+                background: `hsla(${hue},70%,55%,0.1)`
             });
         }
         const colors = assetColorCache.get(name);
@@ -697,14 +724,71 @@ function computeAssetYearSeries(){
             data,
             tension: 0.35,
             borderWidth: 2,
-            fill: true,
-            stack: 'total',
+            fill: false,
             borderColor: colors.border,
-            backgroundColor: colors.background
+            backgroundColor: colors.background,
+            pointRadius: 2,
+            pointHoverRadius: 5,
+            type: 'line'
         };
     }).filter(ds => ds.data.some(value => Math.abs(value) > 0.5));
 
-    assetYearSeries = { labels: years.map(String), datasets };
+    const totalSeries = years.map((_, idx)=>
+        assetDatasets.reduce((sum, ds)=> sum + Number(ds.data[idx] || 0), 0)
+    ).map(value=> Number(value.toFixed(2)));
+
+    const totalDataset = {
+        label: 'Total Contributions',
+        data: totalSeries.slice(),
+        borderColor: 'rgba(59, 130, 246, 0.9)',
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        fill: false,
+        tension: 0.35,
+        pointRadius: 3,
+        pointHoverRadius: 6,
+        type: 'line'
+    };
+
+    let labels = years.map(String);
+    const datasets = [totalDataset, ...assetDatasets];
+
+    if(totalSeries.length){
+        const projectionYear = years[years.length - 1] + 1;
+        let projectionValue = totalSeries[totalSeries.length - 1];
+        if(totalSeries.length > 1){
+            const deltas = [];
+            for(let i=1; i<totalSeries.length; i++){
+                deltas.push(totalSeries[i] - totalSeries[i-1]);
+            }
+            const avgDelta = deltas.reduce((sum,val)=>sum+val,0) / deltas.length;
+            projectionValue += avgDelta;
+        }
+        projectionValue = Number(Math.max(projectionValue, 0).toFixed(2));
+        labels = [...labels, String(projectionYear)];
+        datasets.forEach(ds=>{
+            ds.data = ds.data.slice();
+            ds.data.push(null);
+        });
+        const projectionData = new Array(labels.length).fill(null);
+        projectionData[labels.length - 2] = totalSeries[totalSeries.length - 1];
+        projectionData[labels.length - 1] = projectionValue;
+        datasets.push({
+            label: `Projected ${projectionYear}`,
+            data: projectionData,
+            borderDash: [6, 4],
+            borderColor: 'rgba(16, 185, 129, 0.9)',
+            backgroundColor: 'transparent',
+            borderWidth: 2,
+            fill: false,
+            tension: 0.35,
+            pointRadius: 0,
+            spanGaps: true,
+            type: 'line'
+        });
+    }
+
+    assetYearSeries = { labels, datasets };
     assetYearSeriesDirty = false;
 }
 
@@ -793,48 +877,22 @@ function createOrUpdateChart(id,type,data,options){
 }
 
 function renderAllCharts(){
-    if(!positions.length) return;
     if(assetYearSeriesDirty){
         computeAssetYearSeries();
     }
-    const sortedForPnl = [...positions].sort((a,b)=> pnlSortDesc ? (b.rangePnl||0)-(a.rangePnl||0) : (a.rangePnl||0)-(b.rangePnl||0));
-    const labels = sortedForPnl.map(p=>p.displayName || p.Symbol || p.Name);
-    const pnlData = sortedForPnl.map(p=>Number((p.rangePnl||0).toFixed(2)));
-    const pnlColors = pnlData.map(v=> v>=0 ? 'rgba(52,211,153,0.85)' : 'rgba(248,113,113,0.85)');
-    const rangeLabel = RANGE_LABELS[pnlRange] || pnlRange;
-    createOrUpdateChart('pnlChart','bar',{labels,datasets:[{label:`P&L (${rangeLabel})`,data:pnlData,borderRadius:6,backgroundColor:pnlColors}]},{indexAxis:'x',scales:{y:{beginAtZero:true}}});
-
-    const compLabels = positions.map(p=>p.displayName || p.Symbol || p.Name);
-    const compData = positions.map(p=>Math.max(0, Number(p.marketValue||0)));
-    createOrUpdateChart('compositionChart','doughnut',{labels:compLabels,datasets:[{data:compData,backgroundColor:compLabels.map((_,i)=>`hsla(${(i*47)%360},70%,60%,0.85)`)}]},{plugins:{legend:{position:'bottom'}}});
-
-    const changeLabels = positions.map(p=>p.displayName || p.Symbol || p.Name);
-    const changeData = positions.map(p=>Number((p.changePct||0).toFixed(2)));
-    createOrUpdateChart('dailyChangeChart','bar',{labels:changeLabels,datasets:[{label:'Daily Change (%)',data:changeData,backgroundColor:changeData.map(v=>v>=0? 'rgba(52,211,153,0.85)':'rgba(248,113,113,0.85)')}]},{indexAxis:'y',scales:{x:{ticks:{callback:v=>v+'%'}}}});
-
-    const byType = positions.reduce((acc,p)=>{
-        const key = p.type || 'Other';
-        acc[key] = (acc[key]||0) + Number(p.marketValue||0);
-        return acc;
-    },{});
-    createOrUpdateChart('typeAllocationChart','pie',{labels:Object.keys(byType),datasets:[{data:Object.values(byType)}]},{plugins:{legend:{position:'bottom'}}});
 
     if(assetYearSeries.labels.length && assetYearSeries.datasets.length){
         createOrUpdateChart('assetDynamicChart','line', assetYearSeries, {
             plugins: { legend: { position: 'bottom' } },
             interaction: { mode: 'index', intersect: false },
             scales: {
-                x: {
-                    ticks: { autoSkip: true, maxTicksLimit: 10 }
-                },
+                x: { ticks: { autoSkip: true, maxTicksLimit: 10 } },
                 y: {
-                    stacked: true,
-                    ticks: {
-                        callback: value => money(value)
-                    }
+                    beginAtZero: true,
+                    ticks: { callback: value => money(value) }
                 }
             },
-            elements: { point: { radius: 3, hoverRadius: 5 } }
+            elements: { point: { radius: 3, hoverRadius: 6 } }
         });
     }else if(charts['assetDynamicChart']){
         charts['assetDynamicChart'].destroy();
@@ -848,46 +906,6 @@ function renderAllCharts(){
 
 // ----------------- UI -----------------
 function setStatus(s){ const el = document.getElementById('status'); if(el) el.textContent = s; }
-
-function updateAssetsList(){
-    const el = document.getElementById('assets-list');
-    if(!el) return;
-    el.innerHTML = '';
-    const sorted = [...positions].sort((a,b)=> (b.marketValue||0) - (a.marketValue||0));
-    sorted.forEach(p=>{
-        ensurePositionDefaults(p);
-        const row = document.createElement('div');
-        row.className = 'row';
-        const changeBadge = Number.isFinite(p.rangeChangePct) && p.rangeChangePct !== 0 ? `${p.rangeChangePct>=0?'+':''}${p.rangeChangePct.toFixed(2)}%` : '—';
-        const priceValue = money(p.displayPrice ?? p.currentPrice ?? p.avgPrice ?? 0);
-        row.innerHTML = `
-            <div>
-                <div class="symbol">${p.displayName || p.Symbol || p.Name}</div>
-                <div class="pos" style="font-size:13px">${p.type || '—'} · Qty ${formatQty(Number(p.qty||0))}</div>
-            </div>
-            <div class="row-right">
-                <div class="price-row"><span class="price-label">Price</span><span class="price-value">${priceValue}</span></div>
-                <div class="value-strong">${money(p.marketValue)}</div>
-                <div class="pos">P&L <span class="pnl-value">${money(p.rangePnl ?? p.pnl ?? 0)}</span> · ${changeBadge}</div>
-            </div>`;
-        el.appendChild(row);
-        const priceEl = row.querySelector('.price-value');
-        if(priceEl){
-            flashElement(priceEl, p.priceDirection);
-        }
-        const valueEl = row.querySelector('.value-strong');
-        if(valueEl){
-            flashElement(valueEl, p.marketDirection);
-        }
-        const pnlEl = row.querySelector('.pnl-value');
-        if(pnlEl){
-            flashElement(pnlEl, p.rangeDirection);
-        }
-        p.priceDirection = null;
-        p.marketDirection = null;
-        p.rangeDirection = null;
-    });
-}
 
 function computeRealEstateAnalytics(){
     const now = new Date();
@@ -927,15 +945,16 @@ function computeRealEstateAnalytics(){
 
             const hasRentTag = tags.some(tag=>RENT_TAGS.includes(tag));
             const hasExpenseTag = tags.some(tag=>EXPENSE_TAGS.includes(tag));
+            const cashImpact = spent !== 0 ? spent : (amount !== 0 && price !== 0 ? amount * price : 0);
             const isRent = (type === 'profitloss' || type.includes('rent')) && hasRentTag;
-            const isPurchase = type === 'purchasesell' && (amount <= 0 || spent > 0);
-            const isExpense = (!isPurchase && !isRent) && (hasExpenseTag || type.includes('expense') || type.includes('maintenance') || type.includes('hoa') || type.includes('tax') || type.includes('mortgage') || type.includes('interest') || spent > 0);
+            const isPurchase = type === 'purchasesell' && cashImpact > 0;
+            const isExpense = (!isPurchase && !isRent) && (hasExpenseTag || type.includes('expense') || type.includes('maintenance') || type.includes('hoa') || type.includes('tax') || type.includes('mortgage') || type.includes('interest') || cashImpact > 0);
 
             if(isPurchase){
                 if(date && (!earliestPurchase || date < earliestPurchase)){
                     earliestPurchase = date;
                 }
-                const cashOut = spent !== 0 ? Math.abs(spent) : (amount !== 0 && price > 0 ? Math.abs(amount) * price : 0);
+                const cashOut = Math.abs(cashImpact);
                 totalPurchase += cashOut;
                 return;
             }
@@ -970,8 +989,8 @@ function computeRealEstateAnalytics(){
                 return;
             }
 
-            if(isExpense || (spent > 0 && !isRent && !isPurchase)){
-                const expenseAmount = spent !== 0 ? Math.abs(spent) : (amount !== 0 && price > 0 ? Math.abs(amount) * price : 0);
+            if(isExpense || (cashImpact > 0 && !isRent && !isPurchase)){
+                const expenseAmount = Math.abs(cashImpact);
                 totalExpenses += expenseAmount;
             }
         });
@@ -1091,7 +1110,7 @@ function updateRealEstateRentals(){
                 <div><span class="label">Rent / Mo</span><span class="value">${money(stat.avgMonthlyRent)}</span></div>
                 <div>
                     <span class="label">Utilization</span>
-                    <span class="value">${formatPercent(stat.utilization)}</span>
+                    <span class="value">${Number.isFinite(Number(stat.utilization)) ? `${Number(stat.utilization).toFixed(1)}%` : '—'}</span>
                     <div class="realestate-progress" role="presentation">
                         <div class="realestate-progress-bar" style="${utilizationStyle}"></div>
                     </div>
@@ -1151,13 +1170,17 @@ function renderRealEstateRentChart(){
             labels: realEstateRentSeries.labels,
             datasets: filteredDatasets
         };
-        createOrUpdateChart(chartId, 'line', chartData, {
+        createOrUpdateChart(chartId, 'bar', chartData, {
             animation: { duration: 0 },
             plugins: { legend: { display: false } },
             interaction: { mode: 'index', intersect: false },
             scales: {
-                x: { ticks: { autoSkip: true } },
+                x: {
+                    ticks: { autoSkip: true },
+                    grid: { display: false }
+                },
                 y: {
+                    beginAtZero: true,
                     ticks: {
                         callback: value => money(value)
                     }
@@ -1170,6 +1193,105 @@ function renderRealEstateRentChart(){
         charts[chartId].destroy();
         delete charts[chartId];
     }
+}
+
+function setCategoryMetric(categoryKey, metricKey, value, elementId, formatter){
+    const el = document.getElementById(elementId);
+    if(!el) return;
+    let displayValue;
+    if(value === null || value === undefined || Number.isNaN(value)){
+        displayValue = formatter ? formatter(null) : '—';
+    }else{
+        displayValue = formatter ? formatter(value) : value;
+    }
+    el.textContent = displayValue;
+    const store = previousCategorySummaries[categoryKey];
+    if(!store) return;
+    const previous = store[metricKey];
+    if(previous !== null && value !== null && value !== undefined && !Number.isNaN(value) && previous !== value){
+        flashElement(el, value > previous ? 'up' : 'down');
+    }
+    store[metricKey] = (value === null || value === undefined || Number.isNaN(value)) ? null : value;
+}
+
+function renderCategoryAnalytics(categoryKey, config){
+    const normalized = categoryKey.toLowerCase();
+    const listEl = document.getElementById(config.listId);
+    const chartId = config.chartId;
+    const items = positions.filter(p=> (p.type || '').toLowerCase() === normalized);
+    const totalPortfolioValue = positions.reduce((sum,p)=> sum + Number(p.marketValue || 0), 0);
+    const totalMarketValue = items.reduce((sum,p)=> sum + Number(p.marketValue || 0), 0);
+    const totalPnl = items.reduce((sum,p)=> sum + Number((p.rangePnl ?? p.pnl) || 0), 0);
+    const allocation = totalPortfolioValue ? (totalMarketValue / totalPortfolioValue) * 100 : null;
+
+    setCategoryMetric(config.metricKey, 'market', totalMarketValue, config.summary.market, money);
+    setCategoryMetric(config.metricKey, 'pnl', totalPnl, config.summary.pnl, money);
+    setCategoryMetric(config.metricKey, 'allocation', allocation, config.summary.allocation, value => {
+        if(value === null) return '—';
+        return `${value.toFixed(1)}%`;
+    });
+
+    if(!items.length){
+        if(listEl) listEl.innerHTML = `<div class="pos">No ${config.emptyLabel} holdings yet.</div>`;
+        if(charts[chartId]){
+            charts[chartId].destroy();
+            delete charts[chartId];
+        }
+        return;
+    }
+
+    const sorted = [...items].sort((a,b)=> (b.marketValue || 0) - (a.marketValue || 0));
+    const labels = sorted.map(p=> p.displayName || p.Symbol || p.Name);
+    const data = sorted.map(p=> Number(p.marketValue || 0));
+    const backgroundColors = labels.map((_, idx)=> `hsla(${(idx * 47) % 360},70%,60%,0.75)`);
+    const borderColors = labels.map((_, idx)=> `hsla(${(idx * 47) % 360},70%,50%,1)`);
+    const chartData = { labels, datasets: [{ data, backgroundColor: backgroundColors, borderColor: borderColors, borderWidth: 1, borderRadius: 8 }] };
+    createOrUpdateChart(chartId, 'bar', chartData, {
+        plugins: { legend: { display: false } },
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+            x: { ticks: { autoSkip: false, maxRotation: 45, minRotation: 0 } },
+            y: {
+                beginAtZero: true,
+                ticks: { callback: value => money(value) }
+            }
+        }
+    });
+
+    if(listEl){
+        listEl.innerHTML = '';
+        sorted.forEach(p=>{
+            ensurePositionDefaults(p);
+            const row = document.createElement('div');
+            row.className = 'analytics-row';
+            const name = p.displayName || p.Symbol || p.Name;
+            const qtyText = `Qty ${formatQty(Number(p.qty || 0))} · Avg ${money(p.avgPrice || 0)}`;
+            const marketValue = Number(p.marketValue || 0);
+            const pnlValue = Number((p.rangePnl ?? p.pnl) || 0);
+            const share = totalPortfolioValue ? (marketValue / totalPortfolioValue) * 100 : null;
+            const shareText = share !== null ? `${share.toFixed(1)}%` : '—';
+            row.innerHTML = `
+                <div>
+                    <div class="symbol">${name}</div>
+                    <div class="pos">${qtyText}</div>
+                </div>
+                <div class="analytics-values">
+                    <div class="value-strong">${money(marketValue)}</div>
+                    <div class="${pnlValue >= 0 ? 'delta-positive' : 'delta-negative'}">${money(pnlValue)}</div>
+                    <div class="muted">Share ${shareText}</div>
+                </div>
+            `;
+            listEl.appendChild(row);
+        });
+    }
+}
+
+function renderCryptoAnalytics(){
+    renderCategoryAnalytics('crypto', CATEGORY_CONFIG.crypto);
+}
+
+function renderStockAnalytics(){
+    renderCategoryAnalytics('stock', CATEGORY_CONFIG.stock);
 }
 
 function updateKpis(){
@@ -1263,7 +1385,8 @@ function updateKpis(){
 
 function renderDashboard(){
     updateKpis();
-    updateAssetsList();
+    renderCryptoAnalytics();
+    renderStockAnalytics();
     updateRealEstateRentals();
     renderAllCharts();
     const opsText = operationsMeta.count ? ` · ${operationsMeta.count} Airtable ops` : '';
@@ -1338,16 +1461,6 @@ document.addEventListener('DOMContentLoaded', ()=>{
     if(loadingOverlay){
         setLoadingState('visible','Loading Airtable…');
     }
-    const sortBtn = document.getElementById('sort-pnl');
-    if(sortBtn){
-        sortBtn.textContent = pnlSortDesc ? 'Sort: High → Low' : 'Sort: Low → High';
-        sortBtn.addEventListener('click', ()=>{
-            pnlSortDesc = !pnlSortDesc;
-            scheduleUIUpdate({immediate:true});
-            sortBtn.textContent = pnlSortDesc ? 'Sort: High → Low' : 'Sort: Low → High';
-        });
-    }
-
     const pnlRangeControls = document.getElementById('pnl-range-controls');
     if(pnlRangeControls){
         pnlRangeControls.addEventListener('click', event=>{
@@ -1358,34 +1471,6 @@ document.addEventListener('DOMContentLoaded', ()=>{
             setPnlRange(selected).catch(err=>console.error('Failed to update P&L range', err));
         });
         applyRangeButtons(pnlRange);
-    }
-
-    const exportBtn = document.getElementById('export-csv');
-    if(exportBtn){
-        exportBtn.addEventListener('click', ()=>{
-            const rows = [['Display','Symbol','Category','Qty','AvgPrice','CurrentPrice','MarketValue','P&L','Change%']];
-            positions.forEach(p=>{
-                rows.push([
-                    p.displayName || p.Name,
-                    p.finnhubSymbol || p.Symbol || '',
-                    p.type || '',
-                    Number(p.qty||0),
-                    Number(p.avgPrice||0),
-                    Number(p.currentPrice||0),
-                    Number(p.marketValue||0),
-                    Number((p.rangePnl ?? p.pnl) || 0),
-                    Number((p.rangeChangePct ?? p.changePct) || 0)
-                ]);
-            });
-            const csv = rows.map(r=>r.map(cell => `"${String(cell??'').replace(/"/g,'""')}"`).join(',')).join('\n');
-            const blob = new Blob([csv],{type:'text/csv'});
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'wealth-dashboard.csv';
-            a.click();
-            URL.revokeObjectURL(url);
-        });
     }
 
     const themeToggle = document.getElementById('theme-toggle');

@@ -67,6 +67,14 @@ Assets where `Category` normalises to `Real Estate` get an additional card summa
 - **Rent Collected by Year**: embedded chart at the top of the card totals rent inflows per calendar year across all real estate assets.
   - Use the pill-style checkboxes above the chart to toggle individual assets (or the 'All Assets' aggregate) on and off.
 
+### Crypto & Stocks Portfolio Analytics
+
+- Both the crypto and stock cards surface:
+  - Market value, unrealized P&L, and portfolio share in the header metrics (with live flash indicators).
+  - A bar chart of holdings ordered by market value.
+  - A detail list with quantity, average price, market value, P&L, and intra-portfolio share for each asset.
+- Charts update automatically as Airtable operations arrive; toggles are not required for these cards.
+
 If you do not see values, confirm:
 
 - The asset rows carry `Category = Real Estate`.
@@ -114,3 +122,4 @@ Charts update in place without recreation to avoid UI jitter; extending metrics 
 ## Change Log
 
  - `2025-11-02`: Documented rental analytics, tag conventions, required Airtable fields, and clarified final asset price/utilization definitions.
+- `2025-11-02`: Added crypto/stocks analytics sections, rent-by-year filters, and asset-growth projection guidance.
