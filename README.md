@@ -33,6 +33,7 @@ The dashboard assumes a single table of **operations** that records every cashfl
 | `Date` | ? | ISO date string; operations are processed chronologically. |
 | `Tags` | Optional | Array of keywords that refine behaviour (see sections below). |
 | `Notes` | Optional | Ignored by the dashboard but useful for human tracking. |
+| `Finnhub Symbol` | Optional | Override the exact Finnhub identifier (e.g., `BINANCE:NEXOUSDT`, `ISAC`). Useful when the automatic resolver cannot infer the correct ticker. |
 
 ### Operation Type Expectations
 
@@ -74,6 +75,7 @@ Assets where `Category` normalises to `Real Estate` get an additional card summa
   - A bar chart of holdings ordered by market value.
   - A detail list split into **Open positions** (expanded with live price + P&L) and **Closed positions** (collapsed with realized totals); each row shows quantity, price, market value, P&L, and share where applicable.
 - Charts update automatically as Airtable operations arrive; toggles are not required for these cards.
+- The Rental Portfolio header shows aggregate value/allocation; each property row now includes a projected value (5% annual appreciation) alongside basis, rent metrics, and payoff ETA.
 
 If you do not see values, confirm:
 
@@ -123,3 +125,4 @@ Charts update in place without recreation to avoid UI jitter; extending metrics 
 
  - `2025-11-02`: Documented rental analytics, tag conventions, required Airtable fields, and clarified final asset price/utilization definitions.
 - `2025-11-02`: Added crypto/stocks analytics sections, rent-by-year filters, and asset-growth projection guidance.
+- `2025-11-02`: Improved Finnhub symbol resolution (optional override field), refined rental analytics (allocation/value header, projected property values), and excluded rent cashflows from wealth totals.

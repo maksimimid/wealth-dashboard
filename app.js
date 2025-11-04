@@ -83,12 +83,7 @@ const FLASH_DURATION = 1500;
 const RENT_TAGS = ['rent', 'rental', 'lease', 'tenant', 'tenancy', 'airbnb', 'booking'];
 const EXPENSE_TAGS = ['expense', 'expenses', 'maintenance', 'repair', 'repairs', 'tax', 'taxes', 'property tax', 'property-tax', 'insurance', 'mortgage', 'mortgagepayment', 'hoa', 'hoa fees', 'utility', 'utilities', 'water', 'electric', 'electricity', 'gas', 'cleaning', 'management', 'interest', 'service', 'fee', 'fees'];
 
-function applyRangeButtons(range){
-    const buttons = document.querySelectorAll('#pnl-range-controls button');
-    buttons.forEach(btn=>{
-        btn.classList.toggle('active', btn.dataset.range === range);
-    });
-}
+function applyRangeButtons(){ /* no-op */ }
 
 function setLoadingState(state, message){
     if(!loadingOverlay) return;
@@ -337,18 +332,81 @@ function normalizeCategory(category, asset){
     return map[key] || category;
 }
 
-function mapFinnhubSymbol(asset, category){
+function mapFinnhubSymbol(asset, category, isOverride = false){
     if(!asset) return null;
-    const upper = asset.toUpperCase();
+    if(isOverride) return asset;
     const cat = (category||'').toLowerCase();
+    const cleaned = String(asset).trim().toUpperCase();
     if(cat==='cash') return null;
     if(cat==='crypto'){
-        if(/[A-Z0-9]{2,10}/.test(upper)){
-            return `${upper}:USDT`;
-        }
-        return null;
+        const base = cleaned.replace(/[^A-Z0-9]/g,'');
+        if(!base || base.length < 2 || base.length > 10) return null;
+        return `BINANCE:${base}USDT`;
     }
-    if(/[A-Z0-9]{1,5}/.test(upper) && !upper.includes(' ')) return upper;
+    if(cleaned.includes(':')) return cleaned;
+    if(/[A-Z0-9]{1,5}/.test(cleaned) && !cleaned.includes(' ')) return cleaned;
+    return null;
+}
+
+async function refineFinnhubSymbols(){
+    if(!FINNHUB_KEY || typeof fetch !== 'function') return;
+    const unresolved = positions.filter(position=>{
+        const cat = (position.type || '').toLowerCase();
+        if(cat === 'cash') return false;
+        const symbol = position.finnhubSymbol || '';
+        if(cat === 'crypto'){
+            if(!symbol) return true;
+            const heuristic = /^BINANCE:[A-Z0-9]+USDT$/;
+            return heuristic.test(symbol);
+        }
+        return !symbol;
+    });
+    for(const position of unresolved){
+        try{
+            const resolved = await fetchFinnhubSymbol(position);
+            if(resolved){
+                position.finnhubSymbol = resolved;
+                position.Symbol = resolved;
+            }
+        }catch(error){
+            console.warn('Finnhub search failed', position.Name, error);
+        }
+        await new Promise(resolve=>setTimeout(resolve, 150));
+    }
+}
+
+async function fetchFinnhubSymbol(position){
+    const cat = (position.type || '').toLowerCase();
+    const queries = Array.from(new Set([
+        position.Symbol,
+        position.displayName,
+        position.Name,
+        position.id
+    ].filter(Boolean)));
+    for(const query of queries){
+        const url = `${FINNHUB_REST}/search?q=${encodeURIComponent(query)}&token=${FINNHUB_KEY}`;
+        try{
+            const res = await fetch(url);
+            if(!res.ok) continue;
+            const data = await res.json();
+            const results = Array.isArray(data.result) ? data.result : [];
+            if(!results.length) continue;
+            if(cat === 'crypto'){
+                const cryptoMatches = results.filter(item=> String(item.type || '').toLowerCase() === 'crypto');
+                const preferred = cryptoMatches.find(item=> /USDT|USD/.test(item.symbol || '')) || cryptoMatches[0];
+                if(preferred && preferred.symbol) return preferred.symbol;
+            }else{
+                const stockMatches = results.filter(item=>{
+                    const type = String(item.type || '').toLowerCase();
+                    return type.includes('stock') || type.includes('etf');
+                });
+                const best = stockMatches[0] || results[0];
+                if(best && best.symbol) return best.symbol;
+            }
+        }catch(error){
+            console.warn('Finnhub search error', query, error);
+        }
+    }
     return null;
 }
 
@@ -560,7 +618,10 @@ async function loadPositions(){
         const records = await fetchAllAirtableOperations();
         operationsMeta = {count: records.length, fetchedAt: new Date()};
         positions = transformOperations(records);
+        await refineFinnhubSymbols();
         netContributionTotal = positions.reduce((sum,p)=>sum + Number(p.cashflow || 0),0);
+        symbolSet = new Set();
+        finnhubIndex = new Map();
         positions.forEach(p=>{
             if(p.finnhubSymbol){
                 symbolSet.add(p.finnhubSymbol);
@@ -575,6 +636,8 @@ async function loadPositions(){
         setStatus('Airtable unavailable — showing demo data');
         positions = useFallbackPositions();
         netContributionTotal = positions.reduce((sum,p)=>sum + Number(p.cashflow || 0),0);
+        symbolSet = new Set();
+        finnhubIndex = new Map();
         positions.forEach(p=>{
             if(p.finnhubSymbol){
                 symbolSet.add(p.finnhubSymbol);
@@ -1046,8 +1109,8 @@ function computeRealEstateAnalytics(){
             avgMonthlyRent,
             utilization,
             netOutstanding: outstanding,
-            payoffMonths
-            , projectedValue
+            payoffMonths,
+            projectedValue
         });
     });
 
@@ -1444,13 +1507,6 @@ function updateKpis(){
     const bestPnlEl = document.getElementById('best-performer-pnl');
     const bestChangeEl = document.getElementById('best-performer-change');
     const bestMetaEl = document.getElementById('best-performer-meta');
-    const bestRangeEl = document.getElementById('best-performer-range');
-    const rangeLabel = RANGE_LABELS[pnlRange] || pnlRange;
-
-    if(bestRangeEl){
-        bestRangeEl.textContent = rangeLabel;
-    }
-
     if(bestNameEl || bestPnlEl || bestChangeEl || bestMetaEl){
         const bestCandidate = positions.reduce((acc, position)=>{
             const raw = position.rangePnl ?? position.pnl ?? Number.NEGATIVE_INFINITY;
@@ -1525,11 +1581,6 @@ function renderDashboard(){
     renderAllCharts();
     const opsText = operationsMeta.count ? ` · ${operationsMeta.count} Airtable ops` : '';
     setStatus(`Live ${new Date().toLocaleTimeString()}${opsText}`);
-    const rangeLabelEl = document.getElementById('pnl-range-label');
-    if(rangeLabelEl){
-        rangeLabelEl.textContent = RANGE_LABELS[pnlRange] || pnlRange;
-    }
-    applyRangeButtons(pnlRange);
 }
 
 function scheduleUIUpdate(options = {}){
@@ -1595,18 +1646,6 @@ document.addEventListener('DOMContentLoaded', ()=>{
     if(loadingOverlay){
         setLoadingState('visible','Loading Airtable…');
     }
-    const pnlRangeControls = document.getElementById('pnl-range-controls');
-    if(pnlRangeControls){
-        pnlRangeControls.addEventListener('click', event=>{
-            const button = event.target.closest('button[data-range]');
-            if(!button) return;
-            const selected = button.dataset.range;
-            if(!selected) return;
-            setPnlRange(selected).catch(err=>console.error('Failed to update P&L range', err));
-        });
-        applyRangeButtons(pnlRange);
-    }
-
     const themeToggle = document.getElementById('theme-toggle');
     if(themeToggle){
         updateThemeToggleIcon(themeToggle, document.body.classList.contains('light-theme'));
