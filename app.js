@@ -917,9 +917,11 @@ function computeRealEstateAnalytics(){
                 earliestEvent = date;
             }
 
-            const isRent = type.includes('rent') || tags.some(tag=>RENT_TAGS.includes(tag));
+            const hasRentTag = tags.some(tag=>RENT_TAGS.includes(tag));
+            const hasExpenseTag = tags.some(tag=>EXPENSE_TAGS.includes(tag));
+            const isRent = (type === 'profitloss' || type.includes('rent')) && hasRentTag;
             const isPurchase = type === 'purchasesell' && amount > 0;
-            const isExpense = (!isPurchase && !isRent) && (type.includes('expense') || type.includes('maintenance') || type.includes('hoa') || type.includes('tax') || type.includes('mortgage') || tags.some(tag=>EXPENSE_TAGS.includes(tag)));
+            const isExpense = (!isPurchase && !isRent) && (hasExpenseTag || type.includes('expense') || type.includes('maintenance') || type.includes('hoa') || type.includes('tax') || type.includes('mortgage') || type.includes('interest'));
 
             if(isPurchase){
                 if(date && (!earliestPurchase || date < earliestPurchase)){
@@ -934,10 +936,10 @@ function computeRealEstateAnalytics(){
             }
 
             if(isRent){
-                let rentAmount = spent < 0 ? -spent : 0;
-                if(rentAmount === 0 && amount < 0){
+                let rentAmount = spent;
+                if(rentAmount === 0 && amount !== 0){
                     const referencePrice = price || position.displayPrice || position.lastKnownPrice || position.avgPrice || 0;
-                    rentAmount = Math.abs(amount) * referencePrice;
+                    rentAmount = Math.abs(amount) * referencePrice * (amount < 0 ? 1 : -1);
                 }
                 if(rentAmount > 0){
                     rentCollected += rentAmount;
@@ -1007,11 +1009,11 @@ function updateRealEstateRentals(){
         row.innerHTML = `
             <div class="realestate-main">
                 <div class="symbol">${stat.name}</div>
-                <div class="pos">Purchase ${money(stat.totalPurchase)} · Basis ${money(stat.totalCost)}</div>
+                <div class="pos">Purchase ${money(stat.totalPurchase)} · Expenses ${money(stat.totalExpenses)}</div>
             </div>
             <div class="realestate-metrics">
-                <div><span class="label">Final Price</span><span class="value">${money(stat.netOutstanding)}</span></div>
-                <div><span class="label">Expenses</span><span class="value">${money(stat.totalExpenses)}</span></div>
+                <div><span class="label">Final Asset Price</span><span class="value">${money(stat.totalCost)}</span></div>
+                <div><span class="label">Outstanding</span><span class="value">${money(stat.netOutstanding)}</span></div>
                 <div><span class="label">Rent Collected</span><span class="value">${money(stat.rentCollected)}</span></div>
                 <div><span class="label">Rent YTD</span><span class="value">${money(stat.rentYtd)}</span></div>
                 <div><span class="label">Rent / Mo</span><span class="value">${money(stat.avgMonthlyRent)}</span></div>
