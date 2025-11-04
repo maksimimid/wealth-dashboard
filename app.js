@@ -1022,6 +1022,13 @@ function computeRealEstateAnalytics(){
 
         const marketValue = Number(position.marketValue || 0);
         realEstateTotalValue += finalAssetPrice;
+        let projectedValue = finalAssetPrice;
+        if(earliestPurchase instanceof Date){
+            const yearsHeld = Math.max(0, (now - earliestPurchase) / (365 * 24 * 3600 * 1000));
+            projectedValue = finalAssetPrice * Math.pow(1.05, Math.max(0, yearsHeld));
+        }else{
+            projectedValue = finalAssetPrice * 1.05;
+        }
 
         results.push({
             name: position.displayName || position.Symbol || position.Name || `Asset ${idx+1}`,
@@ -1034,6 +1041,7 @@ function computeRealEstateAnalytics(){
             utilization,
             netOutstanding: outstanding,
             payoffMonths
+            , projectedValue
         });
     });
 
@@ -1136,6 +1144,7 @@ function updateRealEstateRentals(){
             <div class="realestate-metrics">
                 <div><span class="label">Final Asset Price</span><span class="value">${money(stat.finalAssetPrice)}</span></div>
                 <div><span class="label">Outstanding</span><span class="value">${money(stat.netOutstanding)}</span></div>
+                <div><span class="label">Projected Value</span><span class="value">${money(stat.projectedValue)}</span></div>
                 <div><span class="label">Rent Collected</span><span class="value">${money(stat.rentCollected)}</span></div>
                 <div><span class="label">Rent YTD</span><span class="value">${money(stat.rentYtd)}</span></div>
                 <div><span class="label">Rent / Mo</span><span class="value">${money(stat.avgMonthlyRent)}</span></div>
