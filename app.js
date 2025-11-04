@@ -411,16 +411,19 @@ function transformOperations(records){
     const ordered = sortByDateAscending(records);
     const map = new Map();
     ordered.forEach(rec=>{
-            const fields = rec.fields || {};
-            const assetRaw = fields.Asset || fields.Name;
-            if(!assetRaw) return;
-            const asset = String(assetRaw).trim();
-            const category = normalizeCategory(fields.Category, asset);
-            const opType = fields['Operation type'] || fields.Operation || 'Unknown';
-            const amount = Number(fields.Amount ?? 0) || 0;
-            const price = Number(fields['Asset price on invest date'] ?? fields.Price ?? 0) || 0;
-            const spent = Number(fields['Spent on operation'] ?? (amount * (price || 0))) || 0;
-            const date = fields.Date ? new Date(fields.Date) : null;
+        const fields = rec.fields || {};
+        const assetRaw = fields.Asset || fields.Name;
+        if(!assetRaw) return;
+        const asset = String(assetRaw).trim();
+        const category = normalizeCategory(fields.Category, asset);
+        const opType = fields['Operation type'] || fields.Operation || 'Unknown';
+        const amount = Number(fields.Amount ?? 0) || 0;
+        const price = Number(fields['Asset price on invest date'] ?? fields.Price ?? 0) || 0;
+        const spent = Number(fields['Spent on operation'] ?? (amount * (price || 0))) || 0;
+        const date = fields.Date ? new Date(fields.Date) : null;
+        const tagsNormalized = Array.isArray(fields.Tags) ? fields.Tags.map(t=>String(t).toLowerCase()) : [];
+        const opTypeLower = String(opType).toLowerCase();
+        const isRentOp = (opTypeLower === 'profitloss' || opTypeLower.includes('rent')) && tagsNormalized.some(tag=>RENT_TAGS.includes(tag));
 
         if(!map.has(asset)){
             const finnhubSymbol = mapFinnhubSymbol(asset, category);
@@ -452,7 +455,7 @@ function transformOperations(records){
             amount,
             price,
             spent,
-            tags: fields.Tags || []
+            tags: tagsNormalized
         });
 
         if(opType === 'PurchaseSell'){
@@ -480,7 +483,9 @@ function transformOperations(records){
             entry.cashflow += spent;
         }else if(opType === 'ProfitLoss'){
             entry.realized += spent;
-            entry.cashflow += spent;
+            if(!isRentOp){
+                entry.cashflow += spent;
+            }
         }else if(opType === 'DepositWithdrawal'){
             entry.qty += amount;
             entry.costBasis += spent;
