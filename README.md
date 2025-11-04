@@ -72,7 +72,7 @@ Assets where `Category` normalises to `Real Estate` get an additional card summa
 - Both the crypto and stock cards surface:
   - Market value, unrealized P&L, and portfolio share in the header metrics (with live flash indicators).
   - A bar chart of holdings ordered by market value.
-  - A detail list with quantity, average price, market value, P&L, and intra-portfolio share for each asset.
+  - A detail list split into **Open positions** (expanded with live price + P&L) and **Closed positions** (collapsed with realized totals); each row shows quantity, price, market value, P&L, and share where applicable.
 - Charts update automatically as Airtable operations arrive; toggles are not required for these cards.
 
 If you do not see values, confirm:

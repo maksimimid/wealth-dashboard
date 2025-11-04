@@ -1195,6 +1195,79 @@ function renderRealEstateRentChart(){
     }
 }
 
+function buildAnalyticsSection(categoryKey, title, positions, options){
+    const details = document.createElement('details');
+    details.className = 'analytics-section';
+    if(options.open) details.open = true;
+    const summary = document.createElement('summary');
+    summary.innerHTML = `
+        <div class="summary-left">
+            <span class="summary-title">${title}</span>
+            <span class="summary-count">${positions.length}</span>
+        </div>
+        <div class="summary-extra">${options.extra || ''}</div>
+    `;
+    details.appendChild(summary);
+    const content = document.createElement('div');
+    content.className = 'analytics-section-content';
+
+    if(!positions.length){
+        const empty = document.createElement('div');
+        empty.className = 'pos';
+        empty.textContent = options.emptyMessage || 'No positions.';
+        content.appendChild(empty);
+    }else{
+        positions.forEach(position=>{
+            const row = options.type === 'closed'
+                ? createClosedPositionRow(position)
+                : createOpenPositionRow(position, options.totalPortfolioValue);
+            content.appendChild(row);
+        });
+    }
+
+    details.appendChild(content);
+    return details;
+}
+
+function createOpenPositionRow(position, totalPortfolioValue){
+    const row = document.createElement('div');
+    row.className = 'analytics-row';
+    const price = Number(position.displayPrice ?? position.currentPrice ?? position.lastKnownPrice ?? position.avgPrice ?? 0);
+    const marketValue = Number(position.marketValue || 0);
+    const pnlValue = Number((position.rangePnl ?? position.pnl) || 0);
+    const share = totalPortfolioValue ? (marketValue / totalPortfolioValue) * 100 : null;
+    const shareText = Number.isFinite(share) ? `${share.toFixed(1)}%` : '—';
+    row.innerHTML = `
+        <div>
+            <div class="symbol">${position.displayName || position.Symbol || position.Name}</div>
+            <div class="pos">Qty ${formatQty(Number(position.qty || 0))} · Price ${money(price)}</div>
+        </div>
+        <div class="analytics-values">
+            <div class="value-strong">${money(marketValue)}</div>
+            <div class="${pnlValue >= 0 ? 'delta-positive' : 'delta-negative'}">${money(pnlValue)}</div>
+            <div class="muted">Share ${shareText}</div>
+        </div>
+    `;
+    return row;
+}
+
+function createClosedPositionRow(position){
+    const row = document.createElement('div');
+    row.className = 'analytics-row';
+    const realized = Number(position.realized || 0);
+    row.innerHTML = `
+        <div>
+            <div class="symbol">${position.displayName || position.Symbol || position.Name}</div>
+            <div class="pos">Realized P&amp;L ${money(realized)}</div>
+        </div>
+        <div class="analytics-values">
+            <div class="${realized >= 0 ? 'delta-positive' : 'delta-negative'}">${money(realized)}</div>
+            <div class="muted">Position closed</div>
+        </div>
+    `;
+    return row;
+}
+
 function setCategoryMetric(categoryKey, metricKey, value, elementId, formatter){
     const el = document.getElementById(elementId);
     if(!el) return;
@@ -1241,48 +1314,52 @@ function renderCategoryAnalytics(categoryKey, config){
     }
 
     const sorted = [...items].sort((a,b)=> (b.marketValue || 0) - (a.marketValue || 0));
-    const labels = sorted.map(p=> p.displayName || p.Symbol || p.Name);
-    const data = sorted.map(p=> Number(p.marketValue || 0));
-    const backgroundColors = labels.map((_, idx)=> `hsla(${(idx * 47) % 360},70%,60%,0.75)`);
-    const borderColors = labels.map((_, idx)=> `hsla(${(idx * 47) % 360},70%,50%,1)`);
-    const chartData = { labels, datasets: [{ data, backgroundColor: backgroundColors, borderColor: borderColors, borderWidth: 1, borderRadius: 8 }] };
-    createOrUpdateChart(chartId, 'bar', chartData, {
-        plugins: { legend: { display: false } },
-        interaction: { mode: 'index', intersect: false },
-        scales: {
-            x: { ticks: { autoSkip: false, maxRotation: 45, minRotation: 0 } },
-            y: {
-                beginAtZero: true,
-                ticks: { callback: value => money(value) }
+    const openPositions = sorted.filter(p=> Number(p.qty || 0) > 0 || Number(p.marketValue || 0) > 1e-6);
+    const closedPositions = sorted.filter(p=> !openPositions.includes(p));
+    const openMarketValue = openPositions.reduce((sum,p)=> sum + Number(p.marketValue || 0), 0);
+    const closedRealizedValue = closedPositions.reduce((sum,p)=> sum + Number(p.realized || 0), 0);
+
+    const chartSource = openPositions.length
+        ? openPositions.filter(p=> Number(p.marketValue || 0) > 0)
+        : sorted.filter(p=> Number(p.marketValue || 0) > 0);
+
+    if(chartSource.length){
+        const labels = chartSource.map(p=> p.displayName || p.Symbol || p.Name);
+        const data = chartSource.map(p=> Number(p.marketValue || 0));
+        const backgroundColors = labels.map((_, idx)=> `hsla(${(idx * 47) % 360},70%,60%,0.75)`);
+        const borderColors = labels.map((_, idx)=> `hsla(${(idx * 47) % 360},70%,50%,1)`);
+        const chartData = { labels, datasets: [{ data, backgroundColor: backgroundColors, borderColor: borderColors, borderWidth: 1, borderRadius: 8 }] };
+        createOrUpdateChart(chartId, 'bar', chartData, {
+            plugins: { legend: { display: false } },
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                x: { ticks: { autoSkip: false, maxRotation: 45, minRotation: 0 } },
+                y: {
+                    beginAtZero: true,
+                    ticks: { callback: value => money(value) }
+                }
             }
-        }
-    });
+        });
+    }else if(charts[chartId]){
+        charts[chartId].destroy();
+        delete charts[chartId];
+    }
 
     if(listEl){
         listEl.innerHTML = '';
-        sorted.forEach(p=>{
-            ensurePositionDefaults(p);
-            const row = document.createElement('div');
-            row.className = 'analytics-row';
-            const name = p.displayName || p.Symbol || p.Name;
-            const qtyText = `Qty ${formatQty(Number(p.qty || 0))} · Avg ${money(p.avgPrice || 0)}`;
-            const marketValue = Number(p.marketValue || 0);
-            const pnlValue = Number((p.rangePnl ?? p.pnl) || 0);
-            const share = totalPortfolioValue ? (marketValue / totalPortfolioValue) * 100 : null;
-            const shareText = share !== null ? `${share.toFixed(1)}%` : '—';
-            row.innerHTML = `
-                <div>
-                    <div class="symbol">${name}</div>
-                    <div class="pos">${qtyText}</div>
-                </div>
-                <div class="analytics-values">
-                    <div class="value-strong">${money(marketValue)}</div>
-                    <div class="${pnlValue >= 0 ? 'delta-positive' : 'delta-negative'}">${money(pnlValue)}</div>
-                    <div class="muted">Share ${shareText}</div>
-                </div>
-            `;
-            listEl.appendChild(row);
-        });
+        listEl.appendChild(buildAnalyticsSection(config.metricKey, 'Open positions', openPositions, {
+            open: true,
+            extra: `Total ${money(openMarketValue)}`,
+            emptyMessage: `No ${config.emptyLabel} open positions yet.`,
+            totalPortfolioValue
+        }));
+
+        listEl.appendChild(buildAnalyticsSection(config.metricKey, 'Closed positions', closedPositions, {
+            open: false,
+            extra: `Total realized ${money(closedRealizedValue)}`,
+            emptyMessage: `No ${config.emptyLabel} closed positions yet.`,
+            type: 'closed'
+        }));
     }
 }
 
