@@ -929,8 +929,7 @@ function computeRealEstateAnalytics(){
     const rentYearTotals = new Map();
     const rentYearTotalsByAsset = new Map();
     const rentYearSet = new Set();
-    const totalPortfolioValue = positions.reduce((sum,p)=> sum + Number(p.marketValue || 0), 0);
-    let realEstateMarketValue = 0;
+    let realEstateTotalValue = 0;
 
     positions.filter(p=> (p.type || '').toLowerCase() === 'real estate').forEach((position, idx)=>{
         const ops = Array.isArray(position.operations) ? position.operations : [];
@@ -1025,7 +1024,7 @@ function computeRealEstateAnalytics(){
         }
 
         const marketValue = Number(position.marketValue || 0);
-        realEstateMarketValue += marketValue;
+        realEstateTotalValue += finalAssetPrice;
 
         results.push({
             name: position.displayName || position.Symbol || position.Name || `Asset ${idx+1}`,
@@ -1097,8 +1096,12 @@ function computeRealEstateAnalytics(){
     realEstateRentSeriesDirty = false;
 
     const rows = results.sort((a,b)=> b.netOutstanding - a.netOutstanding || b.finalAssetPrice - a.finalAssetPrice);
-    const allocation = totalPortfolioValue ? (realEstateMarketValue / totalPortfolioValue) * 100 : null;
-    return { rows, marketValue: realEstateMarketValue, allocation };
+    const otherAssetsValue = positions
+        .filter(p=> (p.type || '').toLowerCase() !== 'real estate')
+        .reduce((sum,p)=> sum + Number(p.marketValue || 0), 0);
+    const denominator = realEstateTotalValue + otherAssetsValue;
+    const allocation = denominator ? (realEstateTotalValue / denominator) * 100 : null;
+    return { rows, totalValue: realEstateTotalValue, allocation };
 }
 
 function updateRealEstateRentals(){
@@ -1111,7 +1114,7 @@ function updateRealEstateRentals(){
     const headerValueEl = document.getElementById('realestate-value');
     const headerAllocationEl = document.getElementById('realestate-allocation');
     if(headerValueEl){
-        const totalValue = analytics && typeof analytics.marketValue === 'number' ? analytics.marketValue : 0;
+        const totalValue = analytics && typeof analytics.totalValue === 'number' ? analytics.totalValue : 0;
         headerValueEl.textContent = money(totalValue);
     }
     if(headerAllocationEl){
