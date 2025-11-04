@@ -385,6 +385,19 @@ h1 {
     min-height: 420px;
 }
 
+.realestate-chart {
+    min-height: 220px;
+    margin-top: 14px;
+    border-radius: 18px;
+    padding: 18px;
+    background: rgba(15, 23, 42, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.realestate-chart canvas {
+    min-height: 190px;
+}
+
 .realestate-list {
     margin-top: 16px;
     display: flex;
@@ -642,6 +655,7 @@ body.light-theme .realestate-main .pos { color: #64748b; }
 body.light-theme .realestate-metrics .label { color: #64748b; }
 body.light-theme .realestate-progress { background: rgba(148, 163, 184, 0.35); }
 body.light-theme .realestate-progress-bar { background: linear-gradient(120deg, rgba(79, 70, 229, 0.8), rgba(45, 212, 191, 0.85)); box-shadow: 0 0 10px rgba(45, 212, 191, 0.35); }
+body.light-theme .realestate-chart { background: rgba(255, 255, 255, 0.9); border-color: rgba(148, 163, 184, 0.35); }
 body.light-theme .best-performer-range { background: rgba(148, 163, 184, 0.25); color: #475569; }
 body.light-theme .best-performer-change { color: #475569; }
 body.light-theme .best-performer-meta { color: #64748b; }

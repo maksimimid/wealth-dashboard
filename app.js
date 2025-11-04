@@ -42,6 +42,8 @@ const previousBestPerformer = { id: null, pnl: null, change: null };
 let assetYearSeries = { labels: [], datasets: [] };
 let assetYearSeriesDirty = true;
 const assetColorCache = new Map();
+let realEstateRentSeries = { labels: [], datasets: [] };
+let realEstateRentSeriesDirty = true;
 let netContributionTotal = 0;
 let isRangeUpdateInFlight = false;
 const FLASH_DURATION = 1500;
@@ -544,6 +546,7 @@ async function loadPositions(){
     }
     rangeDirty = true;
     assetYearSeriesDirty = true;
+    realEstateRentSeriesDirty = true;
 }
 
 // ----------------- FINNHUB REST (snapshot) -----------------
@@ -891,6 +894,7 @@ function computeRealEstateAnalytics(){
     const cutoffStart = new Date(now.getFullYear(), now.getMonth(), 1);
     cutoffStart.setMonth(cutoffStart.getMonth() - 11);
     const results = [];
+    const rentYearTotals = new Map();
 
     positions.filter(p=> (p.type || '').toLowerCase() === 'real estate').forEach((position, idx)=>{
         const ops = Array.isArray(position.operations) ? position.operations : [];
@@ -944,6 +948,8 @@ function computeRealEstateAnalytics(){
                     if(date){
                         const key = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;
                         rentMonths.add(key);
+                        const yr = date.getFullYear();
+                        rentYearTotals.set(yr, (rentYearTotals.get(yr) || 0) + rentAmount);
                         if(date >= cutoffStart){
                             rentLast12 += rentAmount;
                             rentMonthsLast12.add(key);
@@ -990,6 +996,26 @@ function computeRealEstateAnalytics(){
         });
     });
 
+    const years = Array.from(rentYearTotals.keys()).sort((a,b)=>a-b);
+    if(years.length){
+        const data = years.map(year=> Number((rentYearTotals.get(year) || 0).toFixed(2)));
+        realEstateRentSeries = {
+            labels: years.map(String),
+            datasets: [{
+                label: 'Rent Collected',
+                data,
+                borderColor: 'rgba(56, 189, 248, 0.9)',
+                backgroundColor: 'rgba(56, 189, 248, 0.35)',
+                borderWidth: 2,
+                tension: 0.35,
+                fill: true
+            }]
+        };
+    }else{
+        realEstateRentSeries = { labels: [], datasets: [] };
+    }
+    realEstateRentSeriesDirty = false;
+
     return results.sort((a,b)=> b.netOutstanding - a.netOutstanding || b.finalAssetPrice - a.finalAssetPrice);
 }
 
@@ -997,6 +1023,7 @@ function updateRealEstateRentals(){
     const container = document.getElementById('realestate-stats');
     if(!container) return;
     const stats = computeRealEstateAnalytics();
+    renderRealEstateRentChart();
     if(!stats.length){
         container.innerHTML = '<div class="pos">No rental activity recorded yet.</div>';
         return;
@@ -1030,6 +1057,33 @@ function updateRealEstateRentals(){
         `;
         container.appendChild(row);
     });
+}
+
+function renderRealEstateRentChart(){
+    const chartId = 'realestateRentChart';
+    if(realEstateRentSeriesDirty){
+        computeRealEstateAnalytics();
+    }
+    const hasData = realEstateRentSeries.labels.length && realEstateRentSeries.datasets.some(ds=>Array.isArray(ds.data) && ds.data.some(v=>Math.abs(Number(v)) > 0));
+    if(hasData){
+        createOrUpdateChart(chartId, 'line', realEstateRentSeries, {
+            plugins: { legend: { display: false } },
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                x: { ticks: { autoSkip: true } },
+                y: {
+                    ticks: {
+                        callback: value => money(value)
+                    }
+                }
+            },
+            elements: { point: { radius: 3, hoverRadius: 5 } },
+            layout: { padding: { top: 6, bottom: 6, left: 6, right: 6 } }
+        });
+    }else if(charts[chartId]){
+        charts[chartId].destroy();
+        delete charts[chartId];
+    }
 }
 
 function updateKpis(){

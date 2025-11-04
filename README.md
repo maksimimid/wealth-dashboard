@@ -64,6 +64,7 @@ Assets where `Category` normalises to `Real Estate` get an additional card summa
 - **Rent / Mo** = average of the last 12 months with rent activity (or fewer if insufficient history).
 - **Utilization** = rent collected ? final asset price (clamped to 100%).
 - **Payoff ETA** = months required to clear `Outstanding` using the trailing average monthly rent (shows ?Paid off? when ? 0).
+- **Rent Collected by Year**: embedded chart at the top of the card totals rent inflows per calendar year across all real estate assets.
 
 If you do not see values, confirm:
 
