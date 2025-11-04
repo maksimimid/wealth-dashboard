@@ -309,6 +309,21 @@ h1 {
     gap: 12px;
 }
 
+#pnl-card {
+    min-height: 120px;
+}
+
+.sparkline-container {
+    width: 180px;
+    height: 70px;
+}
+
+.sparkline-container canvas {
+    width: 100% !important;
+    height: 100% !important;
+    display: block;
+}
+
 .grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
@@ -339,6 +354,10 @@ h1 {
 
 .realestate-card {
     min-height: 420px;
+}
+
+#realestate-history {
+    margin-top: 18px;
 }
 
 .realestate-controls {

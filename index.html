@@ -34,7 +34,7 @@
     </header>
 
     <div class="top-summary">
-            <div class="kpi" id="pnl-card">
+        <div class="kpi" id="pnl-card">
             <div style="flex:1">
                 <div class="pnl-label-row">
                     <div class="label">Total P&amp;L</div>
@@ -42,7 +42,7 @@
                 <div class="big" id="total-pnl">$0.00</div>
                 <small>Updated: <span id="last-updated">&mdash;</span></small>
             </div>
-            <div style="width:220px;height:95px">
+            <div class="sparkline-container">
                 <canvas id="sparkline" aria-label="pnl sparkline"></canvas>
             </div>
         </div>
@@ -88,14 +88,22 @@
                 </div>
                 <div class="metric">
                     <span class="label">Allocation</span>
-                    <span class="value" id="realestate-allocation">?</span>
+                    <span class="value" id="realestate-allocation">&mdash;</span>
                 </div>
             </div>
         </div>
-        <div class="realestate-controls" id="realestate-rent-filters"></div>
-        <div class="realestate-chart">
-            <canvas id="realestateRentChart"></canvas>
-        </div>
+        <details class="analytics-section" id="realestate-history">
+            <summary>
+                <div class="summary-left"><span class="summary-title">Rent history</span></div>
+                <div class="summary-extra">Yearly totals</div>
+            </summary>
+            <div class="analytics-section-content">
+                <div class="realestate-controls" id="realestate-rent-filters"></div>
+                <div class="realestate-chart">
+                    <canvas id="realestateRentChart"></canvas>
+                </div>
+            </div>
+        </details>
         <div class="realestate-list" id="realestate-stats">
             <div class="pos">Loading rental analytics&hellip;</div>
         </div>

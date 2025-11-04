@@ -1516,7 +1516,15 @@ function updateKpis(){
     const bestChangeEl = document.getElementById('best-performer-change');
     const bestMetaEl = document.getElementById('best-performer-meta');
     if(bestNameEl || bestPnlEl || bestChangeEl || bestMetaEl){
-        const bestCandidate = positions.reduce((acc, position)=>{
+        const eligible = positions.filter(position=>{
+            const type = (position.type || '').toLowerCase();
+            if(type === 'real estate') return false;
+            const qty = Number(position.qty || 0);
+            const mv = Number(position.marketValue || 0);
+            if(Math.abs(qty) <= 1e-6 && Math.abs(mv) <= 1e-6) return false;
+            return true;
+        });
+        const bestCandidate = eligible.reduce((acc, position)=>{
             const raw = position.rangePnl ?? position.pnl ?? Number.NEGATIVE_INFINITY;
             const value = Number(raw);
             const usable = Number.isFinite(value) ? value : Number.NEGATIVE_INFINITY;
