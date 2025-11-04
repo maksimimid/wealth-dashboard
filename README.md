@@ -28,7 +28,7 @@ The dashboard assumes a single table of **operations** that records every cashfl
 | `Category` | ? | Normalised to detect type (`Stock`, `Crypto`, `Real Estate`, `Cash`, etc.). Real-estate analytics rely on `Real Estate`. |
 | `Operation type` | ? | Drives the core accounting flow (see table below). |
 | `Amount` | ? (for trades) | Quantity of units positive for buys/deposits, negative for sells/withdrawals. |
-| `Spent on operation` | ? | Actual cash impact. Positive values mean cash paid out; negative values mean cash received (rent, dividends, sales proceeds). |
+| `Spent on operation` | ? | Actual cash impact. Recommended convention: negative values for cash paid out (purchases, expenses), positive values for cash received (rent, dividends, sale proceeds). The dashboard normalises signs when building analytics, but consistent usage makes reviews easier. |
 | `Asset price on invest date` / `Price` | Optional | Used to derive cost basis when `Spent on operation` is missing. |
 | `Date` | ? | ISO date string; operations are processed chronologically. |
 | `Tags` | Optional | Array of keywords that refine behaviour (see sections below). |
@@ -40,7 +40,7 @@ Keep the following semantics so calculations remain correct:
 
 | Operation type | Expected sign conventions | Effect |
 |----------------|---------------------------|--------|
-| `PurchaseSell` | `Amount` > 0 for buys, < 0 for sells. `Spent on operation` should reflect the cash paid (positive) or received (negative). | Updates quantity, cost basis, realized P&L. |
+| `PurchaseSell` | Use `Spent on operation < 0` for buys/improvements (cash out) and `Spent on operation > 0` for sales (cash in). `Amount` can be ? depending on your Airtable workflow; the dashboard derives cost basis from the cashflow. | Updates quantity, cost basis, realized P&L. |
 | `ProfitLoss` | `Spent on operation` positive for expenses, negative for income. | Adds to realized P&L and cashflow. Rent is classified here (see below). |
 | `DepositWithdrawal` | Use for cash movements unrelated to holdings; positive `Amount` / `Spent` increases cash, negative reduces. | Adjusts cash reserves. |
 | Other values | Treated as neutral cashflow unless the tags override classification. | Keeps totals balanced without touching quantities. |

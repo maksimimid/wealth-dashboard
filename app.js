@@ -921,14 +921,14 @@ function computeRealEstateAnalytics(){
             const hasRentTag = tags.some(tag=>RENT_TAGS.includes(tag));
             const hasExpenseTag = tags.some(tag=>EXPENSE_TAGS.includes(tag));
             const isRent = (type === 'profitloss' || type.includes('rent')) && hasRentTag;
-            const isPurchase = type === 'purchasesell' && amount > 0;
-            const isExpense = (!isPurchase && !isRent) && (hasExpenseTag || type.includes('expense') || type.includes('maintenance') || type.includes('hoa') || type.includes('tax') || type.includes('mortgage') || type.includes('interest'));
+            const isPurchase = type === 'purchasesell' && spent < 0;
+            const isExpense = (!isPurchase && !isRent) && (hasExpenseTag || type.includes('expense') || type.includes('maintenance') || type.includes('hoa') || type.includes('tax') || type.includes('mortgage') || type.includes('interest') || spent < 0);
 
             if(isPurchase){
                 if(date && (!earliestPurchase || date < earliestPurchase)){
                     earliestPurchase = date;
                 }
-                const cashOut = spent !== 0 ? Math.abs(spent) : (amount > 0 && price > 0 ? amount * price : 0);
+                const cashOut = spent !== 0 ? Math.abs(spent) : (amount !== 0 && price > 0 ? Math.abs(amount) * price : 0);
                 totalPurchase += cashOut;
                 return;
             }
@@ -956,7 +956,7 @@ function computeRealEstateAnalytics(){
                 return;
             }
 
-            if(isExpense || (spent > 0 && !isRent && !isPurchase)){
+            if(isExpense || (spent > 0 && !isRent && !isPurchase && hasExpenseTag)){
                 const expenseAmount = spent !== 0 ? Math.abs(spent) : (amount !== 0 && price > 0 ? Math.abs(amount) * price : 0);
                 totalExpenses += expenseAmount;
             }
