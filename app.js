@@ -341,11 +341,13 @@ function mapFinnhubSymbol(asset, category){
     if(!asset) return null;
     const upper = asset.toUpperCase();
     const cat = (category||'').toLowerCase();
-    if(cat==='crypto'){
-        if(upper==='BTC') return 'BINANCE:BTCUSDT';
-        if(upper==='ETH') return 'BINANCE:ETHUSDT';
-    }
     if(cat==='cash') return null;
+    if(cat==='crypto'){
+        if(/[A-Z0-9]{2,10}/.test(upper)){
+            return `${upper}:USDT`;
+        }
+        return null;
+    }
     if(/[A-Z0-9]{1,5}/.test(upper) && !upper.includes(' ')) return upper;
     return null;
 }
