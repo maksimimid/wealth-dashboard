@@ -681,6 +681,10 @@ function computeAssetYearSeries(){
         if(!ops.length) return;
         const name = position.displayName || position.Symbol || position.Name;
         if(!name) return;
+        const qty = Number(position.qty || 0);
+        const marketValue = Number(position.marketValue || 0);
+        const isClosed = Math.abs(qty) <= 1e-6 && Math.abs(marketValue) <= 1e-6;
+        if(isClosed) return;
         ops.forEach(op=>{
             if(!(op.date instanceof Date)) return;
             const year = op.date.getFullYear();
