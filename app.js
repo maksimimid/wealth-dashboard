@@ -917,6 +917,7 @@ function computeRealEstateAnalytics(){
     const rentYearTotalsByAsset = new Map();
     const rentYearSet = new Set();
     const totalPortfolioValue = positions.reduce((sum,p)=> sum + Number(p.marketValue || 0), 0);
+    let realEstateMarketValue = 0;
 
     positions.filter(p=> (p.type || '').toLowerCase() === 'real estate').forEach((position, idx)=>{
         const ops = Array.isArray(position.operations) ? position.operations : [];
@@ -1011,7 +1012,7 @@ function computeRealEstateAnalytics(){
         }
 
         const marketValue = Number(position.marketValue || 0);
-        const allocation = totalPortfolioValue ? (marketValue / totalPortfolioValue) * 100 : null;
+        realEstateMarketValue += marketValue;
 
         results.push({
             name: position.displayName || position.Symbol || position.Name || `Asset ${idx+1}`,
@@ -1023,9 +1024,7 @@ function computeRealEstateAnalytics(){
             avgMonthlyRent,
             utilization,
             netOutstanding: outstanding,
-            payoffMonths,
-            marketValue,
-            allocation
+            payoffMonths
         });
     });
 
@@ -1084,15 +1083,28 @@ function computeRealEstateAnalytics(){
     }
     realEstateRentSeriesDirty = false;
 
-    return results.sort((a,b)=> b.netOutstanding - a.netOutstanding || b.finalAssetPrice - a.finalAssetPrice);
+    const rows = results.sort((a,b)=> b.netOutstanding - a.netOutstanding || b.finalAssetPrice - a.finalAssetPrice);
+    const allocation = totalPortfolioValue ? (realEstateMarketValue / totalPortfolioValue) * 100 : null;
+    return { rows, marketValue: realEstateMarketValue, allocation };
 }
 
 function updateRealEstateRentals(){
     const container = document.getElementById('realestate-stats');
     if(!container) return;
-    const stats = computeRealEstateAnalytics();
+    const analytics = computeRealEstateAnalytics();
+    const stats = (analytics && Array.isArray(analytics.rows)) ? analytics.rows : [];
     renderRealEstateRentControls();
     renderRealEstateRentChart();
+    const headerValueEl = document.getElementById('realestate-value');
+    const headerAllocationEl = document.getElementById('realestate-allocation');
+    if(headerValueEl){
+        const totalValue = analytics && typeof analytics.marketValue === 'number' ? analytics.marketValue : 0;
+        headerValueEl.textContent = money(totalValue);
+    }
+    if(headerAllocationEl){
+        const allocationValue = analytics && typeof analytics.allocation === 'number' ? analytics.allocation : null;
+        headerAllocationEl.textContent = Number.isFinite(allocationValue) ? `${allocationValue.toFixed(1)}%` : '—';
+    }
     if(!stats.length){
         container.innerHTML = '<div class="pos">No rental activity recorded yet.</div>';
         return;
