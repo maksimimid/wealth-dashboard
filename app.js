@@ -1007,23 +1007,13 @@ function computeRealEstateAnalytics(){
     const years = Array.from(rentYearSet).sort((a,b)=>a-b);
     if(years.length){
         const datasets = [];
-        const totalData = years.map(year=> Number((rentYearTotals.get(year) || 0).toFixed(2)));
-        datasets.push({
-            label: 'All Assets',
-            data: totalData,
-            borderColor: 'rgba(37, 99, 235, 0.95)',
-            backgroundColor: 'rgba(59, 130, 246, 0.28)',
-            borderWidth: 2,
-            tension: 0.35,
-            fill: true
-        });
         let hueIndex = 0;
         rentYearTotalsByAsset.forEach((yearMap, assetName)=>{
             if(!assetColorCache.has(assetName)){
                 const hue = (hueIndex * 47) % 360;
                 assetColorCache.set(assetName, {
-                    border: `hsl(${hue},72%,55%)`,
-                    background: `hsla(${hue},72%,55%,0.3)`
+                    border: `hsl(${hue},70%,52%)`,
+                    background: `hsla(${hue},70%,52%,0.6)`
                 });
                 hueIndex += 1;
             }
@@ -1032,12 +1022,25 @@ function computeRealEstateAnalytics(){
             datasets.push({
                 label: assetName,
                 data,
-                borderColor: colors.border,
                 backgroundColor: colors.background,
-                borderWidth: 2,
-                tension: 0.35,
-                fill: true
+                borderColor: colors.border,
+                borderWidth: 1,
+                borderRadius: 4,
+                stack: 'rent',
+                type: 'bar'
             });
+        });
+        const totalData = years.map(year=> Number((rentYearTotals.get(year) || 0).toFixed(2)));
+        datasets.push({
+            label: 'All Assets',
+            data: totalData,
+            borderColor: 'rgba(37, 99, 235, 0.9)',
+            borderWidth: 2,
+            tension: 0.35,
+            fill: false,
+            pointRadius: 3,
+            pointHoverRadius: 5,
+            type: 'line'
         });
         const labelSet = new Set(datasets.map(ds=>ds.label));
         Array.from(realEstateRentFilters.keys()).forEach(label=>{
