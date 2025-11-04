@@ -28,7 +28,7 @@ The dashboard assumes a single table of **operations** that records every cashfl
 | `Category` | ? | Normalised to detect type (`Stock`, `Crypto`, `Real Estate`, `Cash`, etc.). Real-estate analytics rely on `Real Estate`. |
 | `Operation type` | ? | Drives the core accounting flow (see table below). |
 | `Amount` | ? (for trades) | Quantity of units positive for buys/deposits, negative for sells/withdrawals. |
-| `Spent on operation` | ? | Actual cash impact (positive = cash out, negative = cash in). Critical for P&L and rent detection. |
+| `Spent on operation` | ? | Actual cash impact. Positive values mean cash paid out; negative values mean cash received (rent, dividends, sales proceeds). |
 | `Asset price on invest date` / `Price` | Optional | Used to derive cost basis when `Spent on operation` is missing. |
 | `Date` | ? | ISO date string; operations are processed chronologically. |
 | `Tags` | Optional | Array of keywords that refine behaviour (see sections below). |
@@ -40,7 +40,7 @@ Keep the following semantics so calculations remain correct:
 
 | Operation type | Expected sign conventions | Effect |
 |----------------|---------------------------|--------|
-| `PurchaseSell` | `Amount` > 0 for buys, < 0 for sells. `Spent on operation` should match cash paid (+) or received (?). | Updates quantity, cost basis, realized P&L. |
+| `PurchaseSell` | `Amount` > 0 for buys, < 0 for sells. `Spent on operation` should reflect the cash paid (positive) or received (negative). | Updates quantity, cost basis, realized P&L. |
 | `ProfitLoss` | `Spent on operation` positive for expenses, negative for income. | Adds to realized P&L and cashflow. Rent is classified here (see below). |
 | `DepositWithdrawal` | Use for cash movements unrelated to holdings; positive `Amount` / `Spent` increases cash, negative reduces. | Adjusts cash reserves. |
 | Other values | Treated as neutral cashflow unless the tags override classification. | Keeps totals balanced without touching quantities. |
@@ -50,7 +50,7 @@ Keep the following semantics so calculations remain correct:
 Tags are inspected in lowercase. Keep the vocabulary consistent:
 
 - **Rent income**: `Operation type = ProfitLoss` **and** include one of the tags: `Rent`, `Rental`, `Lease`, `Tenant`, `Tenancy`, `Airbnb`, `Booking`.
-  - Cash inflow (negative `Spent on operation`) or explicit positive amount will be converted to rent collected.
+  - Cash inflow can be recorded as negative `Spent on operation` (preferred) or by entering a positive `Amount` with a reference price; the dashboard normalises either form into rent collected.
 - **Real-estate expenses**: apply any of `Expense`, `Maintenance`, `Repair`, `Repairs`, `Tax`, `Taxes`, `Property Tax`, `Insurance`, `Mortgage`, `MortgagePayment`, `HOA`, `HOA Fees`, `Utility`, `Utilities`, `Water`, `Electric`, `Electricity`, `Gas`, `Cleaning`, `Management`, `Interest`, `Service`, `Fee`, `Fees`.
 - You can add new keywords by extending the arrays `RENT_TAGS` or `EXPENSE_TAGS` in `app.js`.
 
@@ -58,12 +58,12 @@ Tags are inspected in lowercase. Keep the vocabulary consistent:
 
 Assets where `Category` normalises to `Real Estate` get an additional card summarising rental performance:
 
-- **Final Asset Price** = total purchases + accrued expenses.
-- **Outstanding** = Final Asset Price ? total rent collected.
+- **Final Asset Price** = absolute cash paid for purchases + absolute cash paid on expenses.
+- **Outstanding** = `max(0, Final Asset Price - Rent Collected)`.
 - **Rent YTD** = aggregate rent where `Date` falls in the current calendar year.
 - **Rent / Mo** = average of the last 12 months with rent activity (or fewer if insufficient history).
-- **Utilization** = months with rent recorded ? total months since first purchase.
-- **Payoff ETA** = months required to clear `Outstanding` using the trailing average monthly rent (shows ?Paid off? when <=?0).
+- **Utilization** = rent collected ? final asset price (clamped to 100%).
+- **Payoff ETA** = months required to clear `Outstanding` using the trailing average monthly rent (shows ?Paid off? when ? 0).
 
 If you do not see values, confirm:
 
@@ -104,11 +104,11 @@ Charts update in place without recreation to avoid UI jitter; extending metrics 
 |---------|--------------|-----|
 | Net worth or P&L looks off | Missing/incorrect `Spent on operation` values | Populate cashflow column accurately. |
 | Rental card empty | Tags/operation mismatch or category not `Real Estate` | Align with conventions in this README or extend tag arrays. |
-| Rent / Mo shows ??? | Less than 1 month of rent data | Add historical rent entries with correct tags. |
+| Rent / Mo shows ? | Less than 1 month of rent data | Add historical rent entries with correct tags. |
 | Charts flicker | Serving page from local file system may block Finnhub WebSocket | Host over HTTP/HTTPS. |
 
 ---
 
 ## Change Log
 
-- `2025-11-02`: Documented rental analytics, tag conventions, and required Airtable fields.
+ - `2025-11-02`: Documented rental analytics, tag conventions, required Airtable fields, and clarified final asset price/utilization definitions.

@@ -906,7 +906,8 @@ function computeRealEstateAnalytics(){
         const rentMonthsLast12 = new Set();
 
         ops.forEach(op=>{
-            const spent = Number(op.spent || 0) || 0;
+            const spentRaw = Number(op.spent || 0);
+            const spent = Number.isFinite(spentRaw) ? spentRaw : 0;
             const amount = Number(op.amount || 0) || 0;
             const price = Number(op.price || 0) || 0;
             const type = (op.type || '').toLowerCase();
@@ -927,19 +928,16 @@ function computeRealEstateAnalytics(){
                 if(date && (!earliestPurchase || date < earliestPurchase)){
                     earliestPurchase = date;
                 }
-                if(spent > 0){
-                    totalPurchase += spent;
-                }else if(amount > 0 && price > 0){
-                    totalPurchase += amount * price;
-                }
+                const cashOut = spent !== 0 ? Math.abs(spent) : (amount > 0 && price > 0 ? amount * price : 0);
+                totalPurchase += cashOut;
                 return;
             }
 
             if(isRent){
-                let rentAmount = spent;
+                let rentAmount = spent < 0 ? -spent : spent;
                 if(rentAmount === 0 && amount !== 0){
                     const referencePrice = price || position.displayPrice || position.lastKnownPrice || position.avgPrice || 0;
-                    rentAmount = Math.abs(amount) * referencePrice * (amount < 0 ? 1 : -1);
+                    rentAmount = Math.abs(amount) * referencePrice;
                 }
                 if(rentAmount > 0){
                     rentCollected += rentAmount;
@@ -959,15 +957,16 @@ function computeRealEstateAnalytics(){
             }
 
             if(isExpense || (spent > 0 && !isRent && !isPurchase)){
-                totalExpenses += spent > 0 ? spent : 0;
+                const expenseAmount = spent !== 0 ? Math.abs(spent) : (amount !== 0 && price > 0 ? Math.abs(amount) * price : 0);
+                totalExpenses += expenseAmount;
             }
         });
 
-        const totalCost = totalPurchase + totalExpenses;
-        const outstanding = Math.max(0, totalCost - rentCollected);
+        const finalAssetPrice = totalPurchase + totalExpenses;
+        const outstanding = Math.max(0, finalAssetPrice - rentCollected);
         const baseDate = earliestPurchase || earliestEvent;
         const totalMonths = baseDate ? monthsBetween(baseDate, now) : 0;
-        const utilization = totalMonths ? (rentMonths.size / totalMonths) * 100 : 0;
+        const utilization = finalAssetPrice ? (Math.min(rentCollected, finalAssetPrice) / finalAssetPrice) * 100 : 0;
         const monthsForAvg = rentMonthsLast12.size || (rentMonths.size ? Math.min(12, rentMonths.size) : 0);
         const avgMonthlyRent = monthsForAvg ? rentLast12 / monthsForAvg : null;
         let payoffMonths = null;
@@ -981,7 +980,7 @@ function computeRealEstateAnalytics(){
             name: position.displayName || position.Symbol || position.Name || `Asset ${idx+1}`,
             totalPurchase,
             totalExpenses,
-            totalCost,
+            finalAssetPrice,
             rentCollected,
             rentYtd,
             avgMonthlyRent,
@@ -991,7 +990,7 @@ function computeRealEstateAnalytics(){
         });
     });
 
-    return results.sort((a,b)=> b.netOutstanding - a.netOutstanding || b.totalCost - a.totalCost);
+    return results.sort((a,b)=> b.netOutstanding - a.netOutstanding || b.finalAssetPrice - a.finalAssetPrice);
 }
 
 function updateRealEstateRentals(){
@@ -1012,7 +1011,7 @@ function updateRealEstateRentals(){
                 <div class="pos">Purchase ${money(stat.totalPurchase)} · Expenses ${money(stat.totalExpenses)}</div>
             </div>
             <div class="realestate-metrics">
-                <div><span class="label">Final Asset Price</span><span class="value">${money(stat.totalCost)}</span></div>
+                <div><span class="label">Final Asset Price</span><span class="value">${money(stat.finalAssetPrice)}</span></div>
                 <div><span class="label">Outstanding</span><span class="value">${money(stat.netOutstanding)}</span></div>
                 <div><span class="label">Rent Collected</span><span class="value">${money(stat.rentCollected)}</span></div>
                 <div><span class="label">Rent YTD</span><span class="value">${money(stat.rentYtd)}</span></div>
