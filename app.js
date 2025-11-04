@@ -352,14 +352,16 @@ async function refineFinnhubSymbols(){
     if(!FINNHUB_KEY || typeof fetch !== 'function') return;
     const unresolved = positions.filter(position=>{
         const cat = (position.type || '').toLowerCase();
-        if(cat === 'cash') return false;
+        if(cat === 'cash' || position.finnhubOverride) return false;
         const symbol = position.finnhubSymbol || '';
         if(cat === 'crypto'){
             if(!symbol) return true;
             const heuristic = /^BINANCE:[A-Z0-9]+USDT$/;
             return heuristic.test(symbol);
         }
-        return !symbol;
+        if(!symbol) return true;
+        if(symbol.includes(':')) return false;
+        return true;
     });
     for(const position of unresolved){
         try{
@@ -393,14 +395,18 @@ async function fetchFinnhubSymbol(position){
             if(!results.length) continue;
             if(cat === 'crypto'){
                 const cryptoMatches = results.filter(item=> String(item.type || '').toLowerCase() === 'crypto');
-                const preferred = cryptoMatches.find(item=> /USDT|USD/.test(item.symbol || '')) || cryptoMatches[0];
+                const base = (position.Symbol || position.displayName || '').replace(/[^A-Z0-9]/g,'').toUpperCase();
+                const preferred = cryptoMatches.find(item=> (item.symbol || '').toUpperCase().includes(base)) || cryptoMatches.find(item=> /USDT|USD/.test(item.symbol || '')) || cryptoMatches[0];
                 if(preferred && preferred.symbol) return preferred.symbol;
             }else{
                 const stockMatches = results.filter(item=>{
                     const type = String(item.type || '').toLowerCase();
                     return type.includes('stock') || type.includes('etf');
                 });
-                const best = stockMatches[0] || results[0];
+                const base = (position.Symbol || position.displayName || '').replace(/[^A-Z0-9]/g,'').toUpperCase();
+                const exact = stockMatches.find(item=> (item.symbol || '').toUpperCase() === base);
+                const exchangeMatch = stockMatches.find(item=> (item.symbol || '').toUpperCase().endsWith(`:${base}`));
+                const best = exact || exchangeMatch || stockMatches[0] || results[0];
                 if(best && best.symbol) return best.symbol;
             }
         }catch(error){
@@ -496,6 +502,7 @@ function transformOperations(records){
                 type: category,
                 Symbol: finnhubSymbol || asset,
                 finnhubSymbol,
+                finnhubOverride: Boolean(finnhubOverride),
                 qty: 0,
                 costBasis: 0,
                 invested: 0,
@@ -605,6 +612,7 @@ function useFallbackPositions(){
         recomputePositionMetrics(p);
         ensurePositionDefaults(p);
         p.referencePrices = {};
+        p.finnhubOverride = false;
         return p;
     });
 }
