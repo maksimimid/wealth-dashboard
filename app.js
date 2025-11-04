@@ -46,6 +46,8 @@ let netContributionTotal = 0;
 let isRangeUpdateInFlight = false;
 const FLASH_DURATION = 1500;
 let pnlSortDesc = true;
+const RENT_TAGS = ['rent', 'rental', 'lease', 'tenant', 'tenancy', 'airbnb', 'booking'];
+const EXPENSE_TAGS = ['expense', 'expenses', 'maintenance', 'repair', 'repairs', 'tax', 'taxes', 'property tax', 'property-tax', 'insurance', 'mortgage', 'mortgagepayment', 'hoa', 'hoa fees', 'utility', 'utilities', 'water', 'electric', 'electricity', 'gas', 'cleaning', 'management', 'interest', 'service', 'fee', 'fees'];
 
 function applyRangeButtons(range){
     const buttons = document.querySelectorAll('#pnl-range-controls button');
@@ -82,6 +84,31 @@ function pct(v){
     if(v===null || v===undefined || Number.isNaN(Number(v))) return '—';
     const num = Number(v);
     return `${num >= 0 ? '+' : ''}${num.toFixed(2)}%`;
+}
+
+function formatPercent(value){
+    if(value === null || value === undefined || !Number.isFinite(Number(value))) return '—';
+    return `${Number(value).toFixed(1)}%`;
+}
+
+function monthsBetween(start, end){
+    if(!(start instanceof Date) || !(end instanceof Date)) return 0;
+    let months = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+    if(end.getDate() >= start.getDate()) months += 1;
+    return Math.max(months, 1);
+}
+
+function formatDurationFromMonths(months){
+    if(months === null || months === undefined || !Number.isFinite(months)) return '—';
+    if(months <= 0) return 'Paid off';
+    const total = Math.ceil(months);
+    const years = Math.floor(total / 12);
+    const remainder = total % 12;
+    const parts = [];
+    if(years) parts.push(`${years}y`);
+    if(remainder) parts.push(`${remainder}m`);
+    if(!parts.length) return '<1m';
+    return parts.join(' ');
 }
 
 function formatQty(qty){
@@ -858,6 +885,144 @@ function updateAssetsList(){
     });
 }
 
+function computeRealEstateAnalytics(){
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const cutoffStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    cutoffStart.setMonth(cutoffStart.getMonth() - 11);
+    const results = [];
+
+    positions.filter(p=> (p.type || '').toLowerCase() === 'real estate').forEach((position, idx)=>{
+        const ops = Array.isArray(position.operations) ? position.operations : [];
+        if(!ops.length) return;
+        let totalPurchase = 0;
+        let totalExpenses = 0;
+        let rentCollected = 0;
+        let rentYtd = 0;
+        let rentLast12 = 0;
+        let earliestPurchase = null;
+        let earliestEvent = null;
+        const rentMonths = new Set();
+        const rentMonthsLast12 = new Set();
+
+        ops.forEach(op=>{
+            const spent = Number(op.spent || 0) || 0;
+            const amount = Number(op.amount || 0) || 0;
+            const price = Number(op.price || 0) || 0;
+            const type = (op.type || '').toLowerCase();
+            const tags = Array.isArray(op.tags) ? op.tags.map(t=>String(t).toLowerCase()) : [];
+            const date = op.date instanceof Date ? op.date : (op.rawDate ? new Date(op.rawDate) : null);
+
+            if(date && (!earliestEvent || date < earliestEvent)){
+                earliestEvent = date;
+            }
+
+            const isRent = type.includes('rent') || tags.some(tag=>RENT_TAGS.includes(tag));
+            const isPurchase = type === 'purchasesell' && amount > 0;
+            const isExpense = (!isPurchase && !isRent) && (type.includes('expense') || type.includes('maintenance') || type.includes('hoa') || type.includes('tax') || type.includes('mortgage') || tags.some(tag=>EXPENSE_TAGS.includes(tag)));
+
+            if(isPurchase){
+                if(date && (!earliestPurchase || date < earliestPurchase)){
+                    earliestPurchase = date;
+                }
+                if(spent > 0){
+                    totalPurchase += spent;
+                }else if(amount > 0 && price > 0){
+                    totalPurchase += amount * price;
+                }
+                return;
+            }
+
+            if(isRent){
+                let rentAmount = spent < 0 ? -spent : 0;
+                if(rentAmount === 0 && amount < 0){
+                    const referencePrice = price || position.displayPrice || position.lastKnownPrice || position.avgPrice || 0;
+                    rentAmount = Math.abs(amount) * referencePrice;
+                }
+                if(rentAmount > 0){
+                    rentCollected += rentAmount;
+                    if(date){
+                        const key = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;
+                        rentMonths.add(key);
+                        if(date >= cutoffStart){
+                            rentLast12 += rentAmount;
+                            rentMonthsLast12.add(key);
+                        }
+                        if(date.getFullYear() === currentYear){
+                            rentYtd += rentAmount;
+                        }
+                    }
+                }
+                return;
+            }
+
+            if(isExpense || (spent > 0 && !isRent && !isPurchase)){
+                totalExpenses += spent > 0 ? spent : 0;
+            }
+        });
+
+        const totalCost = totalPurchase + totalExpenses;
+        const outstanding = Math.max(0, totalCost - rentCollected);
+        const baseDate = earliestPurchase || earliestEvent;
+        const totalMonths = baseDate ? monthsBetween(baseDate, now) : 0;
+        const utilization = totalMonths ? (rentMonths.size / totalMonths) * 100 : 0;
+        const monthsForAvg = rentMonthsLast12.size || (rentMonths.size ? Math.min(12, rentMonths.size) : 0);
+        const avgMonthlyRent = monthsForAvg ? rentLast12 / monthsForAvg : null;
+        let payoffMonths = null;
+        if(outstanding <= 0){
+            payoffMonths = 0;
+        }else if(avgMonthlyRent && avgMonthlyRent > 0){
+            payoffMonths = outstanding / avgMonthlyRent;
+        }
+
+        results.push({
+            name: position.displayName || position.Symbol || position.Name || `Asset ${idx+1}`,
+            totalPurchase,
+            totalExpenses,
+            totalCost,
+            rentCollected,
+            rentYtd,
+            avgMonthlyRent,
+            utilization,
+            netOutstanding: outstanding,
+            payoffMonths
+        });
+    });
+
+    return results.sort((a,b)=> b.netOutstanding - a.netOutstanding || b.totalCost - a.totalCost);
+}
+
+function updateRealEstateRentals(){
+    const container = document.getElementById('realestate-stats');
+    if(!container) return;
+    const stats = computeRealEstateAnalytics();
+    if(!stats.length){
+        container.innerHTML = '<div class="pos">No rental activity recorded yet.</div>';
+        return;
+    }
+    container.innerHTML = '';
+    stats.forEach(stat=>{
+        const row = document.createElement('div');
+        row.className = 'realestate-row';
+        row.innerHTML = `
+            <div class="realestate-main">
+                <div class="symbol">${stat.name}</div>
+                <div class="pos">Purchase ${money(stat.totalPurchase)} · Basis ${money(stat.totalCost)}</div>
+            </div>
+            <div class="realestate-metrics">
+                <div><span class="label">Final Price</span><span class="value">${money(stat.netOutstanding)}</span></div>
+                <div><span class="label">Expenses</span><span class="value">${money(stat.totalExpenses)}</span></div>
+                <div><span class="label">Rent Collected</span><span class="value">${money(stat.rentCollected)}</span></div>
+                <div><span class="label">Rent YTD</span><span class="value">${money(stat.rentYtd)}</span></div>
+                <div><span class="label">Rent / Mo</span><span class="value">${money(stat.avgMonthlyRent)}</span></div>
+                <div><span class="label">Utilization</span><span class="value">${formatPercent(stat.utilization)}</span></div>
+                <div><span class="label">Payoff ETA</span><span class="value">${formatDurationFromMonths(stat.payoffMonths)}</span></div>
+            </div>
+        `;
+        container.appendChild(row);
+    });
+}
+
 function updateKpis(){
     positions.forEach(recomputePositionMetrics);
     const totalPnl = currentRangeTotalPnl;
@@ -950,6 +1115,7 @@ function updateKpis(){
 function renderDashboard(){
     updateKpis();
     updateAssetsList();
+    updateRealEstateRentals();
     renderAllCharts();
     const opsText = operationsMeta.count ? ` · ${operationsMeta.count} Airtable ops` : '';
     setStatus(`Live ${new Date().toLocaleTimeString()}${opsText}`);
