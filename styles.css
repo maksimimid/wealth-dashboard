@@ -385,16 +385,7 @@ h1 {
     min-height: 420px;
 }
 
-.realestate-chart {
-    min-height: 220px;
-    margin-top: 14px;
-    border-radius: 18px;
-    padding: 18px;
-    background: rgba(15, 23, 42, 0.5);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.realestate-toggle {
+.realestate-controls {
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
@@ -428,8 +419,19 @@ h1 {
     cursor: pointer;
 }
 
+.realestate-chart {
+    position: relative;
+    margin-top: 8px;
+    border-radius: 18px;
+    padding: 18px;
+    background: rgba(15, 23, 42, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    height: 240px;
+}
+
 .realestate-chart canvas {
-    min-height: 190px;
+    width: 100% !important;
+    height: 100% !important;
 }
 
 .realestate-list {
