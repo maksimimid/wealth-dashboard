@@ -1149,6 +1149,7 @@ function renderRealEstateRentChart(){
             datasets: filteredDatasets
         };
         createOrUpdateChart(chartId, 'line', chartData, {
+            animation: { duration: 0 },
             plugins: { legend: { display: false } },
             interaction: { mode: 'index', intersect: false },
             scales: {
