@@ -1005,6 +1005,8 @@ function updateRealEstateRentals(){
     stats.forEach(stat=>{
         const row = document.createElement('div');
         row.className = 'realestate-row';
+        const utilizationPct = Number.isFinite(Number(stat.utilization)) ? Math.max(0, Math.min(100, Number(stat.utilization))) : 0;
+        const utilizationStyle = `width:${utilizationPct.toFixed(2)}%`;
         row.innerHTML = `
             <div class="realestate-main">
                 <div class="symbol">${stat.name}</div>
@@ -1016,7 +1018,13 @@ function updateRealEstateRentals(){
                 <div><span class="label">Rent Collected</span><span class="value">${money(stat.rentCollected)}</span></div>
                 <div><span class="label">Rent YTD</span><span class="value">${money(stat.rentYtd)}</span></div>
                 <div><span class="label">Rent / Mo</span><span class="value">${money(stat.avgMonthlyRent)}</span></div>
-                <div><span class="label">Utilization</span><span class="value">${formatPercent(stat.utilization)}</span></div>
+                <div>
+                    <span class="label">Utilization</span>
+                    <span class="value">${formatPercent(stat.utilization)}</span>
+                    <div class="realestate-progress" role="presentation">
+                        <div class="realestate-progress-bar" style="${utilizationStyle}"></div>
+                    </div>
+                </div>
                 <div><span class="label">Payoff ETA</span><span class="value">${formatDurationFromMonths(stat.payoffMonths)}</span></div>
             </div>
         `;
