@@ -378,7 +378,7 @@ h1 {
 }
 
 .card.full canvas {
-    min-height: 300px;
+    min-height: 210px;
 }
 
 .realestate-card {
@@ -426,7 +426,7 @@ h1 {
     padding: 18px;
     background: rgba(15, 23, 42, 0.5);
     border: 1px solid rgba(255, 255, 255, 0.06);
-    min-height: 260px;
+    min-height: 182px;
     overflow: hidden;
 }
 
@@ -484,7 +484,7 @@ h1 {
     padding: 18px;
     background: rgba(15, 23, 42, 0.5);
     border: 1px solid rgba(255, 255, 255, 0.06);
-    min-height: 240px;
+    min-height: 168px;
 }
 
 .analytics-chart canvas {
@@ -605,7 +605,7 @@ h1 {
 }
 
 .asset-dynamic-chart {
-    min-height: 320px;
+    min-height: 224px;
 }
 
 .realestate-list {
