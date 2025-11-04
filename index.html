@@ -34,20 +34,13 @@
     </header>
 
     <div class="top-summary">
-        <div class="kpi" id="pnl-card">
+            <div class="kpi" id="pnl-card">
             <div style="flex:1">
                 <div class="pnl-label-row">
                     <div class="label">Total P&amp;L</div>
-                    <div id="pnl-range-controls" class="pnl-range-controls">
-                        <button data-range="1D" class="active">1D</button>
-                        <button data-range="1W">1W</button>
-                        <button data-range="1M">1M</button>
-                        <button data-range="1Y">1Y</button>
-                        <button data-range="ALL">All</button>
-                    </div>
                 </div>
                 <div class="big" id="total-pnl">$0.00</div>
-                <small>Updated: <span id="last-updated">&mdash;</span> &middot; <span id="pnl-range-label">Daily</span></small>
+                <small>Updated: <span id="last-updated">&mdash;</span></small>
             </div>
             <div style="width:220px;height:95px">
                 <canvas id="sparkline" aria-label="pnl sparkline"></canvas>
@@ -71,7 +64,6 @@
             <div class="kpi best-performer-card" id="best-performer-card">
                 <div class="best-performer-header">
                     <div class="label">Best Performer</div>
-                    <div class="best-performer-range" id="best-performer-range">Daily</div>
                 </div>
                 <div class="best-performer-name" id="best-performer-name">&mdash;</div>
                 <div class="best-performer-metrics">
