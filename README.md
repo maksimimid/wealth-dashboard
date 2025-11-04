@@ -62,9 +62,10 @@ Assets where `Category` normalises to `Real Estate` get an additional card summa
 - **Outstanding** = `max(0, Final Asset Price - Rent Collected)`.
 - **Rent YTD** = aggregate rent where `Date` falls in the current calendar year.
 - **Rent / Mo** = average of the last 12 months with rent activity (or fewer if insufficient history).
-- **Utilization** = rent collected ? final asset price (clamped to 100%).
-- **Payoff ETA** = months required to clear `Outstanding` using the trailing average monthly rent (shows ?Paid off? when ? 0).
+- **Utilization** = rent collected / final asset price (clamped to 100%).
+- **Payoff ETA** = months required to clear `Outstanding` using the trailing average monthly rent (shows "Paid off" when 0 or below).
 - **Rent Collected by Year**: embedded chart at the top of the card totals rent inflows per calendar year across all real estate assets.
+  - Use the pill-style checkboxes above the chart to toggle individual assets (or the 'All Assets' aggregate) on and off.
 
 If you do not see values, confirm:
 

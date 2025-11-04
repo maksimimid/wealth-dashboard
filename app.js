@@ -44,6 +44,7 @@ let assetYearSeriesDirty = true;
 const assetColorCache = new Map();
 let realEstateRentSeries = { labels: [], datasets: [] };
 let realEstateRentSeriesDirty = true;
+const realEstateRentFilters = new Map();
 let netContributionTotal = 0;
 let isRangeUpdateInFlight = false;
 const FLASH_DURATION = 1500;
@@ -895,6 +896,8 @@ function computeRealEstateAnalytics(){
     cutoffStart.setMonth(cutoffStart.getMonth() - 11);
     const results = [];
     const rentYearTotals = new Map();
+    const rentYearTotalsByAsset = new Map();
+    const rentYearSet = new Set();
 
     positions.filter(p=> (p.type || '').toLowerCase() === 'real estate').forEach((position, idx)=>{
         const ops = Array.isArray(position.operations) ? position.operations : [];
@@ -950,6 +953,11 @@ function computeRealEstateAnalytics(){
                         rentMonths.add(key);
                         const yr = date.getFullYear();
                         rentYearTotals.set(yr, (rentYearTotals.get(yr) || 0) + rentAmount);
+                        rentYearSet.add(yr);
+                        const assetKey = position.displayName || position.Symbol || position.Name || `Asset ${idx+1}`;
+                        if(!rentYearTotalsByAsset.has(assetKey)) rentYearTotalsByAsset.set(assetKey, new Map());
+                        const assetYearMap = rentYearTotalsByAsset.get(assetKey);
+                        assetYearMap.set(yr, (assetYearMap.get(yr) || 0) + rentAmount);
                         if(date >= cutoffStart){
                             rentLast12 += rentAmount;
                             rentMonthsLast12.add(key);
@@ -996,23 +1004,55 @@ function computeRealEstateAnalytics(){
         });
     });
 
-    const years = Array.from(rentYearTotals.keys()).sort((a,b)=>a-b);
+    const years = Array.from(rentYearSet).sort((a,b)=>a-b);
     if(years.length){
-        const data = years.map(year=> Number((rentYearTotals.get(year) || 0).toFixed(2)));
-        realEstateRentSeries = {
-            labels: years.map(String),
-            datasets: [{
-                label: 'Rent Collected',
+        const datasets = [];
+        const totalData = years.map(year=> Number((rentYearTotals.get(year) || 0).toFixed(2)));
+        datasets.push({
+            label: 'All Assets',
+            data: totalData,
+            borderColor: 'rgba(37, 99, 235, 0.95)',
+            backgroundColor: 'rgba(59, 130, 246, 0.28)',
+            borderWidth: 2,
+            tension: 0.35,
+            fill: true
+        });
+        let hueIndex = 0;
+        rentYearTotalsByAsset.forEach((yearMap, assetName)=>{
+            if(!assetColorCache.has(assetName)){
+                const hue = (hueIndex * 47) % 360;
+                assetColorCache.set(assetName, {
+                    border: `hsl(${hue},72%,55%)`,
+                    background: `hsla(${hue},72%,55%,0.3)`
+                });
+                hueIndex += 1;
+            }
+            const colors = assetColorCache.get(assetName);
+            const data = years.map(year=> Number((yearMap.get(year) || 0).toFixed(2)));
+            datasets.push({
+                label: assetName,
                 data,
-                borderColor: 'rgba(56, 189, 248, 0.9)',
-                backgroundColor: 'rgba(56, 189, 248, 0.35)',
+                borderColor: colors.border,
+                backgroundColor: colors.background,
                 borderWidth: 2,
                 tension: 0.35,
                 fill: true
-            }]
+            });
+        });
+        const labelSet = new Set(datasets.map(ds=>ds.label));
+        Array.from(realEstateRentFilters.keys()).forEach(label=>{
+            if(!labelSet.has(label)) realEstateRentFilters.delete(label);
+        });
+        datasets.forEach(ds=>{
+            if(!realEstateRentFilters.has(ds.label)) realEstateRentFilters.set(ds.label, true);
+        });
+        realEstateRentSeries = {
+            labels: years.map(String),
+            datasets
         };
     }else{
         realEstateRentSeries = { labels: [], datasets: [] };
+        realEstateRentFilters.clear();
     }
     realEstateRentSeriesDirty = false;
 
@@ -1023,6 +1063,7 @@ function updateRealEstateRentals(){
     const container = document.getElementById('realestate-stats');
     if(!container) return;
     const stats = computeRealEstateAnalytics();
+    renderRealEstateRentControls();
     renderRealEstateRentChart();
     if(!stats.length){
         container.innerHTML = '<div class="pos">No rental activity recorded yet.</div>';
@@ -1059,14 +1100,55 @@ function updateRealEstateRentals(){
     });
 }
 
+function renderRealEstateRentControls(){
+    const container = document.getElementById('realestate-rent-filters');
+    if(!container) return;
+    container.innerHTML = '';
+    if(!realEstateRentSeries.datasets.length){
+        const empty = document.createElement('div');
+        empty.className = 'pos';
+        empty.textContent = 'No rent history yet.';
+        container.appendChild(empty);
+        return;
+    }
+    realEstateRentSeries.datasets.forEach(dataset=>{
+        const label = dataset.label || 'Series';
+        if(!realEstateRentFilters.has(label)){
+            realEstateRentFilters.set(label, true);
+        }
+        const wrapper = document.createElement('label');
+        wrapper.className = 'rent-filter';
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.dataset.series = label;
+        input.checked = realEstateRentFilters.get(label) !== false;
+        input.addEventListener('change', (event)=>{
+            const series = event.target.dataset.series;
+            realEstateRentFilters.set(series, event.target.checked);
+            renderRealEstateRentChart();
+        });
+        const span = document.createElement('span');
+        span.textContent = label;
+        wrapper.appendChild(input);
+        wrapper.appendChild(span);
+        container.appendChild(wrapper);
+    });
+}
+
 function renderRealEstateRentChart(){
     const chartId = 'realestateRentChart';
     if(realEstateRentSeriesDirty){
         computeRealEstateAnalytics();
+        renderRealEstateRentControls();
     }
-    const hasData = realEstateRentSeries.labels.length && realEstateRentSeries.datasets.some(ds=>Array.isArray(ds.data) && ds.data.some(v=>Math.abs(Number(v)) > 0));
+    const filteredDatasets = realEstateRentSeries.datasets.filter(ds=> realEstateRentFilters.get(ds.label) !== false);
+    const hasData = realEstateRentSeries.labels.length && filteredDatasets.some(ds=>Array.isArray(ds.data) && ds.data.some(v=>Math.abs(Number(v)) > 0));
     if(hasData){
-        createOrUpdateChart(chartId, 'line', realEstateRentSeries, {
+        const chartData = {
+            labels: realEstateRentSeries.labels,
+            datasets: filteredDatasets
+        };
+        createOrUpdateChart(chartId, 'line', chartData, {
             plugins: { legend: { display: false } },
             interaction: { mode: 'index', intersect: false },
             scales: {

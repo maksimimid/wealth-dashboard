@@ -394,6 +394,40 @@ h1 {
     border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+.realestate-toggle {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.rent-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #f8fafc;
+    font-size: 12px;
+    letter-spacing: 0.3px;
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.rent-filter:hover {
+    transform: translateY(-1px);
+    border-color: rgba(59, 130, 246, 0.5);
+}
+
+.rent-filter input {
+    accent-color: #38bdf8;
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+}
+
 .realestate-chart canvas {
     min-height: 190px;
 }
@@ -656,6 +690,8 @@ body.light-theme .realestate-metrics .label { color: #64748b; }
 body.light-theme .realestate-progress { background: rgba(148, 163, 184, 0.35); }
 body.light-theme .realestate-progress-bar { background: linear-gradient(120deg, rgba(79, 70, 229, 0.8), rgba(45, 212, 191, 0.85)); box-shadow: 0 0 10px rgba(45, 212, 191, 0.35); }
 body.light-theme .realestate-chart { background: rgba(255, 255, 255, 0.9); border-color: rgba(148, 163, 184, 0.35); }
+body.light-theme .rent-filter { background: rgba(255, 255, 255, 0.92); color: #1e293b; border-color: rgba(148, 163, 184, 0.4); }
+body.light-theme .rent-filter:hover { border-color: rgba(79, 70, 229, 0.45); }
 body.light-theme .best-performer-range { background: rgba(148, 163, 184, 0.25); color: #475569; }
 body.light-theme .best-performer-change { color: #475569; }
 body.light-theme .best-performer-meta { color: #64748b; }
