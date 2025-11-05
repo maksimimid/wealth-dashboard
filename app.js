@@ -94,8 +94,18 @@ const CRYPTO_ICON_PROVIDERS = [
     symbol => `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/${symbol}.png`
 ];
 const assetIconSourceCache = new Map();
+const transactionPriceCache = new Map();
 let netContributionTotal = 0;
 let isRangeUpdateInFlight = false;
+const TRANSACTION_CHART_COLORS = {
+    buys: 'rgba(34, 197, 94, 0.85)',
+    buysBorder: 'rgba(16, 185, 129, 0.95)',
+    sells: 'rgba(248, 113, 113, 0.85)',
+    sellsBorder: 'rgba(248, 113, 113, 0.95)',
+    baseline: 'rgba(148, 163, 184, 0.55)',
+    priceLine: 'rgba(59, 130, 246, 0.65)'
+};
+const TRANSACTION_HISTORY_LOOKBACK_DAYS = 180;
 const FLASH_DURATION = 1500;
 const RENT_TAGS = ['rent', 'rental', 'lease', 'tenant', 'tenancy', 'airbnb', 'booking'];
 const EXPENSE_TAGS = ['expense', 'expenses', 'maintenance', 'repair', 'repairs', 'tax', 'taxes', 'property tax', 'property-tax', 'insurance', 'mortgage', 'mortgagepayment', 'hoa', 'hoa fees', 'utility', 'utilities', 'water', 'electric', 'electricity', 'gas', 'cleaning', 'management', 'interest', 'service', 'fee', 'fees'];
@@ -889,6 +899,7 @@ async function loadPositions(){
     symbolSet = new Set();
     finnhubIndex = new Map();
     assetIconSourceCache.clear();
+    transactionPriceCache.clear();
     try{
         reportLoading('Connecting to Airtable API…');
         const records = await fetchAllAirtableOperations(reportLoading);
@@ -1735,6 +1746,7 @@ function buildTransactionChartData(position){
             purchases: [],
             sales: [],
             baseline: [],
+            priceSeries: [],
             summary: {
                 totalBuys: 0,
                 totalSells: 0,
@@ -1745,7 +1757,7 @@ function buildTransactionChartData(position){
         };
     }
 
-    const fallbackPrice = Number(position.avgPrice || position.displayPrice || position.currentPrice || position.lastKnownPrice || 0);
+    const fallbackPrice = Number(position.displayPrice || position.currentPrice || position.lastKnownPrice || position.avgPrice || 0);
     const sorted = operations.map((op, index)=>{
         const date = op.date instanceof Date ? op.date : (op.rawDate ? new Date(op.rawDate) : new Date(Date.now() - (operations.length - index) * 24 * 3600 * 1000));
         return Object.assign({}, op, { date });
@@ -1759,6 +1771,7 @@ function buildTransactionChartData(position){
     const purchases = [];
     const sales = [];
     const xValues = new Set();
+    const priceSeries = [];
     let totalBuys = 0;
     let totalSells = 0;
     let totalSpent = 0;
@@ -1799,6 +1812,7 @@ function buildTransactionChartData(position){
             totalProceeds += Math.abs(spent);
         }
         xValues.add(x);
+        priceSeries.push({ x, y: price });
     });
 
     const baseline = Array.from(xValues).sort((a,b)=>a-b).map(x=>({ x, y: fallbackPrice }));
@@ -1807,6 +1821,7 @@ function buildTransactionChartData(position){
         purchases,
         sales,
         baseline,
+        priceSeries: priceSeries.sort((a,b)=> a.x - b.x),
         summary: {
             totalBuys,
             totalSells,
@@ -1824,8 +1839,8 @@ function buildTransactionChartConfig(data, position){
             type: 'scatter',
             label: 'Purchases',
             data: data.purchases,
-            backgroundColor: 'rgba(34, 197, 94, 0.85)',
-            borderColor: 'rgba(16, 185, 129, 0.95)',
+            backgroundColor: TRANSACTION_CHART_COLORS.buys,
+            borderColor: TRANSACTION_CHART_COLORS.buysBorder,
             pointBorderWidth: 1.5,
             pointRadius: ctx => ctx.raw ? ctx.raw.r : 6,
             pointHoverRadius: ctx => ctx.raw ? ctx.raw.r + 2 : 8,
@@ -1837,12 +1852,26 @@ function buildTransactionChartConfig(data, position){
             type: 'scatter',
             label: 'Sales',
             data: data.sales,
-            backgroundColor: 'rgba(248, 113, 113, 0.85)',
-            borderColor: 'rgba(248, 113, 113, 0.95)',
+            backgroundColor: TRANSACTION_CHART_COLORS.sells,
+            borderColor: TRANSACTION_CHART_COLORS.sellsBorder,
             pointBorderWidth: 1.5,
             pointRadius: ctx => ctx.raw ? ctx.raw.r : 6,
             pointHoverRadius: ctx => ctx.raw ? ctx.raw.r + 2 : 8,
             pointHoverBorderWidth: 2
+        });
+    }
+    if(data.priceSeries.length){
+        datasets.push({
+            type: 'line',
+            label: 'Price history',
+            data: data.priceSeries,
+            borderColor: TRANSACTION_CHART_COLORS.priceLine,
+            backgroundColor: 'rgba(59, 130, 246, 0.08)',
+            borderWidth: 2,
+            fill: false,
+            tension: 0.2,
+            pointRadius: 0,
+            order: 0
         });
     }
     if(data.baseline.length){
@@ -1850,7 +1879,7 @@ function buildTransactionChartConfig(data, position){
             type: 'line',
             label: 'Avg price',
             data: data.baseline,
-            borderColor: 'rgba(148, 163, 184, 0.55)',
+            borderColor: TRANSACTION_CHART_COLORS.baseline,
             borderWidth: 2,
             borderDash: [6, 4],
             pointRadius: 0,

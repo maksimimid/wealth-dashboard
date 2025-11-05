@@ -203,6 +203,12 @@ body::before {
     display: none !important;
 }
 
+.modal-note {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-top: 4px;
+}
+
 .modal-meta {
     display: flex;
     flex-direction: column;
