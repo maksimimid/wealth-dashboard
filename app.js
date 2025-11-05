@@ -163,6 +163,9 @@ function ensurePositionDefaults(position){
     if(position.priceDirection === undefined){
         position.priceDirection = null;
     }
+    if(position.rentRealized === undefined){
+        position.rentRealized = 0;
+    }
 }
 
 function applyLivePrice(position, price){
@@ -326,7 +329,7 @@ function recomputeRangeMetrics(range){
         }else if(typeKey === 'stock'){
             categoryTotals.stock += pnl;
         }else if(typeKey === 'real estate'){
-            categoryTotals.realEstate += pnl;
+            categoryTotals.realEstate += position.rentRealized || 0;
         }
     });
     currentRangeTotalPnl = total;
@@ -560,6 +563,7 @@ function transformOperations(records, progressCb){
                 costBasis: 0,
                 invested: 0,
                 realized: 0,
+                rentRealized: 0,
                 cashflow: 0,
                 lastKnownPrice: 0,
                 lastPurchasePrice: 0,
@@ -604,7 +608,9 @@ function transformOperations(records, progressCb){
             entry.cashflow += spent;
         }else if(opType === 'ProfitLoss'){
             entry.realized -= spent;
-            if(!isRentOp){
+            if(isRentOp){
+                entry.rentRealized = (entry.rentRealized || 0) - spent;
+            }else{
                 entry.cashflow += spent;
             }
         }else if(opType === 'DepositWithdrawal'){
@@ -636,6 +642,9 @@ function transformOperations(records, progressCb){
         }
         if(!p.lastKnownPrice){
             p.lastKnownPrice = p.lastPurchasePrice || p.avgPrice || 0;
+        }
+        if(p.rentRealized === undefined){
+            p.rentRealized = 0;
         }
         recomputePositionMetrics(p);
         ensurePositionDefaults(p);
@@ -669,6 +678,7 @@ function useFallbackPositions(){
         ensurePositionDefaults(p);
         p.referencePrices = {};
         p.finnhubOverride = false;
+        p.rentRealized = 0;
         return p;
     });
 }
