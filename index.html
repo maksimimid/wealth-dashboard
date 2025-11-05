@@ -35,43 +35,30 @@
 
     <div class="top-summary">
         <div class="kpi" id="pnl-card">
-            <div style="flex:1">
-                <div class="pnl-label-row">
-                    <div class="label">Total P&amp;L</div>
-                </div>
-                <div class="big" id="total-pnl">$0.00</div>
-                <small>Updated: <span id="last-updated">&mdash;</span></small>
-            </div>
-            <div class="sparkline-container">
-                <canvas id="sparkline" aria-label="pnl sparkline"></canvas>
-            </div>
+            <div class="label">Total P&amp;L</div>
+            <div class="big" id="total-pnl">$0.00</div>
+            <small>Updated: <span id="last-updated">&mdash;</span></small>
         </div>
-        <div style="display:flex;flex-direction:column;gap:14px">
-            <div class="kpi" style="min-height:120px">
-                <div style="flex:1">
-                    <div class="label">Net Worth</div>
-                    <div class="big" id="equity">$0.00</div>
-                    <small>Net contributions deployed to date</small>
-                </div>
+        <div class="kpi" id="net-worth-card">
+            <div class="label">Net Worth</div>
+            <div class="big" id="equity">$0.00</div>
+            <small>Net contributions deployed to date</small>
+        </div>
+        <div class="kpi" id="liquidity-card">
+            <div class="label">Liquidity</div>
+            <div class="big" id="buying-power">$0.00</div>
+            <small>Cash &amp; cash-equivalents from Operations</small>
+        </div>
+        <div class="kpi best-performer-card" id="best-performer-card">
+            <div class="best-performer-header">
+                <div class="label">Best Performer</div>
             </div>
-            <div class="kpi" style="min-height:120px">
-                <div style="flex:1">
-                    <div class="label">Liquidity</div>
-                    <div class="big" id="buying-power">$0.00</div>
-                    <small>Cash &amp; cash-equivalents from Operations</small>
-                </div>
+            <div class="best-performer-name" id="best-performer-name">&mdash;</div>
+            <div class="best-performer-metrics">
+                <span class="best-performer-pnl" id="best-performer-pnl">$0.00</span>
+                <span class="best-performer-change" id="best-performer-change">&mdash;</span>
             </div>
-            <div class="kpi best-performer-card" id="best-performer-card">
-                <div class="best-performer-header">
-                    <div class="label">Best Performer</div>
-                </div>
-                <div class="best-performer-name" id="best-performer-name">&mdash;</div>
-                <div class="best-performer-metrics">
-                    <span class="best-performer-pnl" id="best-performer-pnl">$0.00</span>
-                    <span class="best-performer-change" id="best-performer-change">&mdash;</span>
-                </div>
-                <small class="best-performer-meta" id="best-performer-meta">Awaiting data&hellip;</small>
-            </div>
+            <small class="best-performer-meta" id="best-performer-meta">Awaiting data&hellip;</small>
         </div>
     </div>
 

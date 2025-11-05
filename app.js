@@ -24,7 +24,6 @@ let positions = [];
 let finnhubIndex = new Map();
 let symbolSet = new Set();
 let charts = {};
-let sparkData = [];
 let ws;
 let lastUpdated = null;
 let operationsMeta = {count: 0, fetchedAt: null};
@@ -1042,9 +1041,6 @@ function renderAllCharts(){
         delete charts['assetDynamicChart'];
     }
 
-    sparkData = sparkData.slice(-40);
-    const sparkCfg = {labels: sparkData.map((_,i)=>i+1), datasets:[{data:sparkData,fill:true,tension:0.35,borderColor:'rgba(96,165,250,0.8)',backgroundColor:'rgba(96,165,250,0.18)'}]};
-    createOrUpdateChart('sparkline','line',sparkCfg,{plugins:{legend:{display:false}},scales:{x:{display:false},y:{display:false}},elements:{point:{radius:0}}});
 }
 
 // ----------------- UI -----------------
@@ -1636,13 +1632,6 @@ function updateKpis(){
         }
     }
 
-    if(totalPnl || sparkData.length===0){
-        const rounded = Number(totalPnl.toFixed(2));
-        if(!sparkData.length || sparkData[sparkData.length-1] !== rounded){
-            sparkData.push(rounded);
-        }
-        if(sparkData.length > 60) sparkData.shift();
-    }
 }
 
 function renderDashboard(){
