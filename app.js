@@ -629,9 +629,9 @@ function transformOperations(records, progressCb){
             }
             entry.cashflow += spent;
         }else if(opType === 'ProfitLoss'){
-            entry.realized -= spent;
+            entry.realized += spent;
             if(isRentOp){
-                entry.rentRealized = (entry.rentRealized || 0) - spent;
+                entry.rentRealized = (entry.rentRealized || 0) + (spent < 0 ? -spent : spent);
             }else{
                 entry.cashflow += spent;
             }
@@ -1147,7 +1147,7 @@ function computeRealEstateAnalytics(){
             const hasRentTag = tags.some(tag=>RENT_TAGS.includes(tag));
             const hasExpenseTag = tags.some(tag=>EXPENSE_TAGS.includes(tag));
             const cashImpact = spent !== 0 ? spent : (amount !== 0 && price !== 0 ? amount * price : 0);
-            const isRent = (type === 'profitloss' || type.includes('rent')) && hasRentTag;
+            const isRent = (type === 'profitloss') && hasRentTag;
             const isPurchase = type === 'purchasesell' && cashImpact > 0;
             const isExpense = (!isPurchase && !isRent) && (hasExpenseTag || type.includes('expense') || type.includes('maintenance') || type.includes('hoa') || type.includes('tax') || type.includes('mortgage') || type.includes('interest') || cashImpact > 0);
 
@@ -1161,13 +1161,11 @@ function computeRealEstateAnalytics(){
             }
 
             if(isRent){
-                let rentAmount = -spent;
-                if(rentAmount === 0 && amount !== 0){
-                    const referencePrice = price || position.displayPrice || position.lastKnownPrice || position.avgPrice || 0;
-                    rentAmount = amount * referencePrice;
-                }
-                if(rentAmount !== 0){
+                let rentAmount = spent < 0 ? -spent : spent;
+                
+                if(rentAmount > 0){
                     rentCollected += rentAmount;
+                    console.log(op, rentCollected, rentAmount)
                     if(date){
                         const key = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;
                         rentMonths.add(key);
