@@ -1159,7 +1159,7 @@ function computeRealEstateAnalytics(){
             }
 
             if(isRent){
-                let rentAmount = spent;
+                let rentAmount = -spent;
                 if(rentAmount === 0 && amount !== 0){
                     const referencePrice = price || position.displayPrice || position.lastKnownPrice || position.avgPrice || 0;
                     rentAmount = amount * referencePrice;
