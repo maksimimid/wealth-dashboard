@@ -579,7 +579,7 @@ function transformOperations(records, progressCb){
             }
             entry.cashflow += spent;
         }else if(opType === 'ProfitLoss'){
-            entry.realized += spent;
+            entry.realized -= spent;
             if(!isRentOp){
                 entry.cashflow += spent;
             }
