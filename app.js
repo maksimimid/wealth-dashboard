@@ -1161,12 +1161,12 @@ function computeRealEstateAnalytics(){
             }
 
             if(isRent){
-                let rentAmount = -spent;
+                let rentAmount = spent < 0 ? -spent : spent;
                 if(rentAmount === 0 && amount !== 0){
                     const referencePrice = price || position.displayPrice || position.lastKnownPrice || position.avgPrice || 0;
-                    rentAmount = amount * referencePrice;
+                    rentAmount = Math.abs(amount) * referencePrice;
                 }
-                if(rentAmount !== 0){
+                if(rentAmount > 0){
                     rentCollected += rentAmount;
                     if(date){
                         const key = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;
