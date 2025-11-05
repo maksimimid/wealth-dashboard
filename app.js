@@ -86,6 +86,49 @@ const FLASH_DURATION = 1500;
 const RENT_TAGS = ['rent', 'rental', 'lease', 'tenant', 'tenancy', 'airbnb', 'booking'];
 const EXPENSE_TAGS = ['expense', 'expenses', 'maintenance', 'repair', 'repairs', 'tax', 'taxes', 'property tax', 'property-tax', 'insurance', 'mortgage', 'mortgagepayment', 'hoa', 'hoa fees', 'utility', 'utilities', 'water', 'electric', 'electricity', 'gas', 'cleaning', 'management', 'interest', 'service', 'fee', 'fees'];
 
+function resolveRentReferencePrice(position){
+    if(!position) return 0;
+    const candidates = [
+        position.displayPrice,
+        position.lastKnownPrice,
+        position.avgPrice,
+        position.lastPurchasePrice
+    ];
+    for(const candidate of candidates){
+        const numeric = Number(candidate);
+        if(Number.isFinite(numeric) && numeric !== 0){
+            return numeric;
+        }
+    }
+    return 0;
+}
+
+function calculateRentAmount(spent, amount, price, position){
+    const numericSpent = Number(spent);
+    if(Number.isFinite(numericSpent) && numericSpent !== 0){
+        return Math.abs(numericSpent);
+    }
+    const numericAmount = Number(amount);
+    if(!Number.isFinite(numericAmount) || numericAmount === 0){
+        return 0;
+    }
+    const numericPrice = Number(price);
+    if(Number.isFinite(numericPrice) && numericPrice !== 0){
+        const direct = numericAmount * numericPrice;
+        if(Number.isFinite(direct) && direct !== 0){
+            return Math.abs(direct);
+        }
+    }
+    const fallbackPrice = resolveRentReferencePrice(position);
+    if(Number.isFinite(fallbackPrice) && fallbackPrice !== 0){
+        const derived = numericAmount * fallbackPrice;
+        if(Number.isFinite(derived) && derived !== 0){
+            return Math.abs(derived);
+        }
+    }
+    return 0;
+}
+
 function applyRangeButtons(){ /* no-op */ }
 
 function setLoadingState(state, message){
@@ -594,7 +637,8 @@ function transformOperations(records, progressCb){
         }
 
         const entry = map.get(asset);
-        entry.operations.push({
+        const rentAmount = isRentOp ? calculateRentAmount(spent, amount, price, entry) : 0;
+        const operationRecord = {
             id: rec.id,
             date,
             rawDate: fields.Date,
@@ -603,7 +647,12 @@ function transformOperations(records, progressCb){
             price,
             spent,
             tags: tagsNormalized
-        });
+        };
+        if(isRentOp){
+            operationRecord.isRent = true;
+            operationRecord.rentAmount = rentAmount || null;
+        }
+        entry.operations.push(operationRecord);
 
         if(opType === 'PurchaseSell'){
             if(amount > 0){
@@ -629,10 +678,14 @@ function transformOperations(records, progressCb){
             }
             entry.cashflow += spent;
         }else if(opType === 'ProfitLoss'){
-            entry.realized -= spent;
             if(isRentOp){
-                entry.rentRealized = (entry.rentRealized || 0) - spent;
+                if(rentAmount){
+                    entry.realized += rentAmount;
+                    entry.rentRealized = (entry.rentRealized || 0) + rentAmount;
+                    entry.cashflow -= rentAmount;
+                }
             }else{
+                entry.realized -= spent;
                 entry.cashflow += spent;
             }
         }else if(opType === 'DepositWithdrawal'){
@@ -1147,7 +1200,9 @@ function computeRealEstateAnalytics(){
             const hasRentTag = tags.some(tag=>RENT_TAGS.includes(tag));
             const hasExpenseTag = tags.some(tag=>EXPENSE_TAGS.includes(tag));
             const cashImpact = spent !== 0 ? spent : (amount !== 0 && price !== 0 ? amount * price : 0);
-            const isRent = (type === 'profitloss' || type.includes('rent')) && hasRentTag;
+            const recordedRentAmount = Number(op && op.rentAmount);
+            const isRentMarked = op && op.isRent === true;
+            const isRent = isRentMarked || ((type === 'profitloss' || type.includes('rent')) && hasRentTag);
             const isPurchase = type === 'purchasesell' && cashImpact > 0;
             const isExpense = (!isPurchase && !isRent) && (hasExpenseTag || type.includes('expense') || type.includes('maintenance') || type.includes('hoa') || type.includes('tax') || type.includes('mortgage') || type.includes('interest') || cashImpact > 0);
 
@@ -1161,29 +1216,29 @@ function computeRealEstateAnalytics(){
             }
 
             if(isRent){
-                let rentAmount = -spent;
-                if(rentAmount === 0 && amount !== 0){
-                    const referencePrice = price || position.displayPrice || position.lastKnownPrice || position.avgPrice || 0;
-                    rentAmount = amount * referencePrice;
+                let rentAmount = Number.isFinite(recordedRentAmount) ? recordedRentAmount : 0;
+                if(!rentAmount){
+                    rentAmount = calculateRentAmount(spent, amount, price, position);
                 }
-                if(rentAmount !== 0){
-                    rentCollected += rentAmount;
+                if(rentAmount){
+                    const rentValue = Math.abs(rentAmount);
+                    rentCollected += rentValue;
                     if(date){
                         const key = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;
                         rentMonths.add(key);
                         const yr = date.getFullYear();
-                        rentYearTotals.set(yr, (rentYearTotals.get(yr) || 0) + rentAmount);
+                        rentYearTotals.set(yr, (rentYearTotals.get(yr) || 0) + rentValue);
                         rentYearSet.add(yr);
                         const assetKey = position.displayName || position.Symbol || position.Name || `Asset ${idx+1}`;
                         if(!rentYearTotalsByAsset.has(assetKey)) rentYearTotalsByAsset.set(assetKey, new Map());
                         const assetYearMap = rentYearTotalsByAsset.get(assetKey);
-                        assetYearMap.set(yr, (assetYearMap.get(yr) || 0) + rentAmount);
+                        assetYearMap.set(yr, (assetYearMap.get(yr) || 0) + rentValue);
                         if(date >= cutoffStart){
-                            rentLast12 += rentAmount;
+                            rentLast12 += rentValue;
                             rentMonthsLast12.add(key);
                         }
                         if(date.getFullYear() === currentYear){
-                            rentYtd += rentAmount;
+                            rentYtd += rentValue;
                         }
                     }
                 }
