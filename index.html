@@ -92,7 +92,7 @@
                 </div>
             </div>
         </div>
-        <details class="analytics-section" id="realestate-history">
+        <details class="analytics-section chart-section" id="realestate-history" data-chart="realestateRentChart">
             <summary>
                 <div class="summary-left"><span class="summary-title">Rent history</span></div>
                 <div class="summary-extra">Yearly totals</div>
@@ -130,9 +130,17 @@
                 </div>
             </div>
         </div>
-        <div class="analytics-chart">
-            <canvas id="cryptoPortfolioChart"></canvas>
-        </div>
+        <details class="analytics-section chart-section" data-chart="cryptoPortfolioChart">
+            <summary>
+                <div class="summary-left"><span class="summary-title">Allocation chart</span></div>
+                <div class="summary-extra">Value distribution</div>
+            </summary>
+            <div class="analytics-section-content">
+                <div class="analytics-chart">
+                    <canvas id="cryptoPortfolioChart"></canvas>
+                </div>
+            </div>
+        </details>
         <div class="analytics-list" id="crypto-positions">
             <div class="pos">Loading crypto analytics&hellip;</div>
         </div>
@@ -159,9 +167,17 @@
                 </div>
             </div>
         </div>
-        <div class="analytics-chart">
-            <canvas id="stockPortfolioChart"></canvas>
-        </div>
+        <details class="analytics-section chart-section" data-chart="stockPortfolioChart">
+            <summary>
+                <div class="summary-left"><span class="summary-title">Allocation chart</span></div>
+                <div class="summary-extra">Value distribution</div>
+            </summary>
+            <div class="analytics-section-content">
+                <div class="analytics-chart">
+                    <canvas id="stockPortfolioChart"></canvas>
+                </div>
+            </div>
+        </details>
         <div class="analytics-list" id="stock-positions">
             <div class="pos">Loading stock analytics&hellip;</div>
         </div>
@@ -174,9 +190,17 @@
                 <div class="pos" style="margin-top:4px">Cumulative contributions by asset with a forward projection based on recent dynamics.</div>
             </div>
         </div>
-        <div class="analytics-chart asset-dynamic-chart">
-            <canvas id="assetDynamicChart"></canvas>
-        </div>
+        <details class="analytics-section chart-section" data-chart="assetDynamicChart">
+            <summary>
+                <div class="summary-left"><span class="summary-title">Asset growth chart</span></div>
+                <div class="summary-extra">Cumulative trend</div>
+            </summary>
+            <div class="analytics-section-content">
+                <div class="analytics-chart asset-dynamic-chart">
+                    <canvas id="assetDynamicChart"></canvas>
+                </div>
+            </div>
+        </details>
     </div>
 
     <footer>

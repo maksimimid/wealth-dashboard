@@ -1671,6 +1671,21 @@ document.addEventListener('DOMContentLoaded', ()=>{
         });
     }
 
+    document.querySelectorAll('details[data-chart]').forEach(section=>{
+        section.addEventListener('toggle', ()=>{
+            if(!section.open) return;
+            const chartId = section.getAttribute('data-chart');
+            if(!chartId) return;
+            requestAnimationFrame(()=>{
+                const chart = charts[chartId];
+                if(chart){
+                    chart.resize();
+                    chart.update('none');
+                }
+            });
+        });
+    });
+
     let resizeTimer;
     window.addEventListener('resize', ()=>{
         clearTimeout(resizeTimer);

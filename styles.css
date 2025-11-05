@@ -356,7 +356,7 @@ h1 {
     min-height: 420px;
 }
 
-#realestate-history {
+.chart-section {
     margin-top: 18px;
 }
 
@@ -494,6 +494,17 @@ h1 {
     color: #f8fafc;
 }
 
+.analytics-section summary::before {
+    content: '\25B8';
+    font-size: 12px;
+    color: var(--muted);
+    transition: transform 0.2s ease;
+}
+
+.analytics-section[open] summary::before {
+    transform: rotate(90deg);
+}
+
 .analytics-section summary::-webkit-details-marker {
     display: none;
 }
@@ -507,6 +518,7 @@ h1 {
     display: flex;
     align-items: center;
     gap: 8px;
+    flex: 1;
 }
 
 .summary-title {
