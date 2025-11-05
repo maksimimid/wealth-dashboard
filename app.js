@@ -1384,8 +1384,9 @@ function computeRealEstateAnalytics(){
         let projectedValue = finalAssetPrice;
         if(typeKey === 'automobile' || typeKey === 'automotive'){
             const depreciationRate = 0.004; // 0.4% per year
-            const factor = Math.max(0, 1 - depreciationRate * (yearsHeld || 1));
-            projectedValue = finalAssetPrice * factor;
+            const yearsForDepreciation = baseForHoldingPeriod ? yearsHeld : 0;
+            const depreciationAmount = finalAssetPrice * depreciationRate * yearsForDepreciation;
+            projectedValue = Math.max(0, finalAssetPrice - depreciationAmount);
         }else{
             if(baseForHoldingPeriod){
                 projectedValue = finalAssetPrice * Math.pow(1.05, Math.max(yearsHeld, 1));
@@ -1479,8 +1480,6 @@ function computeRealEstateAnalytics(){
 function createRealEstateRow(stat){
     const row = document.createElement('div');
     row.className = 'realestate-row';
-    const utilizationPct = Number.isFinite(Number(stat.utilization)) ? Math.max(0, Math.min(100, Number(stat.utilization))) : 0;
-    const utilizationStyle = `width:${utilizationPct.toFixed(2)}%`;
 
     const main = document.createElement('div');
     main.className = 'realestate-main';
@@ -1507,6 +1506,11 @@ function createRealEstateRow(stat){
 
     const metrics = document.createElement('div');
     metrics.className = 'realestate-metrics';
+    const utilizationValueRaw = Number(stat.utilization);
+    const hasUtilization = Number.isFinite(utilizationValueRaw);
+    const utilizationValue = hasUtilization ? Math.max(0, Math.min(utilizationValueRaw, 100)) : null;
+    const utilizationDisplay = hasUtilization ? `${utilizationValue.toFixed(1)}%` : '—';
+    const utilizationProgress = hasUtilization ? (utilizationValue / 100) : 0;
     metrics.innerHTML = `
         <div><span class="label">Final Asset Price</span><span class="value">${money(stat.finalAssetPrice)}</span></div>
         <div><span class="label">Outstanding</span><span class="value">${money(stat.netOutstanding)}</span></div>
@@ -1514,11 +1518,10 @@ function createRealEstateRow(stat){
         <div><span class="label">Rent Collected</span><span class="value">${money(stat.rentCollected)}</span></div>
         <div><span class="label">Rent YTD</span><span class="value">${money(stat.rentYtd)}</span></div>
         <div><span class="label">Rent / Mo</span><span class="value">${money(stat.avgMonthlyRent)}</span></div>
-        <div>
+        <div class="utilization-block">
             <span class="label">Utilization</span>
-            <span class="value">${Number.isFinite(Number(stat.utilization)) ? `${Number(stat.utilization).toFixed(1)}%` : '—'}</span>
-            <div class="realestate-progress" role="presentation">
-                <div class="realestate-progress-bar" style="${utilizationStyle}"></div>
+            <div class="circle-progress" style="--progress:${utilizationProgress};">
+                <div class="circle-progress-inner"><span>${utilizationDisplay}</span></div>
             </div>
         </div>
         <div><span class="label">Payoff ETA</span><span class="value">${formatDurationFromMonths(stat.payoffMonths)}</span></div>

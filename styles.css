@@ -715,6 +715,54 @@ h1 {
     gap: 12px;
 }
 
+.utilization-block {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    align-items: flex-start;
+}
+
+.circle-progress {
+    --size: 64px;
+    --progress: 0;
+    --track-color: rgba(148, 163, 184, 0.3);
+    --fill-color: #38bdf8;
+    width: var(--size);
+    height: var(--size);
+    border-radius: 50%;
+    background: conic-gradient(var(--fill-color) calc(var(--progress) * 360deg), var(--track-color) 0deg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.circle-progress::after {
+    content: '';
+    position: absolute;
+    inset: 8px;
+    border-radius: 50%;
+    background: rgba(15, 23, 42, 0.92);
+}
+
+.circle-progress-inner {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: calc(var(--size) - 16px);
+    height: calc(var(--size) - 16px);
+    border-radius: 50%;
+}
+
+.circle-progress-inner span {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: #f8fafc;
+}
+
 .realestate-metrics .label {
     display: block;
     font-size: 11px;
@@ -946,6 +994,9 @@ body.light-theme .metric .label { color: #64748b; }
 body.light-theme .metric .value { color: #0f172a; }
 body.light-theme .card-icon { background: rgba(226, 232, 240, 0.85); border-color: rgba(148, 163, 184, 0.45); box-shadow: 0 10px 20px rgba(148, 163, 184, 0.35); }
 body.light-theme .asset-icon-wrapper { background: transparent; border: 0; box-shadow: none; }
+body.light-theme .circle-progress { --track-color: rgba(148, 163, 184, 0.45); --fill-color: #4f46e5; background: conic-gradient(var(--fill-color) calc(var(--progress) * 360deg), var(--track-color) 0deg); }
+body.light-theme .circle-progress::after { background: rgba(255, 255, 255, 0.96); }
+body.light-theme .circle-progress-inner span { color: #1e293b; }
 body.light-theme .muted { color: #64748b; }
 body.light-theme .analytics-section { background: rgba(255, 255, 255, 0.9); border-color: rgba(148, 163, 184, 0.4); }
 body.light-theme .analytics-section[open] summary { background: rgba(148, 163, 184, 0.15); border-color: rgba(148, 163, 184, 0.35); }
