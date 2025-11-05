@@ -86,6 +86,49 @@ const FLASH_DURATION = 1500;
 const RENT_TAGS = ['rent', 'rental', 'lease', 'tenant', 'tenancy', 'airbnb', 'booking'];
 const EXPENSE_TAGS = ['expense', 'expenses', 'maintenance', 'repair', 'repairs', 'tax', 'taxes', 'property tax', 'property-tax', 'insurance', 'mortgage', 'mortgagepayment', 'hoa', 'hoa fees', 'utility', 'utilities', 'water', 'electric', 'electricity', 'gas', 'cleaning', 'management', 'interest', 'service', 'fee', 'fees'];
 
+function resolveRentReferencePrice(position){
+    if(!position) return 0;
+    const candidates = [
+        position.displayPrice,
+        position.lastKnownPrice,
+        position.avgPrice,
+        position.lastPurchasePrice
+    ];
+    for(const candidate of candidates){
+        const numeric = Number(candidate);
+        if(Number.isFinite(numeric) && numeric !== 0){
+            return numeric;
+        }
+    }
+    return 0;
+}
+
+function calculateRentAmount(spent, amount, price, position){
+    const numericSpent = Number(spent);
+    if(Number.isFinite(numericSpent) && numericSpent !== 0){
+        return Math.abs(numericSpent);
+    }
+    const numericAmount = Number(amount);
+    if(!Number.isFinite(numericAmount) || numericAmount === 0){
+        return 0;
+    }
+    const numericPrice = Number(price);
+    if(Number.isFinite(numericPrice) && numericPrice !== 0){
+        const direct = numericAmount * numericPrice;
+        if(Number.isFinite(direct) && direct !== 0){
+            return Math.abs(direct);
+        }
+    }
+    const fallbackPrice = resolveRentReferencePrice(position);
+    if(Number.isFinite(fallbackPrice) && fallbackPrice !== 0){
+        const derived = numericAmount * fallbackPrice;
+        if(Number.isFinite(derived) && derived !== 0){
+            return Math.abs(derived);
+        }
+    }
+    return 0;
+}
+
 function applyRangeButtons(){ /* no-op */ }
 
 function setLoadingState(state, message){
@@ -594,6 +637,7 @@ function transformOperations(records, progressCb){
         }
 
         const entry = map.get(asset);
+        const rentAmount = isRentOp ? calculateRentAmount(spent, amount, price, entry) : 0;
         entry.operations.push({
             id: rec.id,
             date,
@@ -629,9 +673,11 @@ function transformOperations(records, progressCb){
             }
             entry.cashflow += spent;
         }else if(opType === 'ProfitLoss'){
-            entry.realized -= spent;
+            entry.realized += spent;
             if(isRentOp){
-                entry.rentRealized = (entry.rentRealized || 0) - spent;
+                if(rentAmount){
+                    entry.rentRealized = (entry.rentRealized || 0) + rentAmount;
+                }
             }else{
                 entry.cashflow += spent;
             }
@@ -1161,12 +1207,12 @@ function computeRealEstateAnalytics(){
             }
 
             if(isRent){
-                let rentAmount = -spent;
+                let rentAmount = spent < 0 ? -spent : spent;
                 if(rentAmount === 0 && amount !== 0){
                     const referencePrice = price || position.displayPrice || position.lastKnownPrice || position.avgPrice || 0;
-                    rentAmount = amount * referencePrice;
+                    rentAmount = Math.abs(amount) * referencePrice;
                 }
-                if(rentAmount !== 0){
+                if(rentAmount > 0){
                     rentCollected += rentAmount;
                     if(date){
                         const key = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;
