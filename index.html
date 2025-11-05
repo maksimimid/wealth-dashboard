@@ -214,5 +214,17 @@
         <div>Powered by Airtable &middot; Finnhub &middot; Chart.js</div>
     </footer>
 </div>
+
+<div id="transaction-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="transaction-modal-title">
+        <button type="button" class="modal-close" aria-label="Close transactions chart">&times;</button>
+        <h3 class="modal-title" id="transaction-modal-title">Asset transactions</h3>
+        <div class="modal-subtitle" id="transaction-modal-subtitle"></div>
+        <div class="modal-chart">
+            <canvas id="transaction-chart"></canvas>
+        </div>
+        <div class="modal-meta" id="transaction-modal-meta"></div>
+    </div>
+</div>
 </body>
 </html>

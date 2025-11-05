@@ -47,6 +47,13 @@ let realEstateRentSeries = { labels: [], datasets: [] };
 let realEstateRentSeriesDirty = true;
 const realEstateRentFilters = new Map();
 const realEstateGroupState = { active: true, passive: false };
+let transactionModal = null;
+let transactionModalTitle = null;
+let transactionModalSubtitle = null;
+let transactionModalMeta = null;
+let transactionModalCanvas = null;
+let transactionChart = null;
+let lastTransactionTrigger = null;
 const previousCategorySummaries = {
     crypto: { market: null, pnl: null, allocation: null },
     stock: { market: null, pnl: null, allocation: null }
@@ -154,6 +161,11 @@ function formatDurationFromMonths(months){
     if(remainder) parts.push(`${remainder}m`);
     if(!parts.length) return '<1m';
     return parts.join(' ');
+}
+
+function formatDateShort(date){
+    if(!(date instanceof Date) || Number.isNaN(date.getTime())) return '—';
+    return date.toLocaleDateString(undefined,{year:'numeric', month:'short', day:'numeric'});
 }
 
 function formatQty(qty){
@@ -1672,6 +1684,277 @@ function renderRealEstateRentChart(){
     }
 }
 
+function ensureTransactionModalElements(){
+    if(transactionModal) return;
+    transactionModal = document.getElementById('transaction-modal');
+    if(!transactionModal) return;
+    transactionModalTitle = document.getElementById('transaction-modal-title');
+    transactionModalSubtitle = document.getElementById('transaction-modal-subtitle');
+    transactionModalMeta = document.getElementById('transaction-modal-meta');
+    transactionModalCanvas = document.getElementById('transaction-chart');
+    const closeButton = transactionModal.querySelector('.modal-close');
+    if(closeButton){
+        closeButton.addEventListener('click', closeTransactionModal);
+    }
+    transactionModal.addEventListener('click', event => {
+        if(event.target === transactionModal){
+            closeTransactionModal();
+        }
+    });
+}
+
+function closeTransactionModal(){
+    if(!transactionModal) return;
+    transactionModal.classList.add('hidden');
+    transactionModal.setAttribute('aria-hidden','true');
+    document.body.classList.remove('modal-open');
+    if(lastTransactionTrigger && typeof lastTransactionTrigger.focus === 'function'){
+        lastTransactionTrigger.focus({ preventScroll: false });
+    }
+    lastTransactionTrigger = null;
+}
+
+function buildTransactionChartData(position){
+    const operations = Array.isArray(position.operations) ? position.operations.filter(op => String(op.type || '').toLowerCase() === 'purchasesell') : [];
+    if(!operations.length){
+        return {
+            purchases: [],
+            sales: [],
+            baseline: [],
+            summary: {
+                totalBuys: 0,
+                totalSells: 0,
+                netQty: 0,
+                totalSpent: 0,
+                totalProceeds: 0
+            }
+        };
+    }
+
+    const fallbackPrice = Number(position.avgPrice || position.displayPrice || position.currentPrice || position.lastKnownPrice || 0);
+    const sorted = operations.map((op, index)=>{
+        const date = op.date instanceof Date ? op.date : (op.rawDate ? new Date(op.rawDate) : new Date(Date.now() - (operations.length - index) * 24 * 3600 * 1000));
+        return Object.assign({}, op, { date });
+    }).sort((a,b)=>{
+        if(a.date instanceof Date && b.date instanceof Date){
+            return a.date - b.date;
+        }
+        return 0;
+    });
+
+    const purchases = [];
+    const sales = [];
+    const xValues = new Set();
+    let totalBuys = 0;
+    let totalSells = 0;
+    let totalSpent = 0;
+    let totalProceeds = 0;
+
+    sorted.forEach((op, index)=>{
+        const qty = Number(op.amount || 0);
+        if(!qty) return;
+        const rawSpent = Number(op.spent);
+        let price = Number(op.price);
+        if(!Number.isFinite(price) || price <= 0){
+            if(Number.isFinite(rawSpent) && rawSpent !== 0 && qty){
+                price = Math.abs(rawSpent / qty);
+            }else{
+                price = fallbackPrice;
+            }
+        }
+        const date = op.date instanceof Date ? op.date : new Date(Date.now() - (sorted.length - index) * 24 * 3600 * 1000);
+        const x = date.getTime();
+        const spent = Number.isFinite(rawSpent) ? rawSpent : price * qty;
+        const radius = Math.max(5, Math.min(22, Math.sqrt(Math.abs(qty)) * 4.5));
+        const point = {
+            x,
+            y: price,
+            r: radius,
+            quantity: qty,
+            price,
+            date,
+            spent
+        };
+        if(qty > 0){
+            purchases.push(point);
+            totalBuys += qty;
+            totalSpent += Math.abs(spent);
+        }else{
+            sales.push(point);
+            totalSells += Math.abs(qty);
+            totalProceeds += Math.abs(spent);
+        }
+        xValues.add(x);
+    });
+
+    const baseline = Array.from(xValues).sort((a,b)=>a-b).map(x=>({ x, y: fallbackPrice }));
+
+    return {
+        purchases,
+        sales,
+        baseline,
+        summary: {
+            totalBuys,
+            totalSells,
+            netQty: totalBuys - totalSells,
+            totalSpent,
+            totalProceeds
+        }
+    };
+}
+
+function buildTransactionChartConfig(data, position){
+    const datasets = [];
+    if(data.purchases.length){
+        datasets.push({
+            type: 'scatter',
+            label: 'Purchases',
+            data: data.purchases,
+            backgroundColor: 'rgba(34, 197, 94, 0.85)',
+            borderColor: 'rgba(16, 185, 129, 0.95)',
+            pointBorderWidth: 1.5,
+            pointRadius: ctx => ctx.raw ? ctx.raw.r : 6,
+            pointHoverRadius: ctx => ctx.raw ? ctx.raw.r + 2 : 8,
+            pointHoverBorderWidth: 2
+        });
+    }
+    if(data.sales.length){
+        datasets.push({
+            type: 'scatter',
+            label: 'Sales',
+            data: data.sales,
+            backgroundColor: 'rgba(248, 113, 113, 0.85)',
+            borderColor: 'rgba(248, 113, 113, 0.95)',
+            pointBorderWidth: 1.5,
+            pointRadius: ctx => ctx.raw ? ctx.raw.r : 6,
+            pointHoverRadius: ctx => ctx.raw ? ctx.raw.r + 2 : 8,
+            pointHoverBorderWidth: 2
+        });
+    }
+    if(data.baseline.length){
+        datasets.push({
+            type: 'line',
+            label: 'Avg price',
+            data: data.baseline,
+            borderColor: 'rgba(148, 163, 184, 0.55)',
+            borderWidth: 2,
+            borderDash: [6, 4],
+            pointRadius: 0,
+            tension: 0.2
+        });
+    }
+
+    const yValues = [...data.purchases, ...data.sales].map(point=> point.y);
+    const fallbackPrice = Number(position.avgPrice || position.displayPrice || position.currentPrice || 0) || 0;
+    const minY = yValues.length ? Math.min(...yValues) : fallbackPrice;
+    const maxY = yValues.length ? Math.max(...yValues) : fallbackPrice;
+
+    return {
+        type: 'scatter',
+        data: { datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            parsing: false,
+            animation: false,
+            plugins: {
+                legend: { labels: { usePointStyle: true } },
+                tooltip: {
+                    callbacks: {
+                        label(ctx){
+                            const raw = ctx.raw || {};
+                            if(ctx.dataset.type === 'line'){
+                                return `Avg price ${money(raw.y)}`;
+                            }
+                            const type = raw.quantity > 0 ? 'Buy' : 'Sell';
+                            const qtyText = `Qty ${formatQty(Math.abs(raw.quantity || 0))}`;
+                            const priceText = `@ ${money(raw.price || 0)}`;
+                            const dateLabel = raw.date instanceof Date ? formatDateShort(raw.date) : '';
+                            return `${type} ${qtyText} ${priceText}${dateLabel ? ' · ' + dateLabel : ''}`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    type: 'linear',
+                    ticks: {
+                        callback: value => formatDateShort(new Date(Number(value)))
+                    },
+                    title: { display: true, text: 'Date' },
+                    grid: { color: 'rgba(148, 163, 184, 0.25)' }
+                },
+                y: {
+                    beginAtZero: false,
+                    suggestedMin: minY ? minY * 0.92 : undefined,
+                    suggestedMax: maxY ? maxY * 1.08 : undefined,
+                    title: { display: true, text: 'Price' },
+                    grid: { color: 'rgba(148, 163, 184, 0.25)' },
+                    ticks: { callback: value => money(value) }
+                }
+            }
+        }
+    };
+}
+
+function renderTransactionMeta(position, summary){
+    if(!transactionModalMeta) return;
+    transactionModalMeta.innerHTML = `
+        <div class="modal-meta-grid">
+            <div><strong>Net qty:</strong> ${formatQty(summary.netQty)}</div>
+            <div><strong>Total bought:</strong> ${formatQty(summary.totalBuys)}</div>
+            <div><strong>Total sold:</strong> ${formatQty(summary.totalSells)}</div>
+            <div><strong>Cash invested:</strong> ${money(summary.totalSpent)}</div>
+            <div><strong>Cash returned:</strong> ${money(summary.totalProceeds)}</div>
+        </div>
+    `;
+}
+
+function openTransactionModal(position){
+    ensureTransactionModalElements();
+    if(!transactionModal || !transactionModalCanvas) return;
+    const data = buildTransactionChartData(position);
+    const displayName = position.displayName || position.Symbol || position.Name || position.id || 'Asset';
+    if(transactionModalTitle){
+        transactionModalTitle.textContent = `${displayName} transactions`;
+    }
+    if(transactionModalSubtitle){
+        transactionModalSubtitle.textContent = position.type || '—';
+    }
+
+    const hasData = data.purchases.length || data.sales.length;
+    if(!hasData){
+        if(transactionChart){
+            transactionChart.destroy();
+            transactionChart = null;
+        }
+        transactionModalCanvas.classList.add('hidden');
+        if(transactionModalMeta){
+            transactionModalMeta.innerHTML = '<div class="pos">No purchase or sale operations recorded yet.</div>';
+        }
+    }else{
+        transactionModalCanvas.classList.remove('hidden');
+        const config = buildTransactionChartConfig(data, position);
+        if(transactionChart){
+            transactionChart.data = config.data;
+            transactionChart.options = config.options;
+            transactionChart.update('none');
+        }else{
+            const ctx = transactionModalCanvas.getContext('2d');
+            transactionChart = new Chart(ctx, config);
+        }
+        renderTransactionMeta(position, data.summary);
+    }
+
+    transactionModal.classList.remove('hidden');
+    transactionModal.setAttribute('aria-hidden','false');
+    document.body.classList.add('modal-open');
+    const closeButton = transactionModal.querySelector('.modal-close');
+    if(closeButton){
+        closeButton.focus();
+    }
+}
+
 function buildAnalyticsSection(categoryKey, title, positions, options){
     const details = document.createElement('details');
     details.className = 'analytics-section';
@@ -1755,6 +2038,23 @@ function createOpenPositionRow(position, totalCategoryValue){
     values.appendChild(pnlEl);
     values.appendChild(shareEl);
     row.appendChild(values);
+
+    row.classList.add('interactive-asset-row');
+    row.setAttribute('role', 'button');
+    row.setAttribute('tabindex', '0');
+    row.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        lastTransactionTrigger = row;
+        openTransactionModal(position);
+    });
+    row.addEventListener('keydown', event => {
+        if(event.key === 'Enter' || event.key === ' '){
+            event.preventDefault();
+            lastTransactionTrigger = row;
+            openTransactionModal(position);
+        }
+    });
     return row;
 }
 
@@ -2103,6 +2403,12 @@ document.addEventListener('DOMContentLoaded', ()=>{
     if(loadingOverlay){
         setLoadingState('visible','Loading Airtable…');
     }
+    ensureTransactionModalElements();
+    document.addEventListener('keydown', event => {
+        if(event.key === 'Escape' && transactionModal && !transactionModal.classList.contains('hidden')){
+            closeTransactionModal();
+        }
+    });
     const themeToggle = document.getElementById('theme-toggle');
     if(themeToggle){
         updateThemeToggleIcon(themeToggle, document.body.classList.contains('light-theme'));
