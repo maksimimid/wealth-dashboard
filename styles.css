@@ -606,7 +606,7 @@ h1 {
 .analytics-main,
 .asset-heading {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 12px;
 }
 
@@ -614,27 +614,29 @@ h1 {
     display: flex;
     flex-direction: column;
     gap: 4px;
+    min-width: 0;
 }
 
 .asset-icon-wrapper {
-    width: 36px;
-    height: 36px;
-    border-radius: 12px;
-    background: rgba(15, 23, 42, 0.6);
-    border: 1px solid rgba(148, 163, 184, 0.25);
+    width: 54px;
+    height: 54px;
+    border-radius: 18px;
+    background: transparent;
+    border: 0;
+    box-shadow: none;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 6px 16px rgba(2, 6, 23, 0.45);
     overflow: hidden;
     flex-shrink: 0;
 }
 
 .asset-icon {
-    width: 24px;
-    height: 24px;
+    width: 36px;
+    height: 36px;
     object-fit: contain;
     display: block;
+    flex-shrink: 0;
 }
 
 .analytics-row .pos {
@@ -938,7 +940,7 @@ body.light-theme .analytics-row:hover { border-color: rgba(99, 102, 241, 0.45); 
 body.light-theme .metric .label { color: #64748b; }
 body.light-theme .metric .value { color: #0f172a; }
 body.light-theme .card-icon { background: rgba(226, 232, 240, 0.85); border-color: rgba(148, 163, 184, 0.45); box-shadow: 0 10px 20px rgba(148, 163, 184, 0.35); }
-body.light-theme .asset-icon-wrapper { background: rgba(226, 232, 240, 0.85); border-color: rgba(148, 163, 184, 0.45); box-shadow: 0 6px 14px rgba(148, 163, 184, 0.3); }
+body.light-theme .asset-icon-wrapper { background: transparent; border: 0; box-shadow: none; }
 body.light-theme .muted { color: #64748b; }
 body.light-theme .analytics-section { background: rgba(255, 255, 255, 0.9); border-color: rgba(148, 163, 184, 0.4); }
 body.light-theme .analytics-section[open] summary { background: rgba(148, 163, 184, 0.15); border-color: rgba(148, 163, 184, 0.35); }

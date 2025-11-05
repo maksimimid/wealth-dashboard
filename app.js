@@ -38,7 +38,7 @@ const referencePriceCache = new Map();
 const RANGE_LOOKBACK = {};
 const RANGE_LABELS = { 'ALL': 'All Time' };
 let pnlRange = 'ALL';
-const previousKpiValues = { totalPnl: null, netWorth: null, cashAvailable: null, pnlCrypto: null, pnlStock: null, pnlRealEstate: null, pnlOther: null };
+const previousKpiValues = { totalPnl: null, netWorth: null, cashAvailable: null, pnlCrypto: null, pnlStock: null, pnlRealEstate: null };
 const previousBestPerformer = { id: null, pnl: null, change: null };
 let assetYearSeries = { labels: [], datasets: [] };
 let assetYearSeriesDirty = true;
@@ -194,7 +194,7 @@ function resolveAssetIcon(position){
     if(typeKey === 'real estate'){
         return { sources: ['assets/real-estate.svg'], alt: 'Real estate asset' };
     }
-    if(['car','vehicle','auto','automobile','transport'].includes(typeKey)){
+    if(['car','vehicle','auto','automobile','transport','automotive'].includes(typeKey)){
         return { sources: ['assets/car.svg'], alt: 'Vehicle asset' };
     }
     if(typeKey === 'crypto'){
@@ -457,6 +457,7 @@ function normalizeCategory(category, asset){
         'cash':'Cash',
         'deposit':'Cash',
         'automobile':'Automobile',
+        'automotive':'Automobile',
         'vehicle':'Automobile',
         'auto':'Automobile',
         'car':'Automobile',
@@ -501,22 +502,38 @@ async function refineFinnhubSymbols(progressCb){
     if(typeof progressCb === 'function' && total){
         progressCb(0, total);
     }
-    for(let idx = 0; idx < unresolved.length; idx += 1){
-        const position = unresolved[idx];
-        try{
-            const resolved = await fetchFinnhubSymbol(position);
-            if(resolved){
-                position.finnhubSymbol = resolved;
-                position.Symbol = resolved;
+    if(!total) return;
+
+    const queue = unresolved.slice();
+    let processed = 0;
+    const MAX_SYMBOL_CONCURRENCY = 6;
+
+    async function worker(){
+        while(queue.length){
+            const position = queue.shift();
+            if(!position) break;
+            try{
+                const resolved = await fetchFinnhubSymbol(position);
+                if(resolved){
+                    position.finnhubSymbol = resolved;
+                    position.Symbol = resolved;
+                }
+            }catch(error){
+                console.warn('Finnhub search failed', position.Name, error);
+            }finally{
+                processed += 1;
+                if(typeof progressCb === 'function' && total){
+                    progressCb(processed, total, position);
+                }
+                if(queue.length){
+                    await new Promise(resolve=>setTimeout(resolve, 80));
+                }
             }
-        }catch(error){
-            console.warn('Finnhub search failed', position.Name, error);
         }
-        if(typeof progressCb === 'function' && total){
-            progressCb(idx + 1, total, position);
-        }
-        await new Promise(resolve=>setTimeout(resolve, 150));
     }
+
+    const workerCount = Math.min(MAX_SYMBOL_CONCURRENCY, queue.length);
+    await Promise.all(Array.from({length: workerCount}, worker));
 }
 
 async function fetchFinnhubSymbol(position){
@@ -1210,7 +1227,7 @@ function computeRealEstateAnalytics(){
     const rentYearSet = new Set();
     let realEstateTotalValue = 0;
 
-    const portfolioCategories = new Set(['real estate','automobile']);
+    const portfolioCategories = new Set(['real estate','automobile','automotive']);
     positions.filter(p=> portfolioCategories.has((p.type || '').toLowerCase())).forEach((position, idx)=>{
         const ops = Array.isArray(position.operations) ? position.operations : [];
         if(!ops.length) return;
@@ -1772,7 +1789,7 @@ function renderStockAnalytics(){
 
 function updateKpis(){
     positions.forEach(recomputePositionMetrics);
-    const totalPnl = currentCategoryRangeTotals.crypto + currentCategoryRangeTotals.stock + currentCategoryRangeTotals.realEstate + currentCategoryRangeTotals.other;
+    const totalPnl = currentCategoryRangeTotals.crypto + currentCategoryRangeTotals.stock + currentCategoryRangeTotals.realEstate;
     const cashAvailable = positions.filter(p=> (p.type||'').toLowerCase()==='cash').reduce((sum,p)=>sum + Number(p.marketValue||0),0);
 
     const updatedEl = document.getElementById('last-updated');
@@ -1783,7 +1800,6 @@ function updateKpis(){
     setCategoryPnl('pnl-category-crypto', currentCategoryRangeTotals.crypto || 0, 'pnlCrypto');
     setCategoryPnl('pnl-category-stock', currentCategoryRangeTotals.stock || 0, 'pnlStock');
     setCategoryPnl('pnl-category-realestate', currentCategoryRangeTotals.realEstate || 0, 'pnlRealEstate');
-    setCategoryPnl('pnl-category-other', currentCategoryRangeTotals.other || 0, 'pnlOther');
     if(updatedEl) updatedEl.textContent = lastUpdated ? formatTime(lastUpdated) : '—';
 
     const bestNameEl = document.getElementById('best-performer-name');
@@ -1931,12 +1947,34 @@ async function bootstrap(){
 
     const finnhubSymbols = Array.from(symbolSet);
     if(finnhubSymbols.length){
+        const batches = [];
         for(let i=0;i<finnhubSymbols.length;i+=MAX_REST_BATCH){
-            const batch = finnhubSymbols.slice(i, i + MAX_REST_BATCH);
-            const results = await fetchSnapshotBatch(batch);
-            applySnapshotResults(results);
-            await new Promise(resolve=>setTimeout(resolve,120));
+            batches.push(finnhubSymbols.slice(i, i + MAX_REST_BATCH));
         }
+        const MAX_SNAPSHOT_CONCURRENCY = 4;
+        let nextIndex = 0;
+
+        async function snapshotWorker(){
+            while(nextIndex < batches.length){
+                const currentIndex = nextIndex;
+                nextIndex += 1;
+                const batch = batches[currentIndex];
+                if(!batch || !batch.length) continue;
+                try{
+                    const results = await fetchSnapshotBatch(batch);
+                    applySnapshotResults(results);
+                }catch(error){
+                    console.warn('Snapshot batch failed', batch, error);
+                }finally{
+                    if(nextIndex < batches.length && batches.length > MAX_SNAPSHOT_CONCURRENCY){
+                        await new Promise(resolve=>setTimeout(resolve, 60));
+                    }
+                }
+            }
+        }
+
+        const workerCount = Math.min(MAX_SNAPSHOT_CONCURRENCY, batches.length);
+        await Promise.all(Array.from({length: workerCount}, snapshotWorker));
     }
 
     positions.forEach(recomputePositionMetrics);
