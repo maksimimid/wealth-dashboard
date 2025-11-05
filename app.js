@@ -1861,6 +1861,7 @@ function buildTransactionChartConfig(data, position){
         });
     }
     if(data.priceSeries.length){
+        const avgPrice = data.priceSeries.reduce((sum, point)=> sum + Number(point.y || 0), 0) / data.priceSeries.length || 0;
         datasets.push({
             type: 'line',
             label: 'Price history',
@@ -1871,6 +1872,17 @@ function buildTransactionChartConfig(data, position){
             fill: false,
             tension: 0.2,
             pointRadius: 0,
+            order: 0
+        });
+        datasets.push({
+            type: 'line',
+            label: 'Avg trade price',
+            data: data.priceSeries.map(point=> ({ x: point.x, y: avgPrice })),
+            borderColor: 'rgba(56, 189, 248, 0.55)',
+            borderDash: [4, 4],
+            borderWidth: 1.5,
+            pointRadius: 0,
+            tension: 0,
             order: 0
         });
     }
