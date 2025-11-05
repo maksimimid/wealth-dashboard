@@ -32,7 +32,7 @@ const CRYPTO_UI_INTERVAL = 10000;
 let lastRenderAt = 0;
 let scheduledRender = null;
 let currentRangeTotalPnl = 0;
-let currentCategoryRangeTotals = { crypto: 0, stock: 0, realEstate: 0 };
+let currentCategoryRangeTotals = { crypto: 0, stock: 0, realEstate: 0, other: 0 };
 let rangeDirty = true;
 const referencePriceCache = new Map();
 const RANGE_LOOKBACK = {};
@@ -296,7 +296,7 @@ async function ensureRangeReference(position, range){
 
 function recomputeRangeMetrics(range){
     let total = 0;
-    const categoryTotals = { crypto: 0, stock: 0, realEstate: 0 };
+    const categoryTotals = { crypto: 0, stock: 0, realEstate: 0, other: 0 };
     positions.forEach(position=>{
         ensurePositionDefaults(position);
         const bucket = getReferenceBucket(position);
@@ -325,6 +325,8 @@ function recomputeRangeMetrics(range){
             categoryTotals.crypto += pnl;
         }else if(typeKey === 'stock'){
             categoryTotals.stock += pnl;
+        }else{
+            categoryTotals.other += pnl;
         }
         position.rangePnl = pnl;
         const baseValue = base * qty;
@@ -629,7 +631,7 @@ function transformOperations(records, progressCb){
         }else if(opType === 'ProfitLoss'){
             entry.realized -= spent;
             if(isRentOp){
-                entry.rentRealized = (entry.rentRealized || 0) + spent;
+                entry.rentRealized = (entry.rentRealized || 0) - spent;
             }else{
                 entry.cashflow += spent;
             }
@@ -1612,7 +1614,8 @@ function renderStockAnalytics(){
 
 function updateKpis(){
     positions.forEach(recomputePositionMetrics);
-    const totalPnl = currentRangeTotalPnl;
+    const categoryTotal = currentCategoryRangeTotals.crypto + currentCategoryRangeTotals.stock + currentCategoryRangeTotals.realEstate + currentCategoryRangeTotals.other;
+    const totalPnl = categoryTotal;
     const cashAvailable = positions.filter(p=> (p.type||'').toLowerCase()==='cash').reduce((sum,p)=>sum + Number(p.marketValue||0),0);
 
     const updatedEl = document.getElementById('last-updated');
