@@ -629,10 +629,19 @@ function transformOperations(records, progressCb){
             }
             entry.cashflow += spent;
         }else if(opType === 'ProfitLoss'){
-            entry.realized -= spent;
             if(isRentOp){
-                entry.rentRealized = (entry.rentRealized || 0) - spent;
+                let rentAmount = spent < 0 ? -spent : spent;
+                if(rentAmount === 0 && amount !== 0){
+                    const fallbackPriceCandidate = price || entry.lastKnownPrice || entry.lastPurchasePrice || 0;
+                    const referencePrice = Number.isFinite(Number(fallbackPriceCandidate)) ? Number(fallbackPriceCandidate) : 0;
+                    rentAmount = Math.abs(amount) * Math.abs(referencePrice);
+                }
+                if(rentAmount !== 0){
+                    entry.rentRealized = (entry.rentRealized || 0) + rentAmount;
+                }
+                entry.realized += spent;
             }else{
+                entry.realized -= spent;
                 entry.cashflow += spent;
             }
         }else if(opType === 'DepositWithdrawal'){
@@ -1161,12 +1170,12 @@ function computeRealEstateAnalytics(){
             }
 
             if(isRent){
-                let rentAmount = -spent;
+                let rentAmount = spent < 0 ? -spent : spent;
                 if(rentAmount === 0 && amount !== 0){
                     const referencePrice = price || position.displayPrice || position.lastKnownPrice || position.avgPrice || 0;
-                    rentAmount = amount * referencePrice;
+                    rentAmount = Math.abs(amount) * Math.abs(referencePrice);
                 }
-                if(rentAmount !== 0){
+                if(rentAmount > 0){
                     rentCollected += rentAmount;
                     if(date){
                         const key = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;
