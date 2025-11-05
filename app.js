@@ -85,6 +85,7 @@ const CRYPTO_ICON_PROVIDERS = [
     symbol => `https://assets.coincap.io/assets/icons/${symbol}@2x.png`,
     symbol => `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/${symbol}.png`
 ];
+const assetIconSourceCache = new Map();
 let netContributionTotal = 0;
 let isRangeUpdateInFlight = false;
 const FLASH_DURATION = 1500;
