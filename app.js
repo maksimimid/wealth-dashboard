@@ -1532,9 +1532,11 @@ function createRealEstateRow(stat){
     const isPassive = !stat.rentCollected && !stat.rentYtd && !stat.avgMonthlyRent;
     const rows = [
         `<div><span class="label">Final Asset Price</span><span class="value">${money(stat.finalAssetPrice)}</span></div>`,
-        `<div><span class="label">Outstanding</span><span class="value">${money(stat.netOutstanding)}</span></div>`,
         `<div><span class="label">Projected Value</span><span class="value">${money(stat.projectedValue)}</span></div>`
     ];
+    if(!isPassive){
+        rows.splice(1, 0, `<div><span class="label">Outstanding</span><span class="value">${money(stat.netOutstanding)}</span></div>`);
+    }
     if(!isPassive){
         rows.push(
             `<div><span class="label">Rent Collected</span><span class="value">${money(stat.rentCollected)}</span></div>`,
