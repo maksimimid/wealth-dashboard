@@ -38,7 +38,7 @@ const referencePriceCache = new Map();
 const RANGE_LOOKBACK = {};
 const RANGE_LABELS = { 'ALL': 'All Time' };
 let pnlRange = 'ALL';
-const previousKpiValues = { totalPnl: null, netWorth: null, cashAvailable: null, pnlCrypto: null, pnlStock: null, pnlRealEstate: null };
+const previousKpiValues = { totalPnl: null, netWorth: null, cashAvailable: null, pnlCrypto: null, pnlStock: null, pnlRealEstate: null, pnlOther: null };
 const previousBestPerformer = { id: null, pnl: null, change: null };
 let assetYearSeries = { labels: [], datasets: [] };
 let assetYearSeriesDirty = true;
@@ -80,6 +80,11 @@ const CATEGORY_CONFIG = {
         emptyLabel: 'stock'
     }
 };
+const CRYPTO_ICON_PROVIDERS = [
+    symbol => `https://cryptoicons.org/api/icon/${symbol}/64`,
+    symbol => `https://assets.coincap.io/assets/icons/${symbol}@2x.png`,
+    symbol => `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/${symbol}.png`
+];
 let netContributionTotal = 0;
 let isRangeUpdateInFlight = false;
 const FLASH_DURATION = 1500;
@@ -156,6 +161,82 @@ function formatQty(qty){
     if(abs >= 100) return qty.toFixed(1);
     if(abs >= 10) return qty.toFixed(2);
     return qty.toFixed(4).replace(/0+$/,'').replace(/\.$/,'');
+}
+
+function deriveCryptoIconKey(position){
+    const candidates = [position.Symbol, position.finnhubSymbol, position.displayName, position.Name, position.id];
+    for(const value of candidates){
+        if(!value) continue;
+        let token = String(value).toUpperCase().trim();
+        if(!token) continue;
+        if(token.includes(':')){
+            const parts = token.split(':');
+            token = parts[parts.length - 1];
+        }
+        if(token.includes('/')){
+            token = token.split('/')[0];
+        }
+        const quoteSymbols = ['USDT','USD','USDC','BUSD','EUR','GBP','BTC','ETH','DAI','AUD','CAD','JPY','KRW','TRY','CHF','SGD','MXN'];
+        for(const quote of quoteSymbols){
+            if(token.endsWith(quote)){ token = token.slice(0, -quote.length); break; }
+        }
+        token = token.replace(/[^A-Z0-9]/g,'');
+        if(token.length >= 2 && token.length <= 10){
+            return token.toLowerCase();
+        }
+    }
+    return null;
+}
+
+function resolveAssetIcon(position){
+    if(!position) return null;
+    const typeKey = String(position.type || '').toLowerCase();
+    if(typeKey === 'real estate'){
+        return { sources: ['assets/real-estate.svg'], alt: 'Real estate asset' };
+    }
+    if(['car','vehicle','auto','automobile','transport'].includes(typeKey)){
+        return { sources: ['assets/car.svg'], alt: 'Vehicle asset' };
+    }
+    if(typeKey === 'crypto'){
+        const symbolKey = deriveCryptoIconKey(position);
+        if(symbolKey){
+            return {
+                sources: CRYPTO_ICON_PROVIDERS.map(provider => provider(symbolKey)),
+                alt: `${symbolKey.toUpperCase()} icon`
+            };
+        }
+    }
+    return null;
+}
+
+function createAssetIconElement(position){
+    const icon = resolveAssetIcon(position);
+    if(!icon || !Array.isArray(icon.sources) || !icon.sources.length){
+        return null;
+    }
+    const wrapper = document.createElement('span');
+    wrapper.className = 'asset-icon-wrapper';
+    const img = document.createElement('img');
+    img.className = 'asset-icon';
+    img.alt = icon.alt || '';
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    const sources = icon.sources.slice();
+    let index = 0;
+    const applyNextSource = ()=>{
+        if(index >= sources.length){
+            wrapper.remove();
+            return;
+        }
+        img.src = sources[index];
+        index += 1;
+    };
+    img.addEventListener('error', ()=>{
+        applyNextSource();
+    });
+    wrapper.appendChild(img);
+    applyNextSource();
+    return wrapper;
 }
 
 function ensurePositionDefaults(position){
@@ -1326,8 +1407,15 @@ function updateRealEstateRentals(){
         const utilizationStyle = `width:${utilizationPct.toFixed(2)}%`;
         row.innerHTML = `
             <div class="realestate-main">
-                <div class="symbol">${stat.name}</div>
-                <div class="pos">Purchase ${money(stat.totalPurchase)} · Expenses ${money(stat.totalExpenses)}</div>
+                <div class="asset-heading">
+                    <span class="asset-icon-wrapper">
+                        <img class="asset-icon" src="assets/real-estate.svg" alt="Real estate asset" loading="lazy" decoding="async">
+                    </span>
+                    <div class="asset-label">
+                        <div class="symbol">${stat.name}</div>
+                        <div class="pos">Purchase ${money(stat.totalPurchase)} · Expenses ${money(stat.totalExpenses)}</div>
+                    </div>
+                </div>
             </div>
             <div class="realestate-metrics">
                 <div><span class="label">Final Asset Price</span><span class="value">${money(stat.finalAssetPrice)}</span></div>
@@ -1472,17 +1560,40 @@ function createOpenPositionRow(position, totalCategoryValue){
     const pnlValue = Number((position.rangePnl ?? position.pnl) || 0);
     const share = totalCategoryValue ? (marketValue / totalCategoryValue) * 100 : null;
     const shareText = Number.isFinite(share) ? `${share.toFixed(1)}%` : '—';
-    row.innerHTML = `
-        <div>
-            <div class="symbol">${position.displayName || position.Symbol || position.Name}</div>
-            <div class="pos">Qty ${formatQty(Number(position.qty || 0))} · Price ${money(price)}</div>
-        </div>
-        <div class="analytics-values">
-            <div class="value-strong">${money(marketValue)}</div>
-            <div class="${pnlValue >= 0 ? 'delta-positive' : 'delta-negative'}">${money(pnlValue)}</div>
-            <div class="muted">Category ${shareText}</div>
-        </div>
-    `;
+    const main = document.createElement('div');
+    main.className = 'analytics-main';
+    const iconEl = createAssetIconElement(position);
+    if(iconEl){
+        main.appendChild(iconEl);
+    }
+    const label = document.createElement('div');
+    label.className = 'asset-label';
+    const nameEl = document.createElement('div');
+    nameEl.className = 'symbol';
+    nameEl.textContent = position.displayName || position.Symbol || position.Name;
+    const metaEl = document.createElement('div');
+    metaEl.className = 'pos';
+    metaEl.textContent = `Qty ${formatQty(Number(position.qty || 0))} · Price ${money(price)}`;
+    label.appendChild(nameEl);
+    label.appendChild(metaEl);
+    main.appendChild(label);
+    row.appendChild(main);
+
+    const values = document.createElement('div');
+    values.className = 'analytics-values';
+    const marketEl = document.createElement('div');
+    marketEl.className = 'value-strong';
+    marketEl.textContent = money(marketValue);
+    const pnlEl = document.createElement('div');
+    pnlEl.className = pnlValue >= 0 ? 'delta-positive' : 'delta-negative';
+    pnlEl.textContent = money(pnlValue);
+    const shareEl = document.createElement('div');
+    shareEl.className = 'muted';
+    shareEl.textContent = `Category ${shareText}`;
+    values.appendChild(marketEl);
+    values.appendChild(pnlEl);
+    values.appendChild(shareEl);
+    row.appendChild(values);
     return row;
 }
 
@@ -1490,16 +1601,36 @@ function createClosedPositionRow(position){
     const row = document.createElement('div');
     row.className = 'analytics-row';
     const realized = Number(position.realized || 0);
-    row.innerHTML = `
-        <div>
-            <div class="symbol">${position.displayName || position.Symbol || position.Name}</div>
-            <div class="pos">Realized P&amp;L ${money(realized)}</div>
-        </div>
-        <div class="analytics-values">
-            <div class="${realized >= 0 ? 'delta-positive' : 'delta-negative'}">${money(realized)}</div>
-            <div class="muted">Position closed</div>
-        </div>
-    `;
+    const main = document.createElement('div');
+    main.className = 'analytics-main';
+    const iconEl = createAssetIconElement(position);
+    if(iconEl){
+        main.appendChild(iconEl);
+    }
+    const label = document.createElement('div');
+    label.className = 'asset-label';
+    const nameEl = document.createElement('div');
+    nameEl.className = 'symbol';
+    nameEl.textContent = position.displayName || position.Symbol || position.Name;
+    const metaEl = document.createElement('div');
+    metaEl.className = 'pos';
+    metaEl.textContent = `Realized P&L ${money(realized)}`;
+    label.appendChild(nameEl);
+    label.appendChild(metaEl);
+    main.appendChild(label);
+    row.appendChild(main);
+
+    const values = document.createElement('div');
+    values.className = 'analytics-values';
+    const pnlEl = document.createElement('div');
+    pnlEl.className = realized >= 0 ? 'delta-positive' : 'delta-negative';
+    pnlEl.textContent = money(realized);
+    const statusEl = document.createElement('div');
+    statusEl.className = 'muted';
+    statusEl.textContent = 'Position closed';
+    values.appendChild(pnlEl);
+    values.appendChild(statusEl);
+    row.appendChild(values);
     return row;
 }
 
@@ -1612,8 +1743,7 @@ function renderStockAnalytics(){
 
 function updateKpis(){
     positions.forEach(recomputePositionMetrics);
-    const categoryTotal = currentCategoryRangeTotals.crypto + currentCategoryRangeTotals.stock + currentCategoryRangeTotals.realEstate + currentCategoryRangeTotals.other;
-    const totalPnl = categoryTotal;
+    const totalPnl = currentCategoryRangeTotals.crypto + currentCategoryRangeTotals.stock + currentCategoryRangeTotals.realEstate + currentCategoryRangeTotals.other;
     const cashAvailable = positions.filter(p=> (p.type||'').toLowerCase()==='cash').reduce((sum,p)=>sum + Number(p.marketValue||0),0);
 
     const updatedEl = document.getElementById('last-updated');
@@ -1624,6 +1754,7 @@ function updateKpis(){
     setCategoryPnl('pnl-category-crypto', currentCategoryRangeTotals.crypto || 0, 'pnlCrypto');
     setCategoryPnl('pnl-category-stock', currentCategoryRangeTotals.stock || 0, 'pnlStock');
     setCategoryPnl('pnl-category-realestate', currentCategoryRangeTotals.realEstate || 0, 'pnlRealEstate');
+    setCategoryPnl('pnl-category-other', currentCategoryRangeTotals.other || 0, 'pnlOther');
     if(updatedEl) updatedEl.textContent = lastUpdated ? formatTime(lastUpdated) : '—';
 
     const bestNameEl = document.getElementById('best-performer-name');

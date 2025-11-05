@@ -249,7 +249,7 @@ h1 {
 
 .pnl-breakdown {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
     gap: 12px;
     width: 100%;
     margin-top: 10px;
@@ -362,6 +362,41 @@ h1 {
 
 .realestate-card {
     min-height: 420px;
+}
+
+.card-header-with-icon {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    position: relative;
+    z-index: 1;
+}
+
+.card-heading {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.card-icon {
+    width: 46px;
+    height: 46px;
+    border-radius: 16px;
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 10px 24px rgba(2, 6, 23, 0.45);
+    overflow: hidden;
+}
+
+.card-icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
 }
 
 .chart-section {
@@ -566,6 +601,40 @@ h1 {
 
 .analytics-row:hover {
     border-color: rgba(59, 130, 246, 0.35);
+}
+
+.analytics-main,
+.asset-heading {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.asset-label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.asset-icon-wrapper {
+    width: 36px;
+    height: 36px;
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 6px 16px rgba(2, 6, 23, 0.45);
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.asset-icon {
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
+    display: block;
 }
 
 .analytics-row .pos {
@@ -868,6 +937,8 @@ body.light-theme .analytics-row { background: rgba(255, 255, 255, 0.9); border-c
 body.light-theme .analytics-row:hover { border-color: rgba(99, 102, 241, 0.45); }
 body.light-theme .metric .label { color: #64748b; }
 body.light-theme .metric .value { color: #0f172a; }
+body.light-theme .card-icon { background: rgba(226, 232, 240, 0.85); border-color: rgba(148, 163, 184, 0.45); box-shadow: 0 10px 20px rgba(148, 163, 184, 0.35); }
+body.light-theme .asset-icon-wrapper { background: rgba(226, 232, 240, 0.85); border-color: rgba(148, 163, 184, 0.45); box-shadow: 0 6px 14px rgba(148, 163, 184, 0.3); }
 body.light-theme .muted { color: #64748b; }
 body.light-theme .analytics-section { background: rgba(255, 255, 255, 0.9); border-color: rgba(148, 163, 184, 0.4); }
 body.light-theme .analytics-section[open] summary { background: rgba(148, 163, 184, 0.15); border-color: rgba(148, 163, 184, 0.35); }
