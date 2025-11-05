@@ -27,7 +27,7 @@ let charts = {};
 let ws;
 let lastUpdated = null;
 let operationsMeta = {count: 0, fetchedAt: null};
-const UI_REFRESH_INTERVAL = 5000;
+const UI_REFRESH_INTERVAL = 10000;
 const CRYPTO_UI_INTERVAL = 10000;
 let lastRenderAt = 0;
 let scheduledRender = null;
@@ -1294,6 +1294,7 @@ function computeRealEstateAnalytics(){
         let earliestEvent = null;
         const rentMonths = new Set();
         const rentMonthsLast12 = new Set();
+        const typeKey = String(position.type || '').toLowerCase();
 
         ops.forEach(op=>{
             const spentRaw = Number(op.spent || 0);
@@ -1378,13 +1379,21 @@ function computeRealEstateAnalytics(){
 
         const marketValue = Number(position.marketValue || 0);
         realEstateTotalValue += finalAssetPrice;
+        const baseForHoldingPeriod = earliestPurchase instanceof Date ? earliestPurchase : (earliestEvent instanceof Date ? earliestEvent : null);
+        const yearsHeld = baseForHoldingPeriod ? Math.max(0, (now - baseForHoldingPeriod) / (365 * 24 * 3600 * 1000)) : 0;
         let projectedValue = finalAssetPrice;
-        if(earliestPurchase instanceof Date){
-            const yearsHeld = Math.max(0, (now - earliestPurchase) / (365 * 24 * 3600 * 1000));
-            projectedValue = finalAssetPrice * Math.pow(1.05, Math.max(0, yearsHeld));
+        if(typeKey === 'automobile' || typeKey === 'automotive'){
+            const depreciationRate = 0.004; // 0.4% per year
+            const factor = Math.max(0, 1 - depreciationRate * (yearsHeld || 1));
+            projectedValue = finalAssetPrice * factor;
         }else{
-            projectedValue = finalAssetPrice * 1.05;
+            if(baseForHoldingPeriod){
+                projectedValue = finalAssetPrice * Math.pow(1.05, Math.max(yearsHeld, 1));
+            }else{
+                projectedValue = finalAssetPrice * 1.05;
+            }
         }
+        projectedValue = Number(projectedValue.toFixed(2));
 
         results.push({
             name: position.displayName || position.Symbol || position.Name || `Asset ${idx+1}`,
