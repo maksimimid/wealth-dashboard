@@ -615,6 +615,7 @@ h1 {
     flex-direction: column;
     gap: 4px;
     min-width: 0;
+    flex: 1;
 }
 
 .asset-icon-wrapper {
@@ -679,6 +680,10 @@ h1 {
     display: flex;
     flex-direction: column;
     gap: 14px;
+}
+
+.realestate-group {
+    width: 100%;
 }
 
 .realestate-row {

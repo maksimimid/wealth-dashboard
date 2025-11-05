@@ -46,6 +46,7 @@ const assetColorCache = new Map();
 let realEstateRentSeries = { labels: [], datasets: [] };
 let realEstateRentSeriesDirty = true;
 const realEstateRentFilters = new Map();
+const realEstateGroupState = { active: true, passive: false };
 const previousCategorySummaries = {
     crypto: { market: null, pnl: null, allocation: null },
     stock: { market: null, pnl: null, allocation: null }
@@ -210,6 +211,19 @@ function resolveAssetIcon(position){
     return null;
 }
 
+function getIconCacheKey(position){
+    if(!position) return null;
+    if(position.iconCacheKey) return position.iconCacheKey;
+    const candidates = [position.id, position.Symbol, position.displayName, position.Name];
+    const key = candidates.find(value => value !== undefined && value !== null && String(value).trim().length);
+    if(key !== undefined && key !== null){
+        const resolved = String(key).trim();
+        position.iconCacheKey = resolved;
+        return resolved;
+    }
+    return null;
+}
+
 function createAssetIconElement(position){
     const icon = resolveAssetIcon(position);
     if(!icon || !Array.isArray(icon.sources) || !icon.sources.length){
@@ -220,23 +234,61 @@ function createAssetIconElement(position){
     const img = document.createElement('img');
     img.className = 'asset-icon';
     img.alt = icon.alt || '';
-    img.loading = 'lazy';
-    img.decoding = 'async';
+    img.loading = 'eager';
+    img.decoding = 'sync';
+    img.referrerPolicy = 'no-referrer';
+    img.width = 36;
+    img.height = 36;
+    const cacheKey = getIconCacheKey(position);
+    if(cacheKey && position.iconCacheKey !== cacheKey){
+        position.iconCacheKey = cacheKey;
+    }
+    if(cacheKey && assetIconSourceCache.has(cacheKey)){
+        const cachedSource = assetIconSourceCache.get(cacheKey);
+        if(cachedSource){
+            img.src = cachedSource;
+            wrapper.appendChild(img);
+            return wrapper;
+        }
+        return null;
+    }
+
     const sources = icon.sources.slice();
     let index = 0;
+    let failed = false;
     const applyNextSource = ()=>{
         if(index >= sources.length){
-            wrapper.remove();
+            failed = true;
+            if(cacheKey){
+                assetIconSourceCache.set(cacheKey, null);
+            }
             return;
         }
         img.src = sources[index];
         index += 1;
     };
+
     img.addEventListener('error', ()=>{
         applyNextSource();
+        if(failed){
+            wrapper.remove();
+        }
     });
-    wrapper.appendChild(img);
+
+    img.addEventListener('load', ()=>{
+        if(cacheKey && !assetIconSourceCache.has(cacheKey)){
+            const resolvedSrc = img.currentSrc || img.src;
+            if(resolvedSrc){
+                assetIconSourceCache.set(cacheKey, resolvedSrc);
+            }
+        }
+    }, { once: true });
+
     applyNextSource();
+    if(failed){
+        return null;
+    }
+    wrapper.appendChild(img);
     return wrapper;
 }
 
@@ -818,6 +870,7 @@ function useFallbackPositions(){
 async function loadPositions(){
     symbolSet = new Set();
     finnhubIndex = new Map();
+    assetIconSourceCache.clear();
     try{
         reportLoading('Connecting to Airtable API…');
         const records = await fetchAllAirtableOperations(reportLoading);
@@ -1260,7 +1313,12 @@ function computeRealEstateAnalytics(){
             const cashImpact = spent !== 0 ? spent : (amount !== 0 && price !== 0 ? amount * price : 0);
             const isRent = (type === 'profitloss') && hasRentTag;
             const isPurchase = type === 'purchasesell' && cashImpact > 0;
-            const isExpense = (!isPurchase && !isRent) && (hasExpenseTag || type.includes('expense') || type.includes('maintenance') || type.includes('hoa') || type.includes('tax') || type.includes('mortgage') || type.includes('interest') || cashImpact > 0);
+            const expenseKeywords = ['expense','maintenance','hoa','tax','mortgage','interest','service','fee','fees','insurance','repair','repairs','utility','utilities','management'];
+            const matchesExpenseKeyword = expenseKeywords.some(keyword=> type.includes(keyword));
+            const isExpenseCandidate = !isPurchase && !isRent;
+            const isProfitLoss = type === 'profitloss';
+            const isExpense = isExpenseCandidate && (hasExpenseTag || matchesExpenseKeyword || (isProfitLoss && cashImpact > 0));
+            const isCashOutExpense = isExpenseCandidate && cashImpact < 0 && !type.includes('deposit') && !type.includes('withdraw');
 
             if(isPurchase){
                 if(date && (!earliestPurchase || date < earliestPurchase)){
@@ -1273,10 +1331,9 @@ function computeRealEstateAnalytics(){
 
             if(isRent){
                 let rentAmount = spent < 0 ? -spent : spent;
-                
+
                 if(rentAmount > 0){
                     rentCollected += rentAmount;
-                    console.log(op, rentCollected, rentAmount)
                     if(date){
                         const key = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;
                         rentMonths.add(key);
@@ -1299,7 +1356,7 @@ function computeRealEstateAnalytics(){
                 return;
             }
 
-            if(isExpense || (cashImpact > 0 && !isRent && !isPurchase)){
+            if((isExpense || isCashOutExpense) && cashImpact !== 0){
                 const expenseAmount = Math.abs(cashImpact);
                 totalExpenses += expenseAmount;
             }
@@ -1410,6 +1467,58 @@ function computeRealEstateAnalytics(){
     return { rows, totalValue: realEstateTotalValue, allocation };
 }
 
+function createRealEstateRow(stat){
+    const row = document.createElement('div');
+    row.className = 'realestate-row';
+    const utilizationPct = Number.isFinite(Number(stat.utilization)) ? Math.max(0, Math.min(100, Number(stat.utilization))) : 0;
+    const utilizationStyle = `width:${utilizationPct.toFixed(2)}%`;
+
+    const main = document.createElement('div');
+    main.className = 'realestate-main';
+    const heading = document.createElement('div');
+    heading.className = 'asset-heading';
+    const iconEl = stat.positionRef ? createAssetIconElement(stat.positionRef) : null;
+    if(iconEl){
+        heading.appendChild(iconEl);
+    }
+    const label = document.createElement('div');
+    label.className = 'asset-label';
+    const nameEl = document.createElement('div');
+    nameEl.className = 'symbol';
+    nameEl.textContent = stat.name;
+    const metaEl = document.createElement('div');
+    metaEl.className = 'pos';
+    const categoryText = stat.category || '—';
+    metaEl.textContent = `Category ${categoryText} · Purchase ${money(stat.totalPurchase)} · Expenses ${money(stat.totalExpenses)}`;
+    label.appendChild(nameEl);
+    label.appendChild(metaEl);
+    heading.appendChild(label);
+    main.appendChild(heading);
+    row.appendChild(main);
+
+    const metrics = document.createElement('div');
+    metrics.className = 'realestate-metrics';
+    metrics.innerHTML = `
+        <div><span class="label">Final Asset Price</span><span class="value">${money(stat.finalAssetPrice)}</span></div>
+        <div><span class="label">Outstanding</span><span class="value">${money(stat.netOutstanding)}</span></div>
+        <div><span class="label">Projected Value</span><span class="value">${money(stat.projectedValue)}</span></div>
+        <div><span class="label">Rent Collected</span><span class="value">${money(stat.rentCollected)}</span></div>
+        <div><span class="label">Rent YTD</span><span class="value">${money(stat.rentYtd)}</span></div>
+        <div><span class="label">Rent / Mo</span><span class="value">${money(stat.avgMonthlyRent)}</span></div>
+        <div>
+            <span class="label">Utilization</span>
+            <span class="value">${Number.isFinite(Number(stat.utilization)) ? `${Number(stat.utilization).toFixed(1)}%` : '—'}</span>
+            <div class="realestate-progress" role="presentation">
+                <div class="realestate-progress-bar" style="${utilizationStyle}"></div>
+            </div>
+        </div>
+        <div><span class="label">Payoff ETA</span><span class="value">${formatDurationFromMonths(stat.payoffMonths)}</span></div>
+    `;
+    row.appendChild(metrics);
+
+    return row;
+}
+
 function updateRealEstateRentals(){
     const container = document.getElementById('realestate-stats');
     if(!container) return;
@@ -1431,57 +1540,50 @@ function updateRealEstateRentals(){
         container.innerHTML = '<div class="pos">No rental activity recorded yet.</div>';
         return;
     }
+    const isActiveStat = stat => {
+        return ['rentCollected','rentYtd','avgMonthlyRent'].some(key=> Math.abs(Number(stat[key] || 0)) > 1e-6);
+    };
+    const activeStats = stats.filter(isActiveStat);
+    const passiveStats = stats.filter(stat=> !isActiveStat(stat));
+
     container.innerHTML = '';
-    stats.forEach(stat=>{
-        const row = document.createElement('div');
-        row.className = 'realestate-row';
-        const utilizationPct = Number.isFinite(Number(stat.utilization)) ? Math.max(0, Math.min(100, Number(stat.utilization))) : 0;
-        const utilizationStyle = `width:${utilizationPct.toFixed(2)}%`;
 
-        const main = document.createElement('div');
-        main.className = 'realestate-main';
-        const heading = document.createElement('div');
-        heading.className = 'asset-heading';
-        const iconEl = stat.positionRef ? createAssetIconElement(stat.positionRef) : null;
-        if(iconEl){
-            heading.appendChild(iconEl);
-        }
-        const label = document.createElement('div');
-        label.className = 'asset-label';
-        const nameEl = document.createElement('div');
-        nameEl.className = 'symbol';
-        nameEl.textContent = stat.name;
-        const metaEl = document.createElement('div');
-        metaEl.className = 'pos';
-        const categoryText = stat.category || '—';
-        metaEl.textContent = `Category ${categoryText} · Purchase ${money(stat.totalPurchase)} · Expenses ${money(stat.totalExpenses)}`;
-        label.appendChild(nameEl);
-        label.appendChild(metaEl);
-        heading.appendChild(label);
-        main.appendChild(heading);
-        row.appendChild(main);
+    const groups = [
+        { id: 'active', title: 'Active assets', stats: activeStats, open: true, empty: 'No active rental or automobile assets yet.' },
+        { id: 'passive', title: 'Passive assets', stats: passiveStats, open: false, empty: 'No passive rental or automobile assets right now.' }
+    ];
 
-        const metrics = document.createElement('div');
-        metrics.className = 'realestate-metrics';
-        metrics.innerHTML = `
-            <div><span class="label">Final Asset Price</span><span class="value">${money(stat.finalAssetPrice)}</span></div>
-            <div><span class="label">Outstanding</span><span class="value">${money(stat.netOutstanding)}</span></div>
-            <div><span class="label">Projected Value</span><span class="value">${money(stat.projectedValue)}</span></div>
-            <div><span class="label">Rent Collected</span><span class="value">${money(stat.rentCollected)}</span></div>
-            <div><span class="label">Rent YTD</span><span class="value">${money(stat.rentYtd)}</span></div>
-            <div><span class="label">Rent / Mo</span><span class="value">${money(stat.avgMonthlyRent)}</span></div>
-            <div>
-                <span class="label">Utilization</span>
-                <span class="value">${Number.isFinite(Number(stat.utilization)) ? `${Number(stat.utilization).toFixed(1)}%` : '—'}</span>
-                <div class="realestate-progress" role="presentation">
-                    <div class="realestate-progress-bar" style="${utilizationStyle}"></div>
-                </div>
+    groups.forEach(group=>{
+        const section = document.createElement('details');
+        section.className = 'analytics-section realestate-group';
+        const desiredOpen = realEstateGroupState[group.id];
+        const shouldOpen = desiredOpen === undefined ? group.open : desiredOpen;
+        section.open = Boolean(shouldOpen);
+        const summary = document.createElement('summary');
+        summary.innerHTML = `
+            <div class="summary-left">
+                <span class="summary-title">${group.title}</span>
+                <span class="summary-count">${group.stats.length}</span>
             </div>
-            <div><span class="label">Payoff ETA</span><span class="value">${formatDurationFromMonths(stat.payoffMonths)}</span></div>
         `;
-        row.appendChild(metrics);
-
-        container.appendChild(row);
+        section.appendChild(summary);
+        const content = document.createElement('div');
+        content.className = 'analytics-section-content';
+        if(!group.stats.length){
+            const empty = document.createElement('div');
+            empty.className = 'pos';
+            empty.textContent = group.empty;
+            content.appendChild(empty);
+        }else{
+            group.stats.forEach(stat=>{
+                content.appendChild(createRealEstateRow(stat));
+            });
+        }
+        section.appendChild(content);
+        section.addEventListener('toggle', ()=>{
+            realEstateGroupState[group.id] = section.open;
+        });
+        container.appendChild(section);
     });
 }
 
