@@ -629,7 +629,11 @@ function transformOperations(records, progressCb){
         }else if(opType === 'ProfitLoss'){
             entry.realized -= spent;
             if(isRentOp){
-                entry.rentRealized = (entry.rentRealized || 0) - spent;
+                if(spent < 0){
+                    entry.rentRealized = (entry.rentRealized || 0) + Math.abs(spent);
+                }else{
+                    entry.rentRealized = entry.rentRealized || 0;
+                }
             }else{
                 entry.cashflow += spent;
             }
@@ -1159,31 +1163,39 @@ function computeRealEstateAnalytics(){
             }
 
             if(isRent){
-                let rentAmount = spent < 0 ? -spent : spent;
-                if(rentAmount === 0 && amount !== 0){
-                    const referencePrice = price || position.displayPrice || position.lastKnownPrice || position.avgPrice || 0;
-                    rentAmount = Math.abs(amount) * referencePrice;
-                }
-                if(rentAmount > 0){
-                    rentCollected += rentAmount;
-                    if(date){
-                        const key = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;
-                        rentMonths.add(key);
-                        const yr = date.getFullYear();
-                        rentYearTotals.set(yr, (rentYearTotals.get(yr) || 0) + rentAmount);
-                        rentYearSet.add(yr);
-                        const assetKey = position.displayName || position.Symbol || position.Name || `Asset ${idx+1}`;
-                        if(!rentYearTotalsByAsset.has(assetKey)) rentYearTotalsByAsset.set(assetKey, new Map());
-                        const assetYearMap = rentYearTotalsByAsset.get(assetKey);
-                        assetYearMap.set(yr, (assetYearMap.get(yr) || 0) + rentAmount);
-                        if(date >= cutoffStart){
-                            rentLast12 += rentAmount;
-                            rentMonthsLast12.add(key);
-                        }
-                        if(date.getFullYear() === currentYear){
-                            rentYtd += rentAmount;
+                if(spent < 0 || (spent === 0 && amount !== 0)){
+                    let rentAmount = spent < 0 ? -spent : 0;
+                    if(rentAmount === 0 && amount !== 0){
+                        const referencePrice = price || position.displayPrice || position.lastKnownPrice || position.avgPrice || 0;
+                        rentAmount = Math.abs(amount) * referencePrice;
+                    }
+                    if(rentAmount > 0){
+                        rentCollected += rentAmount;
+                        if(date){
+                            const key = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;
+                            rentMonths.add(key);
+                            const yr = date.getFullYear();
+                            rentYearTotals.set(yr, (rentYearTotals.get(yr) || 0) + rentAmount);
+                            rentYearSet.add(yr);
+                            const assetKey = position.displayName || position.Symbol || position.Name || `Asset ${idx+1}`;
+                            if(!rentYearTotalsByAsset.has(assetKey)) rentYearTotalsByAsset.set(assetKey, new Map());
+                            const assetYearMap = rentYearTotalsByAsset.get(assetKey);
+                            assetYearMap.set(yr, (assetYearMap.get(yr) || 0) + rentAmount);
+                            if(date >= cutoffStart){
+                                rentLast12 += rentAmount;
+                                rentMonthsLast12.add(key);
+                            }
+                            if(date.getFullYear() === currentYear){
+                                rentYtd += rentAmount;
+                            }
                         }
                     }
+                    return;
+                }
+                // If tagged as rent but cash outflow, treat as expense instead
+                const expenseAmount = Math.abs(cashImpact);
+                if(expenseAmount > 0){
+                    totalExpenses += expenseAmount;
                 }
                 return;
             }
