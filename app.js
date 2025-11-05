@@ -103,6 +103,12 @@ function setLoadingState(state, message){
     }
 }
 
+function reportLoading(message){
+    if(!message) return;
+    setLoadingState('visible', message);
+    setStatus(message);
+}
+
 // ----------------- UTIL ---------------------
 function money(v){
     if(v===null || v===undefined || Number.isNaN(Number(v))) return '—';
@@ -348,7 +354,7 @@ function mapFinnhubSymbol(asset, category, isOverride = false){
     return null;
 }
 
-async function refineFinnhubSymbols(){
+async function refineFinnhubSymbols(progressCb){
     if(!FINNHUB_KEY || typeof fetch !== 'function') return;
     const unresolved = positions.filter(position=>{
         const cat = (position.type || '').toLowerCase();
@@ -363,7 +369,12 @@ async function refineFinnhubSymbols(){
         if(symbol.includes(':')) return false;
         return true;
     });
-    for(const position of unresolved){
+    const total = unresolved.length;
+    if(typeof progressCb === 'function' && total){
+        progressCb(0, total);
+    }
+    for(let idx = 0; idx < unresolved.length; idx += 1){
+        const position = unresolved[idx];
         try{
             const resolved = await fetchFinnhubSymbol(position);
             if(resolved){
@@ -372,6 +383,9 @@ async function refineFinnhubSymbols(){
             }
         }catch(error){
             console.warn('Finnhub search failed', position.Name, error);
+        }
+        if(typeof progressCb === 'function' && total){
+            progressCb(idx + 1, total, position);
         }
         await new Promise(resolve=>setTimeout(resolve, 150));
     }
@@ -450,16 +464,23 @@ function sortByDateAscending(records){
 }
 
 // ----------------- DATA LOADERS ---------------------
-async function fetchAllAirtableOperations(){
+async function fetchAllAirtableOperations(onProgress){
     if(!AIRTABLE_API_KEY) throw new Error('Missing Airtable API key');
     const records = [];
     let offset = '';
+    let page = 1;
+    if(typeof onProgress === 'function'){
+        onProgress('Connecting to Airtable API…');
+    }
     do{
         const params = new URLSearchParams();
         params.append('pageSize','100');
         params.append('sort[0][field]','Date');
         params.append('sort[0][direction]','asc');
         if(offset) params.append('offset', offset);
+        if(typeof onProgress === 'function'){
+            onProgress(`Fetching Airtable batch ${page}…`);
+        }
         const url = `${AIRTABLE_URL}?${params.toString()}`;
         const res = await fetch(url,{headers:{Authorization:`Bearer ${AIRTABLE_API_KEY}`}});
         if(!res.ok){
@@ -469,14 +490,23 @@ async function fetchAllAirtableOperations(){
         const json = await res.json();
         records.push(...(json.records||[]));
         offset = json.offset;
+        if(typeof onProgress === 'function'){
+            const suffix = offset ? '…' : '.';
+            onProgress(`Fetched ${records.length} Airtable records${suffix}`);
+        }
+        page += 1;
     }while(offset);
     return records;
 }
 
-function transformOperations(records){
+function transformOperations(records, progressCb){
     const ordered = sortByDateAscending(records);
     const map = new Map();
-    ordered.forEach(rec=>{
+    const total = ordered.length;
+    if(typeof progressCb === 'function'){
+        progressCb(0, total);
+    }
+    ordered.forEach((rec, index)=>{
         const fields = rec.fields || {};
         const assetRaw = fields.Asset || fields.Name;
         if(!assetRaw) return;
@@ -572,6 +602,9 @@ function transformOperations(records){
         if(!entry.lastKnownPrice && entry.lastPurchasePrice){
             entry.lastKnownPrice = entry.lastPurchasePrice;
         }
+        if(typeof progressCb === 'function'){
+            progressCb(index + 1, total, asset);
+        }
     });
 
     return Array.from(map.values()).map(p=>{
@@ -621,12 +654,35 @@ async function loadPositions(){
     symbolSet = new Set();
     finnhubIndex = new Map();
     try{
-        setLoadingState('visible','Loading Airtable…');
-        setStatus('Loading Airtable operations…');
-        const records = await fetchAllAirtableOperations();
+        reportLoading('Connecting to Airtable API…');
+        const records = await fetchAllAirtableOperations(reportLoading);
         operationsMeta = {count: records.length, fetchedAt: new Date()};
-        positions = transformOperations(records);
-        await refineFinnhubSymbols();
+        if(records.length){
+            reportLoading(`Processing operations… 0/${records.length}`);
+        }else{
+            reportLoading('Processing operations…');
+        }
+        positions = transformOperations(records, (processed, total, asset)=>{
+            if(!total){
+                reportLoading('Processing operations…');
+                return;
+            }
+            const safeProcessed = Math.min(processed, total);
+            const label = asset && safeProcessed ? ` · ${asset}` : '';
+            reportLoading(`Processing operations… ${safeProcessed}/${total}${label}`);
+        });
+        reportLoading('Resolving market symbols…');
+        await refineFinnhubSymbols((processed, total, position)=>{
+            if(!total){
+                reportLoading('Resolving market symbols…');
+                return;
+            }
+            const safeProcessed = Math.min(processed, total);
+            const labelSource = position ? (position.displayName || position.Symbol || position.Name) : '';
+            const label = labelSource && safeProcessed ? ` · ${labelSource}` : '';
+            reportLoading(`Resolving market symbols… ${safeProcessed}/${total}${label}`);
+        });
+        reportLoading('Preparing dashboard data…');
         netContributionTotal = positions.reduce((sum,p)=>sum + Number(p.cashflow || 0),0);
         symbolSet = new Set();
         finnhubIndex = new Map();
