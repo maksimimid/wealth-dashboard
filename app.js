@@ -28,6 +28,7 @@ let ws;
 let lastUpdated = null;
 let operationsMeta = {count: 0, fetchedAt: null};
 const UI_REFRESH_INTERVAL = 5000;
+const CRYPTO_UI_INTERVAL = 10000;
 let lastRenderAt = 0;
 let scheduledRender = null;
 let currentRangeTotalPnl = 0;
@@ -53,6 +54,8 @@ const categorySectionState = {
     crypto: { open: true, closed: false },
     stock: { open: true, closed: false }
 };
+let lastCryptoUiSync = 0;
+let pendingCryptoUiSync = null;
 const CATEGORY_CONFIG = {
     crypto: {
         metricKey: 'crypto',
@@ -839,7 +842,12 @@ function applyRealtime(symbol, price){
     recomputePositionMetrics(pos);
     lastUpdated = new Date();
     rangeDirty = true;
-    scheduleUIUpdate();
+    const type = (pos.type || '').toLowerCase();
+    if(type === 'crypto'){
+        scheduleCryptoUiUpdate();
+    }else{
+        scheduleUIUpdate();
+    }
 }
 
 // ----------------- RENDER CHARTS -----------------
@@ -1716,6 +1724,26 @@ function scheduleUIUpdate(options = {}){
             }
             renderDashboard();
         }, UI_REFRESH_INTERVAL - elapsed);
+    }
+}
+
+function scheduleCryptoUiUpdate(){
+    const now = Date.now();
+    const elapsed = now - lastCryptoUiSync;
+    if(elapsed >= CRYPTO_UI_INTERVAL){
+        if(pendingCryptoUiSync){
+            clearTimeout(pendingCryptoUiSync);
+            pendingCryptoUiSync = null;
+        }
+        lastCryptoUiSync = now;
+        scheduleUIUpdate({immediate:true});
+    }else if(!pendingCryptoUiSync){
+        const remaining = CRYPTO_UI_INTERVAL - elapsed;
+        pendingCryptoUiSync = setTimeout(()=>{
+            pendingCryptoUiSync = null;
+            lastCryptoUiSync = Date.now();
+            scheduleUIUpdate({immediate:true});
+        }, remaining);
     }
 }
 
