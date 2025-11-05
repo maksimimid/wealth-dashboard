@@ -763,6 +763,10 @@ h1 {
     color: var(--muted);
 }
 
+.analytics-row .pos .price-warning {
+    color: #facc15;
+}
+
 .analytics-values {
     display: flex;
     flex-direction: column;
@@ -1119,6 +1123,7 @@ body.light-theme .modal-content { background: rgba(255, 255, 255, 0.96); border-
 body.light-theme .modal-close { background: rgba(148, 163, 184, 0.2); color: #1e293b; }
 body.light-theme .modal-close:hover { background: rgba(79, 70, 229, 0.35); }
 body.light-theme .modal-subtitle { color: #475569; }
+body.light-theme .modal-note { color: #64748b; }
 body.light-theme .muted { color: #64748b; }
 body.light-theme .analytics-section { background: rgba(255, 255, 255, 0.9); border-color: rgba(148, 163, 184, 0.4); }
 body.light-theme .analytics-section[open] summary { background: rgba(148, 163, 184, 0.15); border-color: rgba(148, 163, 184, 0.35); }

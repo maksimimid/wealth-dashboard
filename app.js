@@ -318,7 +318,12 @@ function ensurePositionDefaults(position){
 }
 
 function applyLivePrice(position, price){
-    if(price === undefined || price === null) return;
+    if(price === undefined || price === null || Number(price) === 0){
+        if(!position.priceStatus){
+            position.priceStatus = 'Price failed to update';
+        }
+        return;
+    }
     ensurePositionDefaults(position);
     const previous = position.displayPrice;
     if(previous !== undefined && previous !== null && price !== previous){
@@ -329,6 +334,7 @@ function applyLivePrice(position, price){
     position.displayPrice = price;
     position.currentPrice = price;
     position.lastPriceUpdate = Date.now();
+    position.priceStatus = null;
 }
 
 function flashElement(element, direction){
@@ -1523,21 +1529,27 @@ function createRealEstateRow(stat){
     const utilizationValue = hasUtilization ? Math.max(0, Math.min(utilizationValueRaw, 100)) : null;
     const utilizationDisplay = hasUtilization ? `${utilizationValue.toFixed(1)}%` : '—';
     const utilizationProgress = hasUtilization ? (utilizationValue / 100) : 0;
-    metrics.innerHTML = `
-        <div><span class="label">Final Asset Price</span><span class="value">${money(stat.finalAssetPrice)}</span></div>
-        <div><span class="label">Outstanding</span><span class="value">${money(stat.netOutstanding)}</span></div>
-        <div><span class="label">Projected Value</span><span class="value">${money(stat.projectedValue)}</span></div>
-        <div><span class="label">Rent Collected</span><span class="value">${money(stat.rentCollected)}</span></div>
-        <div><span class="label">Rent YTD</span><span class="value">${money(stat.rentYtd)}</span></div>
-        <div><span class="label">Rent / Mo</span><span class="value">${money(stat.avgMonthlyRent)}</span></div>
-        <div class="utilization-block">
-            <span class="label">Utilization</span>
-            <div class="circle-progress" style="--progress:${utilizationProgress};">
-                <div class="circle-progress-inner"><span>${utilizationDisplay}</span></div>
-            </div>
-        </div>
-        <div><span class="label">Payoff ETA</span><span class="value">${formatDurationFromMonths(stat.payoffMonths)}</span></div>
-    `;
+    const isPassive = !stat.rentCollected && !stat.rentYtd && !stat.avgMonthlyRent;
+    const rows = [
+        `<div><span class="label">Final Asset Price</span><span class="value">${money(stat.finalAssetPrice)}</span></div>`,
+        `<div><span class="label">Outstanding</span><span class="value">${money(stat.netOutstanding)}</span></div>`,
+        `<div><span class="label">Projected Value</span><span class="value">${money(stat.projectedValue)}</span></div>`
+    ];
+    if(!isPassive){
+        rows.push(
+            `<div><span class="label">Rent Collected</span><span class="value">${money(stat.rentCollected)}</span></div>`,
+            `<div><span class="label">Rent YTD</span><span class="value">${money(stat.rentYtd)}</span></div>`,
+            `<div><span class="label">Rent / Mo</span><span class="value">${money(stat.avgMonthlyRent)}</span></div>`,
+            `<div class="utilization-block">`
+            + `<span class="label">Utilization</span>`
+            + `<div class="circle-progress" style="--progress:${utilizationProgress};">`
+            + `<div class="circle-progress-inner"><span>${utilizationDisplay}</span></div>`
+            + `</div>`
+            + `</div>`,
+            `<div><span class="label">Payoff ETA</span><span class="value">${formatDurationFromMonths(stat.payoffMonths)}</span></div>`
+        );
+    }
+    metrics.innerHTML = rows.join('');
     row.appendChild(metrics);
 
     return row;
@@ -1919,7 +1931,11 @@ function openTransactionModal(position){
         transactionModalTitle.textContent = `${displayName} transactions`;
     }
     if(transactionModalSubtitle){
-        transactionModalSubtitle.textContent = position.type || '—';
+            transactionModalSubtitle.textContent = position.type || '—';
+            const note = document.createElement('div');
+            note.className = 'pos modal-note';
+            note.textContent = 'Dot size represents traded quantity.';
+            transactionModalSubtitle.appendChild(note);
     }
 
     const hasData = data.purchases.length || data.sales.length;
@@ -2017,7 +2033,9 @@ function createOpenPositionRow(position, totalCategoryValue){
     nameEl.textContent = position.displayName || position.Symbol || position.Name;
     const metaEl = document.createElement('div');
     metaEl.className = 'pos';
-    metaEl.textContent = `Qty ${formatQty(Number(position.qty || 0))} · Price ${money(price)}`;
+    const qtyText = `Qty ${formatQty(Number(position.qty || 0))}`;
+    const priceLabel = position.priceStatus ? `${money(price)} · ⚠ ${position.priceStatus}` : money(price);
+    metaEl.innerHTML = `${qtyText} · Price ${position.priceStatus ? `<span class="price-warning">${priceLabel}</span>` : priceLabel}`;
     label.appendChild(nameEl);
     label.appendChild(metaEl);
     main.appendChild(label);
