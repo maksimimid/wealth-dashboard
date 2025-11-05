@@ -315,10 +315,23 @@ function recomputeRangeMetrics(range){
         const prevRange = position.rangePnl ?? null;
         const unrealized = (price - base) * qty;
         const realized = Number(position.realized || 0);
-        const pnl = unrealized + realized;
-        const baseValue = base * qty;
-        const denominator = baseValue !== 0 ? baseValue : Math.abs(position.invested) || Math.abs(realized) || 1;
+        let pnl = unrealized + realized;
+        const typeKey = (position.type || '').toLowerCase();
+        if(typeKey === 'real estate'){
+            const rentPnl = position.rentRealized || 0;
+            pnl = rentPnl;
+            categoryTotals.realEstate += rentPnl;
+        }else if(typeKey === 'crypto'){
+            categoryTotals.crypto += pnl;
+        }else if(typeKey === 'stock'){
+            categoryTotals.stock += pnl;
+        }
         position.rangePnl = pnl;
+        const baseValue = base * qty;
+        let denominator = baseValue !== 0 ? baseValue : Math.abs(position.invested) || Math.abs(realized) || 1;
+        if(typeKey === 'real estate'){
+            denominator = Math.abs(position.invested) || Math.abs(pnl) || 1;
+        }
         position.rangeChangePct = denominator ? (pnl / denominator) * 100 : 0;
         if(prevRange !== null){
             position.rangeDirection = pnl > prevRange ? 'up' : pnl < prevRange ? 'down' : null;
@@ -326,14 +339,6 @@ function recomputeRangeMetrics(range){
             position.rangeDirection = null;
         }
         total += pnl;
-        const typeKey = (position.type || '').toLowerCase();
-        if(typeKey === 'crypto'){
-            categoryTotals.crypto += pnl;
-        }else if(typeKey === 'stock'){
-            categoryTotals.stock += pnl;
-        }else if(typeKey === 'real estate'){
-            categoryTotals.realEstate += position.rentRealized || 0;
-        }
     });
     currentRangeTotalPnl = total;
     currentCategoryRangeTotals = categoryTotals;
@@ -478,6 +483,18 @@ function recomputePositionMetrics(position){
         position.marketDirection = null;
     }
     position.prevMarketValue = marketValue;
+
+    const typeKey = (position.type || '').toLowerCase();
+    if(typeKey === 'real estate'){
+        const propertyValue = costBasis;
+        position.marketValue = propertyValue;
+        position.unrealized = 0;
+        const rentPnl = position.rentRealized !== undefined ? Number(position.rentRealized) : realized;
+        position.pnl = rentPnl;
+        position.totalReturn = rentPnl;
+        position.prevMarketValue = propertyValue;
+        position.displayPrice = propertyValue;
+    }
     return position;
 }
 
