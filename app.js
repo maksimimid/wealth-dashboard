@@ -31,12 +31,13 @@ const UI_REFRESH_INTERVAL = 5000;
 let lastRenderAt = 0;
 let scheduledRender = null;
 let currentRangeTotalPnl = 0;
+let currentCategoryRangeTotals = { crypto: 0, stock: 0, realEstate: 0 };
 let rangeDirty = true;
 const referencePriceCache = new Map();
 const RANGE_LOOKBACK = {};
 const RANGE_LABELS = { 'ALL': 'All Time' };
 let pnlRange = 'ALL';
-const previousKpiValues = { totalPnl: null, netWorth: null, cashAvailable: null };
+const previousKpiValues = { totalPnl: null, netWorth: null, cashAvailable: null, pnlCrypto: null, pnlStock: null, pnlRealEstate: null };
 const previousBestPerformer = { id: null, pnl: null, change: null };
 let assetYearSeries = { labels: [], datasets: [] };
 let assetYearSeriesDirty = true;
@@ -201,6 +202,19 @@ function setMoneyWithFlash(elementId, value, key){
     previousKpiValues[key] = value;
 }
 
+function setCategoryPnl(elementId, value, key){
+    setMoneyWithFlash(elementId, value, key);
+    const el = document.getElementById(elementId);
+    if(!el) return;
+    el.classList.remove('delta-positive','delta-negative');
+    const numeric = Number(value);
+    if(numeric > 0){
+        el.classList.add('delta-positive');
+    }else if(numeric < 0){
+        el.classList.add('delta-negative');
+    }
+}
+
 function updateThemeToggleIcon(button, isLight){
     if(!button) return;
     const icon = button.querySelector('.theme-icon');
@@ -276,6 +290,7 @@ async function ensureRangeReference(position, range){
 
 function recomputeRangeMetrics(range){
     let total = 0;
+    const categoryTotals = { crypto: 0, stock: 0, realEstate: 0 };
     positions.forEach(position=>{
         ensurePositionDefaults(position);
         const bucket = getReferenceBucket(position);
@@ -305,8 +320,17 @@ function recomputeRangeMetrics(range){
             position.rangeDirection = null;
         }
         total += pnl;
+        const typeKey = (position.type || '').toLowerCase();
+        if(typeKey === 'crypto'){
+            categoryTotals.crypto += pnl;
+        }else if(typeKey === 'stock'){
+            categoryTotals.stock += pnl;
+        }else if(typeKey === 'real estate'){
+            categoryTotals.realEstate += pnl;
+        }
     });
     currentRangeTotalPnl = total;
+    currentCategoryRangeTotals = categoryTotals;
     rangeDirty = false;
 }
 
@@ -1561,6 +1585,9 @@ function updateKpis(){
     setMoneyWithFlash('total-pnl', totalPnl, 'totalPnl');
     setMoneyWithFlash('equity', netContributionTotal, 'netWorth');
     setMoneyWithFlash('buying-power', cashAvailable, 'cashAvailable');
+    setCategoryPnl('pnl-category-crypto', currentCategoryRangeTotals.crypto || 0, 'pnlCrypto');
+    setCategoryPnl('pnl-category-stock', currentCategoryRangeTotals.stock || 0, 'pnlStock');
+    setCategoryPnl('pnl-category-realestate', currentCategoryRangeTotals.realEstate || 0, 'pnlRealEstate');
     if(updatedEl) updatedEl.textContent = lastUpdated ? formatTime(lastUpdated) : '—';
 
     const bestNameEl = document.getElementById('best-performer-name');

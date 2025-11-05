@@ -247,6 +247,32 @@ h1 {
     min-height: 18px;
 }
 
+.pnl-breakdown {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    width: 100%;
+    margin-top: 10px;
+}
+
+.pnl-sub {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.pnl-sub-label {
+    font-size: 11px;
+    letter-spacing: 0.35px;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+
+.pnl-sub-value {
+    font-weight: 600;
+    font-size: 1rem;
+}
+
 .best-performer-card {
     min-height: 150px;
     flex-direction: column;
@@ -913,6 +939,7 @@ body.light-theme .status-dot { background: #22c55e; box-shadow: 0 0 6px rgba(34,
 @media (max-width: 900px) {
     .grid { grid-template-columns: 1fr; }
     .controls { width: 100%; }
+    .pnl-breakdown { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
 }
 
 @media (max-width: 600px) {
@@ -920,4 +947,6 @@ body.light-theme .status-dot { background: #22c55e; box-shadow: 0 0 6px rgba(34,
     .card { padding: 18px; }
     .kpi { flex-direction: column; align-items: flex-start; }
     .card.full canvas { min-height: 220px; }
+    .pnl-breakdown { grid-template-columns: 1fr; }
 }
+
