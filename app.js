@@ -450,7 +450,18 @@ function normalizeCategory(category, asset){
         if(asset.toLowerCase()==='cash') return 'Cash';
     }
     if(!category) return 'Unclassified';
-    const map = { 'crypto':'Crypto', 'stock':'Stock', 'real estate':'Real Estate', 'cash':'Cash', 'deposit':'Cash' };
+    const map = {
+        'crypto':'Crypto',
+        'stock':'Stock',
+        'real estate':'Real Estate',
+        'cash':'Cash',
+        'deposit':'Cash',
+        'automobile':'Automobile',
+        'vehicle':'Automobile',
+        'auto':'Automobile',
+        'car':'Automobile',
+        'transport':'Automobile'
+    };
     const key = String(category).toLowerCase();
     return map[key] || category;
 }
@@ -1199,7 +1210,8 @@ function computeRealEstateAnalytics(){
     const rentYearSet = new Set();
     let realEstateTotalValue = 0;
 
-    positions.filter(p=> (p.type || '').toLowerCase() === 'real estate').forEach((position, idx)=>{
+    const portfolioCategories = new Set(['real estate','automobile']);
+    positions.filter(p=> portfolioCategories.has((p.type || '').toLowerCase())).forEach((position, idx)=>{
         const ops = Array.isArray(position.operations) ? position.operations : [];
         if(!ops.length) return;
         let totalPurchase = 0;
@@ -1310,7 +1322,9 @@ function computeRealEstateAnalytics(){
             utilization,
             netOutstanding: outstanding,
             payoffMonths,
-            projectedValue
+            projectedValue,
+            category: position.type || '—',
+            positionRef: position
         });
     });
 
@@ -1371,7 +1385,7 @@ function computeRealEstateAnalytics(){
 
     const rows = results.sort((a,b)=> b.netOutstanding - a.netOutstanding || b.finalAssetPrice - a.finalAssetPrice);
     const otherAssetsValue = positions
-        .filter(p=> (p.type || '').toLowerCase() !== 'real estate')
+        .filter(p=> !portfolioCategories.has((p.type || '').toLowerCase()))
         .reduce((sum,p)=> sum + Number(p.marketValue || 0), 0);
     const denominator = realEstateTotalValue + otherAssetsValue;
     const allocation = denominator ? (realEstateTotalValue / denominator) * 100 : null;
@@ -1405,35 +1419,50 @@ function updateRealEstateRentals(){
         row.className = 'realestate-row';
         const utilizationPct = Number.isFinite(Number(stat.utilization)) ? Math.max(0, Math.min(100, Number(stat.utilization))) : 0;
         const utilizationStyle = `width:${utilizationPct.toFixed(2)}%`;
-        row.innerHTML = `
-            <div class="realestate-main">
-                <div class="asset-heading">
-                    <span class="asset-icon-wrapper">
-                        <img class="asset-icon" src="assets/real-estate.svg" alt="Real estate asset" loading="lazy" decoding="async">
-                    </span>
-                    <div class="asset-label">
-                        <div class="symbol">${stat.name}</div>
-                        <div class="pos">Purchase ${money(stat.totalPurchase)} · Expenses ${money(stat.totalExpenses)}</div>
-                    </div>
+
+        const main = document.createElement('div');
+        main.className = 'realestate-main';
+        const heading = document.createElement('div');
+        heading.className = 'asset-heading';
+        const iconEl = stat.positionRef ? createAssetIconElement(stat.positionRef) : null;
+        if(iconEl){
+            heading.appendChild(iconEl);
+        }
+        const label = document.createElement('div');
+        label.className = 'asset-label';
+        const nameEl = document.createElement('div');
+        nameEl.className = 'symbol';
+        nameEl.textContent = stat.name;
+        const metaEl = document.createElement('div');
+        metaEl.className = 'pos';
+        const categoryText = stat.category || '—';
+        metaEl.textContent = `Category ${categoryText} · Purchase ${money(stat.totalPurchase)} · Expenses ${money(stat.totalExpenses)}`;
+        label.appendChild(nameEl);
+        label.appendChild(metaEl);
+        heading.appendChild(label);
+        main.appendChild(heading);
+        row.appendChild(main);
+
+        const metrics = document.createElement('div');
+        metrics.className = 'realestate-metrics';
+        metrics.innerHTML = `
+            <div><span class="label">Final Asset Price</span><span class="value">${money(stat.finalAssetPrice)}</span></div>
+            <div><span class="label">Outstanding</span><span class="value">${money(stat.netOutstanding)}</span></div>
+            <div><span class="label">Projected Value</span><span class="value">${money(stat.projectedValue)}</span></div>
+            <div><span class="label">Rent Collected</span><span class="value">${money(stat.rentCollected)}</span></div>
+            <div><span class="label">Rent YTD</span><span class="value">${money(stat.rentYtd)}</span></div>
+            <div><span class="label">Rent / Mo</span><span class="value">${money(stat.avgMonthlyRent)}</span></div>
+            <div>
+                <span class="label">Utilization</span>
+                <span class="value">${Number.isFinite(Number(stat.utilization)) ? `${Number(stat.utilization).toFixed(1)}%` : '—'}</span>
+                <div class="realestate-progress" role="presentation">
+                    <div class="realestate-progress-bar" style="${utilizationStyle}"></div>
                 </div>
             </div>
-            <div class="realestate-metrics">
-                <div><span class="label">Final Asset Price</span><span class="value">${money(stat.finalAssetPrice)}</span></div>
-                <div><span class="label">Outstanding</span><span class="value">${money(stat.netOutstanding)}</span></div>
-                <div><span class="label">Projected Value</span><span class="value">${money(stat.projectedValue)}</span></div>
-                <div><span class="label">Rent Collected</span><span class="value">${money(stat.rentCollected)}</span></div>
-                <div><span class="label">Rent YTD</span><span class="value">${money(stat.rentYtd)}</span></div>
-                <div><span class="label">Rent / Mo</span><span class="value">${money(stat.avgMonthlyRent)}</span></div>
-                <div>
-                    <span class="label">Utilization</span>
-                    <span class="value">${Number.isFinite(Number(stat.utilization)) ? `${Number(stat.utilization).toFixed(1)}%` : '—'}</span>
-                    <div class="realestate-progress" role="presentation">
-                        <div class="realestate-progress-bar" style="${utilizationStyle}"></div>
-                    </div>
-                </div>
-                <div><span class="label">Payoff ETA</span><span class="value">${formatDurationFromMonths(stat.payoffMonths)}</span></div>
-            </div>
+            <div><span class="label">Payoff ETA</span><span class="value">${formatDurationFromMonths(stat.payoffMonths)}</span></div>
         `;
+        row.appendChild(metrics);
+
         container.appendChild(row);
     });
 }
