@@ -3021,8 +3021,6 @@ function updateKpis(){
 
     const totalMarketValue = Object.values(netWorthTotals).reduce((sum, value)=> sum + Number(value || 0), 0);
 
-    const updatedEl = document.getElementById('last-updated');
-
     setMoneyWithFlash('total-pnl', totalPnl, 'totalPnl');
     setMoneyWithFlash('equity', totalMarketValue, 'netWorth');
     setMoneyWithFlash('net-contribution-inline', netContributionTotal, 'netContribution');
@@ -3031,7 +3029,6 @@ function updateKpis(){
     setCategoryPnl('pnl-category-stock', currentCategoryRangeTotals.stock || 0, 'pnlStock');
     setCategoryPnl('pnl-category-realestate', currentCategoryRangeTotals.realEstate || 0, 'pnlRealEstate');
     updateNetWorthBreakdown(netWorthTotals);
-    if(updatedEl) updatedEl.textContent = lastUpdated ? formatTime(lastUpdated) : '—';
 
     const bestNameEl = document.getElementById('best-performer-name');
     const bestPnlEl = document.getElementById('best-performer-pnl');
