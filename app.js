@@ -1789,6 +1789,8 @@ async function fetchHistoricalPriceSeries(position){
     return [];
 }
 
+function registerFinancialControllers(){ /* no-op placeholder */ }
+
 function buildTransactionChartData(position){
     const operations = Array.isArray(position.operations) ? position.operations.filter(op => String(op.type || '').toLowerCase() === 'purchasesell') : [];
     if(!operations.length){
