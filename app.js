@@ -1791,7 +1791,7 @@ async function fetchHistoricalPriceSeries(position){
     }
 
     if(yahooSymbol){
-        series = await fetchYahooSeries(yahooSymbol, firstPurchaseTime);
+        series = await fetchAlphaVantageSeries(yahooSymbol, typeKey, firstPurchaseTime);
         if(series.length){
             transactionPriceCache.set(cacheKey, series);
             return series;
@@ -1838,33 +1838,55 @@ async function fetchFinnhubSeries(position, rawSymbol, firstPurchaseTime){
     return [];
 }
 
-async function fetchYahooSeries(symbol, firstPurchaseTime){
+function getAlphaVantageKey(){
+    if(typeof window !== 'undefined' && window.DASHBOARD_CONFIG && window.DASHBOARD_CONFIG.ALPHA_VANTAGE_KEY){
+        return window.DASHBOARD_CONFIG.ALPHA_VANTAGE_KEY;
+    }
+    if(typeof ALPHA_VANTAGE_KEY !== 'undefined') return ALPHA_VANTAGE_KEY;
+    return null;
+}
+
+async function fetchAlphaVantageSeries(symbol, typeKey, firstPurchaseTime){
+    const apiKey = getAlphaVantageKey();
+    if(!apiKey) return [];
+    const params = new URLSearchParams();
+    if(typeKey === 'crypto'){
+        params.set('function', 'DIGITAL_CURRENCY_DAILY');
+        params.set('symbol', symbol.replace(/-USD$/i, '')); // expect BTC-USD style
+        params.set('market', 'USD');
+    }else{
+        params.set('function', 'TIME_SERIES_DAILY');
+        params.set('symbol', symbol);
+        params.set('outputsize', 'full');
+    }
+    params.set('apikey', apiKey);
+    const url = `https://www.alphavantage.co/query?${params.toString()}`;
     try{
-        const params = new URLSearchParams();
-        params.set('interval','1wk');
-        if(firstPurchaseTime){
-            const marginMs = 30 * 24 * 3600 * 1000;
-            const start = Math.floor((firstPurchaseTime - marginMs)/1000);
-            params.set('period1', String(Math.max(0, start)));
-            params.set('period2', String(Math.floor(Date.now()/1000)));
-        }else{
-            params.set('range','2y');
-        }
-        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?${params.toString()}`;
         const response = await fetch(url);
         if(!response.ok) return [];
         const json = await response.json();
-        const result = json?.chart?.result?.[0];
-        const timestamps = result?.timestamp;
-        const closes = result?.indicators?.quote?.[0]?.close;
-        if(!Array.isArray(timestamps) || !Array.isArray(closes)) return [];
-        return timestamps.map((ts, idx)=>{
-            const close = Number(closes[idx]);
-            if(!Number.isFinite(close) || close <= 0) return null;
-            return { x: ts * 1000, y: close };
-        }).filter(Boolean);
+        const series = [];
+        let timeSeries;
+        if(typeKey === 'crypto'){
+            timeSeries = json['Time Series (Digital Currency Daily)'];
+        }else{
+            timeSeries = json['Time Series (Daily)'];
+        }
+        if(!timeSeries || typeof timeSeries !== 'object') return [];
+        Object.entries(timeSeries).forEach(([dateStr, row])=>{
+            const closeKey = typeKey === 'crypto' ? '4a. close (USD)' : '4. close';
+            const close = Number(row?.[closeKey]);
+            if(!Number.isFinite(close) || close <= 0) return;
+            const date = new Date(dateStr + 'T00:00:00Z');
+            if(firstPurchaseTime){
+                const marginMs = 30 * 24 * 3600 * 1000;
+                if(date.getTime() < firstPurchaseTime - marginMs) return;
+            }
+            series.push({ x: date.getTime(), y: close });
+        });
+        return series.sort((a,b)=> a.x - b.x);
     }catch(error){
-        console.warn('Yahoo Finance history fetch failed', symbol, error);
+        console.warn('Alpha Vantage history fetch failed', symbol, error);
     }
     return [];
 }
