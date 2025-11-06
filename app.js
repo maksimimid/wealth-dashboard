@@ -566,6 +566,30 @@ function mapFinnhubSymbol(asset, category, isOverride = false){
     return null;
 }
 
+function mapYahooSymbol(position){
+    const typeKey = String(position.type || '').toLowerCase();
+    const rawSymbol = position.finnhubSymbol || position.Symbol || position.displayName || position.Name;
+    if(!rawSymbol) return null;
+    if(typeKey === 'crypto'){
+        let token = rawSymbol;
+        if(token.includes(':')) token = token.split(':').pop();
+        token = token.replace(/[^a-z0-9]/gi,'').toUpperCase();
+        const stableSuffixes = ['USDT','USDC','BUSD','USD'];
+        let base = token;
+        const suffix = stableSuffixes.find(s=> token.endsWith(s));
+        if(suffix){
+            base = token.slice(0, token.length - suffix.length);
+        }
+        if(!base) base = token;
+        return `${base}-USD`;
+    }
+    let symbol = rawSymbol.replace(/\s+/g,'').toUpperCase();
+    if(symbol.includes(':')){
+        symbol = symbol.replace(':','-');
+    }
+    return symbol;
+}
+
 async function refineFinnhubSymbols(progressCb){
     if(!FINNHUB_KEY || typeof fetch !== 'function') return;
     const unresolved = positions.filter(position=>{
@@ -1926,10 +1950,17 @@ function buildTransactionChartData(position){
         fallbackPriceSeries.push({ x, y: price });
     });
 
-    const maxQty = Math.max(maxAbsQty, 1);
+    const meaningfulQty = purchases.concat(sales).map(point => point.rawQty || 0).filter(value => value > 0);
+    const minAbsQty = meaningfulQty.length ? Math.min(...meaningfulQty) : 0;
+    const maxQty = Math.max(maxAbsQty, minAbsQty || 1);
+    const logDenominator = Math.log10((maxQty / Math.max(minAbsQty || maxQty, 1e-12)) + 1);
     const computeRadius = qty => {
-        const ratio = Math.max(0, qty / maxQty);
-        return 6 + Math.sqrt(ratio) * 18;
+        if(!qty || !Number.isFinite(qty)) return 8;
+        if(!minAbsQty || logDenominator === 0){
+            return 6 + (Math.sqrt(qty / maxQty) || 0) * 18;
+        }
+        const ratio = Math.log10((qty / Math.max(minAbsQty, 1e-12)) + 1) / logDenominator;
+        return 6 + Math.min(1, Math.max(0, ratio)) * 26;
     };
     purchases.forEach(point => { point.r = computeRadius(point.rawQty || 0); });
     sales.forEach(point => { point.r = computeRadius(point.rawQty || 0); });
