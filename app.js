@@ -54,6 +54,8 @@ let transactionModalMeta = null;
 let transactionModalCanvas = null;
 let transactionChart = null;
 let lastTransactionTrigger = null;
+let lastTransactionData = null;
+let lastTransactionPosition = null;
 const previousCategorySummaries = {
     crypto: { market: null, pnl: null, allocation: null },
     stock: { market: null, pnl: null, allocation: null }
@@ -1737,6 +1739,51 @@ function closeTransactionModal(){
         lastTransactionTrigger.focus({ preventScroll: false });
     }
     lastTransactionTrigger = null;
+    lastTransactionData = null;
+    lastTransactionPosition = null;
+}
+
+async function fetchHistoricalPriceSeries(position){
+    const rawSymbol = position.finnhubSymbol || mapFinnhubSymbol(position.Symbol || position.displayName || position.Name, position.type, false);
+    if(!rawSymbol || !FINNHUB_KEY) return [];
+    if(!position.finnhubSymbol){
+        position.finnhubSymbol = rawSymbol;
+        finnhubIndex.set(rawSymbol, position);
+        symbolSet.add(rawSymbol);
+        if(ws && ws.readyState === WebSocket.OPEN){
+            try{ ws.send(JSON.stringify({type:'subscribe', symbol: rawSymbol})); }
+            catch(error){ console.warn('Failed to subscribe for history symbol', rawSymbol, error); }
+        }
+    }
+    const cacheKey = `${rawSymbol}`;
+    if(transactionPriceCache.has(cacheKey)){
+        return transactionPriceCache.get(cacheKey);
+    }
+    const nowSec = Math.floor(Date.now()/1000);
+    const fromSec = nowSec - TRANSACTION_HISTORY_LOOKBACK_DAYS * 24 * 3600;
+    const endpoint = (/crypto/i.test(position.type || '') || rawSymbol.includes(':')) ? 'crypto/candle' : 'stock/candle';
+    const url = `${FINNHUB_REST}/${endpoint}?symbol=${encodeURIComponent(rawSymbol)}&resolution=D&from=${fromSec}&to=${nowSec}&token=${FINNHUB_KEY}`;
+    try{
+        const response = await fetch(url);
+        if(!response.ok){
+            transactionPriceCache.set(cacheKey, []);
+            return [];
+        }
+        const json = await response.json();
+        if(json && json.s === 'ok' && Array.isArray(json.t) && Array.isArray(json.c)){
+            const series = json.t.map((ts, idx)=>{
+                const price = Number(json.c[idx]);
+                if(!Number.isFinite(price) || price <= 0) return null;
+                return { x: ts * 1000, y: price };
+            }).filter(Boolean);
+            transactionPriceCache.set(cacheKey, series);
+            return series;
+        }
+    }catch(error){
+        console.warn('Historical price fetch failed', rawSymbol, error);
+    }
+    transactionPriceCache.set(cacheKey, []);
+    return [];
 }
 
 function buildTransactionChartData(position){
@@ -1746,7 +1793,7 @@ function buildTransactionChartData(position){
             purchases: [],
             sales: [],
             baseline: [],
-            priceSeries: [],
+            fallbackPriceSeries: [],
             summary: {
                 totalBuys: 0,
                 totalSells: 0,
@@ -1771,17 +1818,20 @@ function buildTransactionChartData(position){
     const purchases = [];
     const sales = [];
     const xValues = new Set();
-    const priceSeries = [];
+    const fallbackPriceSeries = [];
     let totalBuys = 0;
     let totalSells = 0;
     let totalSpent = 0;
     let totalProceeds = 0;
+    let maxAbsQty = 0;
 
     sorted.forEach((op, index)=>{
         const qty = Number(op.amount || 0);
         if(!qty) return;
         const rawSpent = Number(op.spent);
         let price = Number(op.price);
+        const absQty = Math.abs(qty);
+        if(absQty > maxAbsQty) maxAbsQty = absQty;
         if(!Number.isFinite(price) || price <= 0){
             if(Number.isFinite(rawSpent) && rawSpent !== 0 && qty){
                 price = Math.abs(rawSpent / qty);
@@ -1792,15 +1842,15 @@ function buildTransactionChartData(position){
         const date = op.date instanceof Date ? op.date : new Date(Date.now() - (sorted.length - index) * 24 * 3600 * 1000);
         const x = date.getTime();
         const spent = Number.isFinite(rawSpent) ? rawSpent : price * qty;
-        const radius = Math.max(5, Math.min(22, Math.sqrt(Math.abs(qty)) * 4.5));
         const point = {
             x,
             y: price,
-            r: radius,
+            r: 8,
             quantity: qty,
             price,
             date,
-            spent
+            spent,
+            rawQty: absQty
         };
         if(qty > 0){
             purchases.push(point);
@@ -1812,8 +1862,16 @@ function buildTransactionChartData(position){
             totalProceeds += Math.abs(spent);
         }
         xValues.add(x);
-        priceSeries.push({ x, y: price });
+        fallbackPriceSeries.push({ x, y: price });
     });
+
+    const maxQty = Math.max(maxAbsQty, 1);
+    const computeRadius = qty => {
+        const ratio = Math.max(0, qty / maxQty);
+        return 6 + Math.sqrt(ratio) * 18;
+    };
+    purchases.forEach(point => { point.r = computeRadius(point.rawQty || 0); });
+    sales.forEach(point => { point.r = computeRadius(point.rawQty || 0); });
 
     const baseline = Array.from(xValues).sort((a,b)=>a-b).map(x=>({ x, y: fallbackPrice }));
 
@@ -1821,7 +1879,7 @@ function buildTransactionChartData(position){
         purchases,
         sales,
         baseline,
-        priceSeries: priceSeries.sort((a,b)=> a.x - b.x),
+        fallbackPriceSeries: fallbackPriceSeries.sort((a,b)=> a.x - b.x),
         summary: {
             totalBuys,
             totalSells,
@@ -1832,7 +1890,7 @@ function buildTransactionChartData(position){
     };
 }
 
-function buildTransactionChartConfig(data, position){
+function buildTransactionChartConfig(data, position, priceSeries = []){
     const datasets = [];
     if(data.purchases.length){
         datasets.push({
@@ -1860,12 +1918,13 @@ function buildTransactionChartConfig(data, position){
             pointHoverBorderWidth: 2
         });
     }
-    if(data.priceSeries.length){
-        const avgPrice = data.priceSeries.reduce((sum, point)=> sum + Number(point.y || 0), 0) / data.priceSeries.length || 0;
+    const effectivePriceSeries = priceSeries.length ? priceSeries : (data.fallbackPriceSeries || []);
+    if(effectivePriceSeries.length){
+        const avgPrice = effectivePriceSeries.reduce((sum, point)=> sum + Number(point.y || 0), 0) / effectivePriceSeries.length || 0;
         datasets.push({
             type: 'line',
             label: 'Price history',
-            data: data.priceSeries,
+            data: effectivePriceSeries,
             borderColor: TRANSACTION_CHART_COLORS.priceLine,
             backgroundColor: 'rgba(59, 130, 246, 0.08)',
             borderWidth: 2,
@@ -1874,17 +1933,19 @@ function buildTransactionChartConfig(data, position){
             pointRadius: 0,
             order: 0
         });
-        datasets.push({
-            type: 'line',
-            label: 'Avg trade price',
-            data: data.priceSeries.map(point=> ({ x: point.x, y: avgPrice })),
-            borderColor: 'rgba(56, 189, 248, 0.55)',
-            borderDash: [4, 4],
-            borderWidth: 1.5,
-            pointRadius: 0,
-            tension: 0,
-            order: 0
-        });
+        if(avgPrice){
+            datasets.push({
+                type: 'line',
+                label: 'Avg trade price',
+                data: effectivePriceSeries.map(point=> ({ x: point.x, y: avgPrice })),
+                borderColor: 'rgba(56, 189, 248, 0.55)',
+                borderDash: [4, 4],
+                borderWidth: 1.5,
+                pointRadius: 0,
+                tension: 0,
+                order: 0
+            });
+        }
     }
     if(data.baseline.length){
         datasets.push({
@@ -1969,6 +2030,8 @@ function openTransactionModal(position){
     ensureTransactionModalElements();
     if(!transactionModal || !transactionModalCanvas) return;
     const data = buildTransactionChartData(position);
+    lastTransactionData = data;
+    lastTransactionPosition = position;
     const displayName = position.displayName || position.Symbol || position.Name || position.id || 'Asset';
     if(transactionModalTitle){
         transactionModalTitle.textContent = `${displayName} transactions`;
@@ -1982,28 +2045,22 @@ function openTransactionModal(position){
     }
 
     const hasData = data.purchases.length || data.sales.length;
-    if(!hasData){
-        if(transactionChart){
-            transactionChart.destroy();
-            transactionChart = null;
-        }
-        transactionModalCanvas.classList.add('hidden');
-        if(transactionModalMeta){
-            transactionModalMeta.innerHTML = '<div class="pos">No purchase or sale operations recorded yet.</div>';
-        }
+    transactionModalCanvas.classList.remove('hidden');
+    const config = buildTransactionChartConfig(data, position, data.fallbackPriceSeries);
+    if(transactionChart){
+        transactionChart.data = config.data;
+        transactionChart.options = config.options;
+        transactionChart.update('none');
     }else{
-        transactionModalCanvas.classList.remove('hidden');
-        const config = buildTransactionChartConfig(data, position);
-        if(transactionChart){
-            transactionChart.data = config.data;
-            transactionChart.options = config.options;
-            transactionChart.update('none');
-        }else{
-            const ctx = transactionModalCanvas.getContext('2d');
-            transactionChart = new Chart(ctx, config);
-        }
-        renderTransactionMeta(position, data.summary);
+        const ctx = transactionModalCanvas.getContext('2d');
+        transactionChart = new Chart(ctx, config);
     }
+    if(hasData){
+        renderTransactionMeta(position, data.summary);
+    }else if(transactionModalMeta){
+        transactionModalMeta.innerHTML = '<div class="pos">No purchase or sale operations recorded yet.</div>';
+    }
+    loadHistoricalPriceSeries(position);
 
     transactionModal.classList.remove('hidden');
     transactionModal.setAttribute('aria-hidden','false');
@@ -2011,6 +2068,28 @@ function openTransactionModal(position){
     const closeButton = transactionModal.querySelector('.modal-close');
     if(closeButton){
         closeButton.focus();
+    }
+}
+
+async function loadHistoricalPriceSeries(position){
+    try{
+        const series = await fetchHistoricalPriceSeries(position);
+        if(!series.length){
+            if(transactionModalMeta && !transactionModalMeta.querySelector('.price-history-note')){
+                const note = document.createElement('div');
+                note.className = 'pos price-history-note';
+                note.textContent = 'Historical price data unavailable.';
+                transactionModalMeta.appendChild(note);
+            }
+            return;
+        }
+        if(!transactionChart || lastTransactionPosition !== position || !lastTransactionData) return;
+        const config = buildTransactionChartConfig(lastTransactionData, position, series);
+        transactionChart.data = config.data;
+        transactionChart.options = config.options;
+        transactionChart.update('none');
+    }catch(error){
+        console.warn('Failed to load historical price series', error);
     }
 }
 

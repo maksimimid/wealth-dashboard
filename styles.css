@@ -215,6 +215,11 @@ body::before {
     gap: 8px;
 }
 
+.price-history-note {
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+
 .modal-meta-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -773,6 +778,10 @@ h1 {
     color: #facc15;
 }
 
+body.light-theme .price-warning {
+    color: #ca8a04;
+}
+
 .analytics-values {
     display: flex;
     flex-direction: column;
@@ -1130,6 +1139,7 @@ body.light-theme .modal-close { background: rgba(148, 163, 184, 0.2); color: #1e
 body.light-theme .modal-close:hover { background: rgba(79, 70, 229, 0.35); }
 body.light-theme .modal-subtitle { color: #475569; }
 body.light-theme .modal-note { color: #64748b; }
+body.light-theme .price-history-note { color: #64748b; }
 body.light-theme .muted { color: #64748b; }
 body.light-theme .analytics-section { background: rgba(255, 255, 255, 0.9); border-color: rgba(148, 163, 184, 0.4); }
 body.light-theme .analytics-section[open] summary { background: rgba(148, 163, 184, 0.15); border-color: rgba(148, 163, 184, 0.35); }
