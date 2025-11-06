@@ -347,6 +347,9 @@ body::before {
     border: 1px solid rgba(148, 163, 184, 0.25);
     margin-top: 8px;
     align-self: flex-start;
+    margin-left: 0;
+    margin-right: auto;
+    flex-basis: 100%;
 }
 
 .market-dot {
