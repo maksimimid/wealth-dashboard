@@ -1752,9 +1752,14 @@ async function fetchHistoricalPriceSeries(position){
         return transactionPriceCache.get(cacheKey);
     }
 
+    const operations = Array.isArray(position.operations) ? position.operations : [];
+    const firstPurchase = operations
+        .filter(op => String(op.type || '').toLowerCase() === 'purchasesell' && Number(op.amount || 0) > 0 && op.date instanceof Date)
+        .sort((a,b)=> a.date - b.date)[0];
+    const firstPurchaseTime = firstPurchase ? firstPurchase.date.getTime() : null;
     let series = [];
     if(finnhubSymbol && FINNHUB_KEY){
-        series = await fetchFinnhubSeries(position, finnhubSymbol);
+        series = await fetchFinnhubSeries(position, finnhubSymbol, firstPurchaseTime);
         if(series.length){
             transactionPriceCache.set(cacheKey, series);
             return series;
@@ -1762,7 +1767,7 @@ async function fetchHistoricalPriceSeries(position){
     }
 
     if(yahooSymbol){
-        series = await fetchYahooSeries(yahooSymbol);
+        series = await fetchYahooSeries(yahooSymbol, firstPurchaseTime);
         if(series.length){
             transactionPriceCache.set(cacheKey, series);
             return series;
@@ -1773,7 +1778,7 @@ async function fetchHistoricalPriceSeries(position){
     return [];
 }
 
-async function fetchFinnhubSeries(position, rawSymbol){
+async function fetchFinnhubSeries(position, rawSymbol, firstPurchaseTime){
     try{
         if(!position.finnhubSymbol){
             position.finnhubSymbol = rawSymbol;
@@ -1785,7 +1790,12 @@ async function fetchFinnhubSeries(position, rawSymbol){
             }
         }
         const nowSec = Math.floor(Date.now()/1000);
-        const fromSec = nowSec - TRANSACTION_HISTORY_LOOKBACK_DAYS * 24 * 3600;
+        let fromMs = Date.now() - TRANSACTION_HISTORY_LOOKBACK_DAYS * 24 * 3600 * 1000;
+        if(firstPurchaseTime){
+            const marginMs = 30 * 24 * 3600 * 1000;
+            fromMs = Math.max(fromMs, firstPurchaseTime - marginMs);
+        }
+        const fromSec = Math.floor(fromMs / 1000);
         const endpoint = (/crypto/i.test(position.type || '') || rawSymbol.includes(':')) ? 'crypto/candle' : 'stock/candle';
         const url = `${FINNHUB_REST}/${endpoint}?symbol=${encodeURIComponent(rawSymbol)}&resolution=D&from=${fromSec}&to=${nowSec}&token=${FINNHUB_KEY}`;
         const response = await fetch(url);
@@ -1804,9 +1814,19 @@ async function fetchFinnhubSeries(position, rawSymbol){
     return [];
 }
 
-async function fetchYahooSeries(symbol){
+async function fetchYahooSeries(symbol, firstPurchaseTime){
     try{
-        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1wk&range=2y`;
+        const params = new URLSearchParams();
+        params.set('interval','1wk');
+        if(firstPurchaseTime){
+            const marginMs = 30 * 24 * 3600 * 1000;
+            const start = Math.floor((firstPurchaseTime - marginMs)/1000);
+            params.set('period1', String(Math.max(0, start)));
+            params.set('period2', String(Math.floor(Date.now()/1000)));
+        }else{
+            params.set('range','2y');
+        }
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?${params.toString()}`;
         const response = await fetch(url);
         if(!response.ok) return [];
         const json = await response.json();
