@@ -590,6 +590,35 @@ function mapYahooSymbol(position){
     return symbol;
 }
 
+function mapCoinGeckoId(position){
+    const explicit = position.coinGeckoId || position.coinGecko || position.coingecko;
+    if(explicit) return String(explicit).toLowerCase();
+    const candidates = [position.Symbol, position.displayName, position.Name, position.id].filter(Boolean);
+    if(!candidates.length) return null;
+    const known = {
+        'btc': 'bitcoin',
+        'bitcoin': 'bitcoin',
+        'eth': 'ethereum',
+        'ethereum': 'ethereum',
+        'sol': 'solana',
+        'solana': 'solana',
+        'ada': 'cardano',
+        'cardano': 'cardano',
+        'dot': 'polkadot',
+        'polkadot': 'polkadot',
+        'doge': 'dogecoin',
+        'dogecoin': 'dogecoin',
+        'matic': 'matic-network',
+        'polygon': 'matic-network',
+        'xrp': 'ripple'
+    };
+    const raw = String(candidates[0]).toLowerCase();
+    if(known[raw]) return known[raw];
+    const slug = raw.replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+    if(known[slug]) return known[slug];
+    return slug || null;
+}
+
 async function refineFinnhubSymbols(progressCb){
     if(!FINNHUB_KEY || typeof fetch !== 'function') return;
     const unresolved = positions.filter(position=>{
@@ -1770,8 +1799,9 @@ function closeTransactionModal(){
 async function fetchHistoricalPriceSeries(position){
     const typeKey = String(position.type || '').toLowerCase();
     const finnhubSymbol = position.finnhubSymbol || mapFinnhubSymbol(position.Symbol || position.displayName || position.Name, position.type, false);
+    const coinGeckoId = typeKey === 'crypto' ? mapCoinGeckoId(position) : null;
     const yahooSymbol = mapYahooSymbol(position);
-    const cacheKey = `${finnhubSymbol || ''}|${yahooSymbol || ''}|${typeKey}`;
+    const cacheKey = `${finnhubSymbol || ''}|${coinGeckoId || yahooSymbol || ''}|${typeKey}`;
     if(transactionPriceCache.has(cacheKey)){
         return transactionPriceCache.get(cacheKey);
     }
@@ -1784,6 +1814,14 @@ async function fetchHistoricalPriceSeries(position){
     let series = [];
     if(finnhubSymbol && FINNHUB_KEY){
         series = await fetchFinnhubSeries(position, finnhubSymbol, firstPurchaseTime);
+        if(series.length){
+            transactionPriceCache.set(cacheKey, series);
+            return series;
+        }
+    }
+
+    if(coinGeckoId){
+        series = await fetchCoinGeckoSeries(coinGeckoId, firstPurchaseTime);
         if(series.length){
             transactionPriceCache.set(cacheKey, series);
             return series;
@@ -1891,6 +1929,35 @@ async function fetchAlphaVantageSeries(symbol, typeKey, firstPurchaseTime){
     return [];
 }
 
+async function fetchCoinGeckoSeries(coinId, firstPurchaseTime){
+    try{
+        let fromMs = Date.now() - TRANSACTION_HISTORY_LOOKBACK_DAYS * 24 * 3600 * 1000;
+        if(firstPurchaseTime){
+            const marginMs = 30 * 24 * 3600 * 1000;
+            fromMs = Math.max(fromMs, firstPurchaseTime - marginMs);
+        }
+        const days = Math.max(30, Math.ceil((Date.now() - fromMs) / (24 * 3600 * 1000)));
+        const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}/market_chart?vs_currency=usd&days=${days}&interval=weekly`;
+        const response = await fetch(url, { headers: { 'accept': 'application/json' } });
+        if(!response.ok) return [];
+        const json = await response.json();
+        if(!json || !Array.isArray(json.prices)) return [];
+        const series = json.prices.map(([timestamp, price])=>{
+            const close = Number(price);
+            if(!Number.isFinite(close) || close <= 0) return null;
+            if(firstPurchaseTime){
+                const marginMs = 30 * 24 * 3600 * 1000;
+                if(timestamp < firstPurchaseTime - marginMs) return null;
+            }
+            return { x: timestamp, y: close };
+        }).filter(Boolean);
+        return series.sort((a,b)=> a.x - b.x);
+    }catch(error){
+        console.warn('CoinGecko history fetch failed', coinId, error);
+    }
+    return [];
+}
+
 function registerFinancialControllers(){ /* no-op placeholder */ }
 
 function buildTransactionChartData(position){
@@ -1957,6 +2024,7 @@ function buildTransactionChartData(position){
             price,
             date,
             spent,
+            spentAbs: Math.abs(spent),
             rawQty: absQty
         };
         if(qty > 0){
@@ -2066,20 +2134,6 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
                 order: 2
             });
         }
-        const baselineSource = data.baseline.length ? data.baseline : effectivePriceSeries.map(point=> ({ x: point.x, y: point.y ?? fallbackPrice }));
-        if(baselineSource.length){
-            datasets.push({
-                type: 'line',
-                label: 'Avg price baseline',
-                data: baselineSource,
-                borderColor: TRANSACTION_CHART_COLORS.baseline,
-                borderWidth: 1.5,
-                borderDash: [6, 4],
-                pointRadius: 0,
-                tension: 0.15,
-                order: 1
-            });
-        }
     }
 
     const yValues = [...data.purchases, ...data.sales].map(point=> point.y);
@@ -2106,15 +2160,13 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
                                 if(ctx.dataset.label === 'Avg trade price'){
                                     return `Avg trade price ${money(raw.y)}`;
                                 }
-                                if(ctx.dataset.label === 'Avg price baseline'){
-                                    return `Avg baseline ${money(raw.y)}`;
-                                }
                             }
                             const type = raw.quantity > 0 ? 'Buy' : 'Sell';
                             const qtyText = `Qty ${formatQty(Math.abs(raw.quantity || 0))}`;
                             const priceText = `@ ${money(raw.price || raw.y || 0)}`;
+                            const usdText = raw.spentAbs ? ` · ${money(raw.spentAbs)}` : '';
                             const dateLabel = raw.date instanceof Date ? formatDateShort(raw.date) : formatDateShort(new Date(Number(raw.x || ctx.parsed.x)));
-                            return `${type} ${qtyText} ${priceText}${dateLabel ? ' · ' + dateLabel : ''}`;
+                            return `${type} ${qtyText} ${priceText}${usdText}${dateLabel ? ' · ' + dateLabel : ''}`;
                         }
                     }
                 }
