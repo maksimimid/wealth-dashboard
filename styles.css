@@ -483,10 +483,12 @@ h1 {
     min-height: 18px;
 }
 
+.inline-amount,
 .cash-inline {
     color: var(--muted);
     font-size: 11px;
-    margin-left: 6px;
+    margin-left: 4px;
+    font-variant-numeric: tabular-nums;
 }
 
 .pnl-breakdown {
@@ -511,6 +513,32 @@ h1 {
 }
 
 .pnl-sub-value {
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.networth-breakdown {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    width: 100%;
+    margin-top: 12px;
+}
+
+.networth-sub {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.networth-sub-label {
+    font-size: 11px;
+    letter-spacing: 0.35px;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+
+.networth-sub-value {
     font-weight: 600;
     font-size: 1rem;
 }
@@ -921,6 +949,16 @@ h1 {
     color: #facc15;
 }
 
+.reinvested-chip {
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(14, 116, 144, 0.28);
+    color: #38bdf8;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.25px;
+}
+
 body.light-theme .price-warning {
     color: #ca8a04;
 }
@@ -1292,6 +1330,7 @@ body.light-theme .lot-negative { color: #b91c1c; }
 body.light-theme .market-status { background: rgba(255, 255, 255, 0.85); border-color: rgba(148, 163, 184, 0.35); }
 body.light-theme .market-hours { color: #475569; }
 body.light-theme .muted { color: #64748b; }
+body.light-theme .reinvested-chip { background: rgba(56, 189, 248, 0.18); color: #0c4a6e; }
 body.light-theme .analytics-section { background: rgba(255, 255, 255, 0.9); border-color: rgba(148, 163, 184, 0.4); }
 body.light-theme .analytics-section[open] summary { background: rgba(148, 163, 184, 0.15); border-color: rgba(148, 163, 184, 0.35); }
 body.light-theme .analytics-section summary { color: #0f172a; }

@@ -38,7 +38,7 @@ const referencePriceCache = new Map();
 const RANGE_LOOKBACK = {};
 const RANGE_LABELS = { 'ALL': 'All Time' };
 let pnlRange = 'ALL';
-const previousKpiValues = { totalPnl: null, netWorth: null, cashAvailable: null, pnlCrypto: null, pnlStock: null, pnlRealEstate: null };
+const previousKpiValues = { totalPnl: null, netWorth: null, netContribution: null, cashAvailable: null, pnlCrypto: null, pnlStock: null, pnlRealEstate: null };
 const previousBestPerformer = { id: null, pnl: null, change: null };
 let assetYearSeries = { labels: [], datasets: [] };
 let assetYearSeriesDirty = true;
@@ -66,6 +66,17 @@ const VIEW_MODE_STORAGE_KEY = 'assetViewMode';
 const MARKET_TIME_ZONE = 'America/New_York';
 const MARKET_OPEN_MINUTES = 9 * 60 + 30;
 const MARKET_CLOSE_MINUTES = 16 * 60;
+const MARKET_STATUS_INTERVAL = 60 * 1000;
+const NET_WORTH_LABEL_MAP = {
+    crypto: 'Crypto',
+    stock: 'Stocks',
+    realestate: 'Real Estate',
+    automobile: 'Automobile',
+    cash: 'Cash',
+    other: 'Other',
+    unclassified: 'Unclassified'
+};
+const WEEKDAY_NAME_TO_INDEX = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
 const previousCategorySummaries = {
     crypto: { market: null, pnl: null, allocation: null },
     stock: { market: null, pnl: null, allocation: null }
@@ -74,6 +85,8 @@ const categorySectionState = {
     crypto: { open: true, closed: false },
     stock: { open: true, closed: false }
 };
+let marketStatusTimer = null;
+let marketStatusVisibilityBound = false;
 let lastCryptoUiSync = 0;
 let pendingCryptoUiSync = null;
 const CATEGORY_CONFIG = {
@@ -338,6 +351,9 @@ function ensurePositionDefaults(position){
     }
     if(position.rentRealized === undefined){
         position.rentRealized = 0;
+    }
+    if(position.reinvested === undefined){
+        position.reinvested = 0;
     }
 }
 
@@ -849,6 +865,7 @@ function transformOperations(records, progressCb){
         const tagsNormalized = Array.isArray(fields.Tags) ? fields.Tags.map(t=>String(t).toLowerCase()) : [];
         const opTypeLower = String(opType).toLowerCase();
         const isRentOp = (opTypeLower === 'profitloss' || opTypeLower.includes('rent')) && tagsNormalized.some(tag=>RENT_TAGS.includes(tag));
+        const isReinvesting = tagsNormalized.includes('reinvesting');
 
         if(!map.has(asset)){
             const finnhubOverride = fields['Finnhub Symbol'] || fields['Finnhub symbol'] || fields['finnhubSymbol'] || fields['FINNHUB_SYMBOL'];
@@ -866,6 +883,7 @@ function transformOperations(records, progressCb){
                 costBasis: 0,
                 invested: 0,
                 realized: 0,
+                reinvested: 0,
                 rentRealized: 0,
                 cashflow: 0,
                 lastKnownPrice: 0,
@@ -883,7 +901,9 @@ function transformOperations(records, progressCb){
             amount,
             price,
             spent,
-            tags: tagsNormalized
+            tags: tagsNormalized,
+            isReinvesting,
+            skipInCharts: Boolean(isReinvesting)
         });
 
         if(opType === 'PurchaseSell'){
@@ -909,23 +929,34 @@ function transformOperations(records, progressCb){
                 entry.realized += proceeds - costOut;
             }
             entry.cashflow += spent;
-        }else if(opType === 'ProfitLoss'){
+    }else if(opType === 'ProfitLoss'){
+        if(isReinvesting){
+            let reinvestAmount = spent < 0 ? -spent : spent;
+            if(!reinvestAmount){
+                const fallbackAmount = Math.abs(Number(price || 0) * Number(amount || 0));
+                if(fallbackAmount) reinvestAmount = fallbackAmount;
+            }
+            if(reinvestAmount){
+                entry.reinvested = (entry.reinvested || 0) + reinvestAmount;
+            }
+        }else{
             entry.realized += spent;
             if(isRentOp){
                 entry.rentRealized = (entry.rentRealized || 0) + (spent < 0 ? -spent : spent);
             }else{
                 entry.cashflow += spent;
             }
-        }else if(opType === 'DepositWithdrawal'){
-            entry.qty += amount;
-            entry.costBasis += spent;
-            entry.cashflow += spent;
-            if(!entry.lastKnownPrice && price){
-                entry.lastKnownPrice = price;
-            }
-        }else{
-            entry.cashflow += spent;
         }
+    }else if(opType === 'DepositWithdrawal'){
+        entry.qty += amount;
+        entry.costBasis += spent;
+        entry.cashflow += spent;
+        if(!entry.lastKnownPrice && price){
+            entry.lastKnownPrice = price;
+        }
+    }else{
+        entry.cashflow += spent;
+    }
 
         if(entry.qty <= 0){
             entry.qty = 0;
@@ -1424,9 +1455,14 @@ function computeRealEstateAnalytics(){
             const type = (op.type || '').toLowerCase();
             const tags = Array.isArray(op.tags) ? op.tags.map(t=>String(t).toLowerCase()) : [];
             const date = op.date instanceof Date ? op.date : (op.rawDate ? new Date(op.rawDate) : null);
+            const isReinvestingOp = Boolean(op.isReinvesting || tags.includes('reinvesting'));
 
             if(date && (!earliestEvent || date < earliestEvent)){
                 earliestEvent = date;
+            }
+
+            if(isReinvestingOp){
+                return;
             }
 
             const hasRentTag = tags.some(tag=>RENT_TAGS.includes(tag));
@@ -2014,7 +2050,7 @@ async function fetchCoinGeckoSeries(coinId, firstPurchaseTime){
 function registerFinancialControllers(){ /* no-op placeholder */ }
 
 function buildTransactionChartData(position){
-    const operations = Array.isArray(position.operations) ? position.operations.filter(op => String(op.type || '').toLowerCase() === 'purchasesell') : [];
+    const operations = Array.isArray(position.operations) ? position.operations.filter(op => String(op.type || '').toLowerCase() === 'purchasesell' && !op.skipInCharts) : [];
     if(!operations.length){
         return {
             purchases: [],
@@ -2276,6 +2312,7 @@ function renderTransactionLots(position, data){
     const fragment = document.createDocumentFragment();
     let rows = 0;
     operations.forEach((op, index)=>{
+        if(op.skipInCharts) return;
         const qty = Number(op.amount || 0);
         if(!qty) return;
         const absQty = Math.abs(qty);
@@ -2500,6 +2537,13 @@ function createOpenPositionRow(position, totalCategoryValue){
     values.appendChild(marketEl);
     values.appendChild(pnlEl);
     values.appendChild(shareEl);
+    const reinvestedValue = Number(position.reinvested || 0);
+    if(Math.abs(reinvestedValue) > 1e-6){
+        const reinvestEl = document.createElement('div');
+        reinvestEl.className = 'reinvested-chip';
+        reinvestEl.textContent = `Reinvested ${money(reinvestedValue)}`;
+        values.appendChild(reinvestEl);
+    }
     row.appendChild(values);
 
     row.classList.add('interactive-asset-row');
@@ -2556,6 +2600,218 @@ function createClosedPositionRow(position){
     values.appendChild(statusEl);
     row.appendChild(values);
     return row;
+}
+
+function applyAssetViewMode(){
+    const lists = [
+        document.getElementById('crypto-positions'),
+        document.getElementById('stock-positions')
+    ].filter(Boolean);
+    lists.forEach(list => {
+        list.classList.toggle('plates', assetViewMode === 'plates');
+    });
+    if(assetViewToggleButton){
+        const isPlates = assetViewMode === 'plates';
+        assetViewToggleButton.textContent = isPlates ? 'View rows' : 'View plates';
+        assetViewToggleButton.classList.toggle('active', isPlates);
+    }
+}
+
+function setAssetViewMode(mode){
+    const nextMode = mode === 'plates' ? 'plates' : 'rows';
+    if(assetViewMode === nextMode) return;
+    assetViewMode = nextMode;
+    try{
+        if(typeof window !== 'undefined' && window.localStorage){
+            window.localStorage.setItem(VIEW_MODE_STORAGE_KEY, assetViewMode);
+        }
+    }catch(error){
+        console.warn('Failed to persist asset view mode', error);
+    }
+    applyAssetViewMode();
+}
+
+function getNetWorthKey(position){
+    const baseType = position.type || position.Category || 'Other';
+    const normalized = normalizeCategory(baseType, position.displayName || position.Name || position.Symbol || '');
+    const sanitized = String(normalized || 'Other').toLowerCase().replace(/[^a-z]/g, '');
+    if(NET_WORTH_LABEL_MAP[sanitized]) return sanitized;
+    return 'other';
+}
+
+function updateNetWorthBreakdown(categoryMap){
+    const container = document.getElementById('networth-breakdown');
+    if(!container) return;
+    container.innerHTML = '';
+    const entries = Object.entries(categoryMap || {}).filter(([, value])=> Math.abs(value) > 1e-2).sort((a,b)=> b[1] - a[1]);
+    if(!entries.length){
+        const empty = document.createElement('div');
+        empty.className = 'pos';
+        empty.textContent = 'Awaiting holdings data…';
+        container.appendChild(empty);
+        return;
+    }
+    entries.forEach(([key, value])=>{
+        const item = document.createElement('div');
+        item.className = 'networth-sub';
+        const labelKey = key || 'other';
+        const label = NET_WORTH_LABEL_MAP[labelKey] || labelKey.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, letter=>letter.toUpperCase());
+        item.innerHTML = `
+            <span class="networth-sub-label">${label}</span>
+            <span class="networth-sub-value">${money(value)}</span>
+        `;
+        container.appendChild(item);
+    });
+}
+
+function extractEtContext(date){
+    const numericFormatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: MARKET_TIME_ZONE,
+        hour12: false,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    });
+    const offsetFormatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: MARKET_TIME_ZONE,
+        timeZoneName: 'shortOffset'
+    });
+    const weekdayFormatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: MARKET_TIME_ZONE,
+        weekday: 'short'
+    });
+    const parts = numericFormatter.formatToParts(date);
+    const partValue = type => Number(parts.find(part => part.type === type)?.value || 0);
+    const year = partValue('year');
+    const month = partValue('month');
+    const day = partValue('day');
+    const hour = partValue('hour');
+    const minute = partValue('minute');
+    const second = partValue('second');
+    const offsetParts = offsetFormatter.formatToParts(date);
+    const offsetString = offsetParts.find(part => part.type === 'timeZoneName')?.value || '';
+    const offsetMatch = /GMT([+-])(\d{1,2})(?::(\d{2}))?/i.exec(offsetString);
+    let offsetMinutes = 240;
+    if(offsetMatch){
+        const sign = offsetMatch[1] === '-' ? -1 : 1;
+        const hours = Number(offsetMatch[2] || 0);
+        const minutes = Number(offsetMatch[3] || 0);
+        const gmtOffset = sign * (hours * 60 + minutes);
+        offsetMinutes = -gmtOffset;
+    }
+    const weekdayString = weekdayFormatter.format(date).toLowerCase();
+    const weekdayIndex = WEEKDAY_NAME_TO_INDEX[weekdayString.slice(0,3)] ?? 0;
+    return { year, month, day, hour, minute, second, offsetMinutes, weekdayIndex };
+}
+
+function createEtInstant(context, minutes){
+    const hour = Math.floor(minutes / 60);
+    const minute = minutes % 60;
+    const utcMs = Date.UTC(context.year, context.month - 1, context.day, hour, minute, 0) + context.offsetMinutes * 60 * 1000;
+    return new Date(utcMs);
+}
+
+function formatDuration(ms){
+    if(!Number.isFinite(ms)) return '';
+    const totalMinutes = Math.max(0, Math.round(ms / 60000));
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if(hours <= 0 && minutes <= 0) return '0m';
+    if(hours <= 0) return `${minutes}m`;
+    if(minutes === 0) return `${hours}h`;
+    return `${hours}h ${minutes}m`;
+}
+
+function computeMarketStatusInfo(reference = new Date()){
+    const context = extractEtContext(reference);
+    const minutes = context.hour * 60 + context.minute;
+    const openInstant = createEtInstant(context, MARKET_OPEN_MINUTES);
+    const closeInstant = createEtInstant(context, MARKET_CLOSE_MINUTES);
+    const isWeekday = context.weekdayIndex >= 1 && context.weekdayIndex <= 5;
+    const isOpen = isWeekday && minutes >= MARKET_OPEN_MINUTES && minutes < MARKET_CLOSE_MINUTES;
+    let nextOpenInstant = null;
+    if(isOpen){
+        nextOpenInstant = closeInstant;
+    }else if(isWeekday && minutes < MARKET_OPEN_MINUTES){
+        nextOpenInstant = openInstant;
+    }else{
+        let searchDate = new Date(reference.getTime());
+        for(let i = 0; i < 7; i += 1){
+            searchDate = new Date(searchDate.getTime() + 24 * 60 * 60 * 1000);
+            const candidateContext = extractEtContext(searchDate);
+            const weekdayCandidate = candidateContext.weekdayIndex;
+            if(weekdayCandidate >= 1 && weekdayCandidate <= 5){
+                nextOpenInstant = createEtInstant(candidateContext, MARKET_OPEN_MINUTES);
+                break;
+            }
+        }
+    }
+    return { isOpen, openInstant, closeInstant, nextOpenInstant };
+}
+
+function updateMarketStatus(){
+    const statusEl = document.getElementById('market-status');
+    if(!statusEl) return;
+    const textEl = document.getElementById('market-status-text');
+    const usEl = document.getElementById('market-hours-us');
+    const localEl = document.getElementById('market-hours-local');
+    const nextEl = document.getElementById('market-next-open');
+    const now = new Date();
+    const info = computeMarketStatusInfo(now);
+    statusEl.classList.toggle('closed', !info.isOpen);
+    if(textEl){
+        textEl.textContent = info.isOpen ? 'Market open' : 'Market closed';
+    }
+    const usFormatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: MARKET_TIME_ZONE,
+        hour: 'numeric',
+        minute: '2-digit'
+    });
+    const localFormatter = new Intl.DateTimeFormat(undefined, {
+        hour: 'numeric',
+        minute: '2-digit'
+    });
+    const descriptorFormatter = new Intl.DateTimeFormat(undefined, {
+        weekday: 'short',
+        hour: 'numeric',
+        minute: '2-digit'
+    });
+    if(usEl){
+        usEl.textContent = `US hours: ${usFormatter.format(info.openInstant)} – ${usFormatter.format(info.closeInstant)} ET`;
+    }
+    if(localEl){
+        localEl.textContent = `Local: ${localFormatter.format(info.openInstant)} – ${localFormatter.format(info.closeInstant)}`;
+    }
+    if(nextEl){
+        if(info.isOpen){
+            const remaining = info.closeInstant.getTime() - now.getTime();
+            nextEl.textContent = `Closes ${descriptorFormatter.format(info.closeInstant)} (${formatDuration(remaining)})`;
+        }else if(info.nextOpenInstant){
+            const untilOpen = info.nextOpenInstant.getTime() - now.getTime();
+            nextEl.textContent = `Opens ${descriptorFormatter.format(info.nextOpenInstant)} (${formatDuration(untilOpen)})`;
+        }else{
+            nextEl.textContent = '—';
+        }
+    }
+}
+
+function initMarketStatusWatcher(){
+    updateMarketStatus();
+    if(marketStatusTimer){
+        clearInterval(marketStatusTimer);
+    }
+    marketStatusTimer = setInterval(updateMarketStatus, MARKET_STATUS_INTERVAL);
+    if(typeof document !== 'undefined' && !marketStatusVisibilityBound){
+        document.addEventListener('visibilitychange', ()=>{
+            if(document.visibilityState === 'visible'){
+                updateMarketStatus();
+            }
+        });
+        marketStatusVisibilityBound = true;
+    }
 }
 
 function setCategoryMetric(categoryKey, metricKey, value, elementId, formatter){
@@ -2655,6 +2911,7 @@ function renderCategoryAnalytics(categoryKey, config){
             type: 'closed'
         }));
     }
+    applyAssetViewMode();
 }
 
 function renderCryptoAnalytics(){
@@ -2663,21 +2920,32 @@ function renderCryptoAnalytics(){
 
 function renderStockAnalytics(){
     renderCategoryAnalytics('stock', CATEGORY_CONFIG.stock);
+    updateMarketStatus();
 }
 
 function updateKpis(){
     positions.forEach(recomputePositionMetrics);
     const totalPnl = currentCategoryRangeTotals.crypto + currentCategoryRangeTotals.stock + currentCategoryRangeTotals.realEstate;
     const cashAvailable = positions.filter(p=> (p.type||'').toLowerCase()==='cash').reduce((sum,p)=>sum + Number(p.marketValue||0),0);
+    const totalMarketValue = positions.reduce((sum,p)=> sum + Number(p.marketValue || 0), 0);
+    const netWorthTotals = positions.reduce((acc, position)=>{
+        const value = Number(position.marketValue || 0);
+        if(!value) return acc;
+        const key = getNetWorthKey(position);
+        acc[key] = (acc[key] || 0) + value;
+        return acc;
+    }, {});
 
     const updatedEl = document.getElementById('last-updated');
 
     setMoneyWithFlash('total-pnl', totalPnl, 'totalPnl');
-    setMoneyWithFlash('equity', netContributionTotal, 'netWorth');
-    setMoneyWithFlash('buying-power', cashAvailable, 'cashAvailable');
+    setMoneyWithFlash('equity', totalMarketValue, 'netWorth');
+    setMoneyWithFlash('net-contribution-inline', netContributionTotal, 'netContribution');
+    setMoneyWithFlash('cash-inline', cashAvailable, 'cashAvailable');
     setCategoryPnl('pnl-category-crypto', currentCategoryRangeTotals.crypto || 0, 'pnlCrypto');
     setCategoryPnl('pnl-category-stock', currentCategoryRangeTotals.stock || 0, 'pnlStock');
     setCategoryPnl('pnl-category-realestate', currentCategoryRangeTotals.realEstate || 0, 'pnlRealEstate');
+    updateNetWorthBreakdown(netWorthTotals);
     if(updatedEl) updatedEl.textContent = lastUpdated ? formatTime(lastUpdated) : '—';
 
     const bestNameEl = document.getElementById('best-performer-name');
@@ -2880,6 +3148,27 @@ document.addEventListener('DOMContentLoaded', ()=>{
             updateThemeToggleIcon(themeToggle, isLight);
         });
     }
+
+    assetViewToggleButton = document.getElementById('asset-view-toggle');
+    try{
+        if(typeof window !== 'undefined' && window.localStorage){
+            const storedMode = window.localStorage.getItem(VIEW_MODE_STORAGE_KEY);
+            if(storedMode === 'plates' || storedMode === 'rows'){
+                assetViewMode = storedMode;
+            }
+        }
+    }catch(error){
+        console.warn('Failed to read stored asset view mode', error);
+    }
+    applyAssetViewMode();
+    if(assetViewToggleButton){
+        assetViewToggleButton.addEventListener('click', ()=>{
+            const nextMode = assetViewMode === 'plates' ? 'rows' : 'plates';
+            setAssetViewMode(nextMode);
+        });
+    }
+
+    initMarketStatusWatcher();
 
     document.querySelectorAll('details[data-chart]').forEach(section=>{
         section.addEventListener('toggle', ()=>{
