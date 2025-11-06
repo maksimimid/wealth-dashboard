@@ -59,6 +59,7 @@ let lastTransactionPosition = null;
 let modalChartContainer = null;
 let transactionLotsContainer = null;
 let viewLotsButton = null;
+let assetViewToggleButton = null;
 let assetViewMode = 'rows';
 let currentModalView = 'chart';
 const VIEW_MODE_STORAGE_KEY = 'assetViewMode';
