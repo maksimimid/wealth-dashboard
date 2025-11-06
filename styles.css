@@ -528,13 +528,7 @@ h1 {
     min-height: 18px;
 }
 
-.inline-amount,
-.cash-inline {
-    color: var(--muted);
-    font-size: 11px;
-    margin-left: 4px;
-    font-variant-numeric: tabular-nums;
-}
+/* inline amount styles removed */
 
 .pnl-breakdown {
     display: grid;

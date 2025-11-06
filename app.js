@@ -2991,7 +2991,6 @@ function renderStockAnalytics(){
 function updateKpis(){
     positions.forEach(recomputePositionMetrics);
     const totalPnl = currentCategoryRangeTotals.crypto + currentCategoryRangeTotals.stock + currentCategoryRangeTotals.realEstate;
-    const cashAvailable = positions.filter(p=> (p.type||'').toLowerCase()==='cash').reduce((sum,p)=>sum + Number(p.marketValue||0),0);
     const netWorthTotals = positions.reduce((acc, position)=>{
         const value = Number(position.marketValue || 0);
         if(!value) return acc;
@@ -3023,7 +3022,6 @@ function updateKpis(){
 
     setMoneyWithFlash('total-pnl', totalPnl, 'totalPnl');
     setMoneyWithFlash('equity', totalMarketValue, 'netWorth');
-    setMoneyWithFlash('cash-inline', cashAvailable, 'cashAvailable');
     setCategoryPnl('pnl-category-crypto', currentCategoryRangeTotals.crypto || 0, 'pnlCrypto');
     setCategoryPnl('pnl-category-stock', currentCategoryRangeTotals.stock || 0, 'pnlStock');
     setCategoryPnl('pnl-category-realestate', currentCategoryRangeTotals.realEstate || 0, 'pnlRealEstate');
