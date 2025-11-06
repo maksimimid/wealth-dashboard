@@ -41,7 +41,7 @@ body::before {
 
 .theme-toggle {
     position: fixed;
-    top: 18px;
+    top: 40px;
     right: 24px;
     width: 44px;
     height: 44px;
@@ -75,7 +75,7 @@ body::before {
 
 .floating-view-toggle {
     position: fixed;
-    top: 74px;
+    top: 104px;
     right: 24px;
     width: 48px;
     height: 48px;
