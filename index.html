@@ -222,10 +222,15 @@
         <button type="button" class="modal-close" aria-label="Close transactions chart">&times;</button>
         <h3 class="modal-title" id="transaction-modal-title">Asset transactions</h3>
         <div class="modal-subtitle" id="transaction-modal-subtitle"></div>
+        <div class="modal-toolbar">
+            <button type="button" id="toggle-view-btn" class="btn btn-secondary">View plates</button>
+            <button type="button" id="view-lots-btn" class="btn btn-secondary">View lots</button>
+        </div>
         <div class="modal-chart">
             <canvas id="transaction-chart"></canvas>
         </div>
         <div class="modal-meta" id="transaction-modal-meta"></div>
+        <div class="modal-lots hidden" id="transaction-lots"></div>
     </div>
 </div>
 </body>
