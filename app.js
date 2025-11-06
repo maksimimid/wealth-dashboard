@@ -56,6 +56,15 @@ let transactionChart = null;
 let lastTransactionTrigger = null;
 let lastTransactionData = null;
 let lastTransactionPosition = null;
+let modalChartContainer = null;
+let transactionLotsContainer = null;
+let viewLotsButton = null;
+let assetViewMode = 'rows';
+let currentModalView = 'chart';
+const VIEW_MODE_STORAGE_KEY = 'assetViewMode';
+const MARKET_TIME_ZONE = 'America/New_York';
+const MARKET_OPEN_MINUTES = 9 * 60 + 30;
+const MARKET_CLOSE_MINUTES = 16 * 60;
 const previousCategorySummaries = {
     crypto: { market: null, pnl: null, allocation: null },
     stock: { market: null, pnl: null, allocation: null }
@@ -1796,6 +1805,9 @@ function ensureTransactionModalElements(){
     transactionModalSubtitle = document.getElementById('transaction-modal-subtitle');
     transactionModalMeta = document.getElementById('transaction-modal-meta');
     transactionModalCanvas = document.getElementById('transaction-chart');
+    modalChartContainer = transactionModal.querySelector('.modal-chart');
+    transactionLotsContainer = document.getElementById('transaction-lots');
+    viewLotsButton = document.getElementById('view-lots-btn');
     const closeButton = transactionModal.querySelector('.modal-close');
     if(closeButton){
         closeButton.addEventListener('click', closeTransactionModal);
@@ -1805,6 +1817,19 @@ function ensureTransactionModalElements(){
             closeTransactionModal();
         }
     });
+    if(viewLotsButton && !viewLotsButton.dataset.bound){
+        viewLotsButton.addEventListener('click', ()=>{
+            if(currentModalView === 'lots'){
+                setModalView('chart');
+            }else{
+                if(lastTransactionPosition && lastTransactionData){
+                    renderTransactionLots(lastTransactionPosition, lastTransactionData);
+                }
+                setModalView('lots');
+            }
+        });
+        viewLotsButton.dataset.bound = 'true';
+    }
 }
 
 function closeTransactionModal(){
@@ -1818,6 +1843,7 @@ function closeTransactionModal(){
     lastTransactionTrigger = null;
     lastTransactionData = null;
     lastTransactionPosition = null;
+    setModalView('chart');
 }
 
 async function fetchHistoricalPriceSeries(position){
@@ -2215,6 +2241,80 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
     };
 }
 
+function setModalView(view){
+    currentModalView = view;
+    if(viewLotsButton){
+        viewLotsButton.textContent = view === 'lots' ? 'View chart' : 'View lots';
+        viewLotsButton.classList.toggle('active', view === 'lots');
+    }
+    if(modalChartContainer){
+        modalChartContainer.classList.toggle('hidden', view === 'lots');
+    }
+    if(transactionLotsContainer){
+        transactionLotsContainer.classList.toggle('hidden', view !== 'lots');
+    }
+    if(view === 'chart' && !transactionChart && lastTransactionPosition){
+        loadHistoricalPriceSeries(lastTransactionPosition);
+    }
+}
+
+function renderTransactionLots(position, data){
+    if(!transactionLotsContainer) return;
+    const operations = Array.isArray(position.operations) ? position.operations.slice().sort((a,b)=>{
+        const da = a.date instanceof Date ? a.date.getTime() : (a.rawDate ? new Date(a.rawDate).getTime() : 0);
+        const db = b.date instanceof Date ? b.date.getTime() : (b.rawDate ? new Date(b.rawDate).getTime() : 0);
+        return da - db;
+    }) : [];
+    if(!operations.length){
+        transactionLotsContainer.innerHTML = '<div class="pos">No transactions recorded yet.</div>';
+        return;
+    }
+    const currentPrice = Number(position.displayPrice || position.currentPrice || position.lastKnownPrice || position.avgPrice || 0);
+    const fragment = document.createDocumentFragment();
+    let rows = 0;
+    operations.forEach((op, index)=>{
+        const qty = Number(op.amount || 0);
+        if(!qty) return;
+        const absQty = Math.abs(qty);
+        const date = op.date instanceof Date ? op.date : (op.rawDate ? new Date(op.rawDate) : null);
+        const price = Number(op.price || currentPrice || 0);
+        const rawSpent = Number(op.spent);
+        const spentAbs = Number.isFinite(rawSpent) ? Math.abs(rawSpent) : Math.abs(price * qty);
+        const typeLabel = qty > 0 ? 'Buy' : 'Sell';
+        const amountLabel = qty > 0 ? 'Invested' : 'Proceeds';
+        let pnlValue = 0;
+        let baseAmount = spentAbs;
+        if(qty > 0){
+            if(!baseAmount) baseAmount = Math.abs(price * absQty);
+            const currentValue = currentPrice * absQty;
+            pnlValue = currentValue - baseAmount;
+        }else{
+            if(!baseAmount) baseAmount = Math.abs(price * absQty);
+            const estimatedCost = Math.abs(price * absQty);
+            pnlValue = baseAmount - estimatedCost;
+        }
+        const pnlPct = baseAmount ? (pnlValue / baseAmount) * 100 : 0;
+        const pnlClass = pnlValue >= 0 ? 'lot-positive' : 'lot-negative';
+        const row = document.createElement('div');
+        row.className = 'lot-row';
+        row.innerHTML = `
+            <div><strong>${date ? formatDateShort(date) : '—'}</strong></div>
+            <div>${typeLabel} · ${formatQty(absQty)}</div>
+            <div>Price ${money(price)}</div>
+            <div>${amountLabel} ${money(baseAmount)}</div>
+            <div class="lot-value ${pnlClass}">${money(pnlValue)} (${formatPercent(pnlPct)})</div>
+        `;
+        fragment.appendChild(row);
+        rows += 1;
+    });
+    if(!rows){
+        transactionLotsContainer.innerHTML = '<div class="pos">No transactions recorded yet.</div>';
+        return;
+    }
+    transactionLotsContainer.innerHTML = '';
+    transactionLotsContainer.appendChild(fragment);
+}
+
 function renderTransactionMeta(position, summary){
     if(!transactionModalMeta) return;
     transactionModalMeta.innerHTML = `
@@ -2267,6 +2367,8 @@ function openTransactionModal(position){
     }else if(transactionModalMeta){
         transactionModalMeta.innerHTML = '<div class="pos">No purchase or sale operations recorded yet.</div>';
     }
+    renderTransactionLots(position, data);
+    setModalView('chart');
     loadHistoricalPriceSeries(position);
 
     transactionModal.classList.remove('hidden');

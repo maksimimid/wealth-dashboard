@@ -35,6 +35,10 @@
         </div>
     </header>
 
+    <div class="view-toggle">
+        <button id="asset-view-toggle" class="btn btn-secondary">View plates</button>
+    </div>
+
     <div class="top-summary">
         <div class="kpi" id="pnl-card">
             <div class="label">Total P&amp;L</div>
@@ -58,12 +62,7 @@
         <div class="kpi" id="net-worth-card">
             <div class="label">Net Worth</div>
             <div class="big" id="equity">$0.00</div>
-            <small>Net contributions deployed to date</small>
-        </div>
-        <div class="kpi" id="liquidity-card">
-            <div class="label">Liquidity</div>
-            <div class="big" id="buying-power">$0.00</div>
-            <small>Cash &amp; cash-equivalents from Operations</small>
+            <small>Net contributions deployed to date <span id="cash-inline" class="cash-inline">(Cash $0.00)</span></small>
         </div>
         <div class="kpi best-performer-card" id="best-performer-card">
             <div class="best-performer-header">
@@ -174,6 +173,17 @@
                     <span class="value" id="stock-allocation">?</span>
                 </div>
             </div>
+          <div class="market-status" id="market-status">
+              <span class="market-dot" id="market-status-dot"></span>
+              <div class="market-status-text">
+                  <span id="market-status-text">Checking market hours…</span>
+                  <div class="market-hours">
+                      <span id="market-hours-us"></span>
+                      <span id="market-hours-local"></span>
+                      <span id="market-next-open"></span>
+                  </div>
+              </div>
+          </div>
         </div>
         <details class="analytics-section chart-section" data-chart="stockPortfolioChart">
             <summary>
@@ -223,7 +233,6 @@
         <h3 class="modal-title" id="transaction-modal-title">Asset transactions</h3>
         <div class="modal-subtitle" id="transaction-modal-subtitle"></div>
         <div class="modal-toolbar">
-            <button type="button" id="toggle-view-btn" class="btn btn-secondary">View plates</button>
             <button type="button" id="view-lots-btn" class="btn btn-secondary">View lots</button>
         </div>
         <div class="modal-chart">
