@@ -56,6 +56,7 @@ let transactionChart = null;
 let lastTransactionTrigger = null;
 let lastTransactionData = null;
 let lastTransactionPosition = null;
+let financialControllersRegistered = false;
 const previousCategorySummaries = {
     crypto: { market: null, pnl: null, allocation: null },
     stock: { market: null, pnl: null, allocation: null }
@@ -1795,6 +1796,26 @@ async function fetchHistoricalPriceSeries(position){
     return [];
 }
 
+function registerFinancialControllers(){
+    if(financialControllersRegistered) return;
+    if(typeof window === 'undefined' || !window.Chart) return;
+    const globalAny = window;
+    const financial = globalAny['chartjs-chart-financial'] || globalAny.chartjsChartFinancial || globalAny.ChartjsChartFinancial || globalAny;
+    const controllers = [];
+    if(financial.CandlestickController) controllers.push(financial.CandlestickController);
+    if(financial.OhlcController) controllers.push(financial.OhlcController);
+    if(financial.CandlestickElement) controllers.push(financial.CandlestickElement);
+    if(financial.OhlcElement) controllers.push(financial.OhlcElement);
+    if(financial.FinancialElement) controllers.push(financial.FinancialElement);
+    if(!controllers.length) return;
+    try{
+        window.Chart.register(...controllers);
+        financialControllersRegistered = true;
+    }catch(error){
+        console.warn('Financial chart registration failed', error);
+    }
+}
+
 function buildTransactionChartData(position){
     const operations = Array.isArray(position.operations) ? position.operations.filter(op => String(op.type || '').toLowerCase() === 'purchasesell') : [];
     if(!operations.length){
@@ -2070,12 +2091,17 @@ function openTransactionModal(position){
 
     const hasData = data.purchases.length || data.sales.length;
     transactionModalCanvas.classList.remove('hidden');
+    registerFinancialControllers();
     const config = buildTransactionChartConfig(data, position, data.fallbackPriceSeries);
     if(transactionChart){
         transactionChart.data = config.data;
         transactionChart.options = config.options;
         transactionChart.update('none');
     }else{
+        const existing = window.Chart && typeof window.Chart.getChart === 'function' ? window.Chart.getChart(transactionModalCanvas) : null;
+        if(existing){
+            existing.destroy();
+        }
         const ctx = transactionModalCanvas.getContext('2d');
         transactionChart = new Chart(ctx, config);
     }
