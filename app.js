@@ -330,7 +330,6 @@ function createAssetIconElement(position){
     };
 
     const icon = resolveAssetIcon(position);
-    const wrapper = document.createElement('span');
     if(!icon || !Array.isArray(icon.sources) || !icon.sources.length){
         const cacheKeyFallback = getIconCacheKey(position);
         if(cacheKeyFallback && !assetIconSourceCache.has(cacheKeyFallback)){
@@ -3001,6 +3000,17 @@ function updateKpis(){
         acc[key] = (acc[key] || 0) + value;
         return acc;
     }, {});
+    try{
+        const realEstateAnalytics = computeRealEstateAnalytics();
+        if(realEstateAnalytics && Array.isArray(realEstateAnalytics.rows) && realEstateAnalytics.rows.length){
+            const projectedTotal = realEstateAnalytics.rows.reduce((sum, stat)=> sum + Number(stat.projectedValue || 0), 0);
+            if(Number.isFinite(projectedTotal)){
+                netWorthTotals.realestate = projectedTotal;
+            }
+        }
+    }catch(error){
+        console.warn('Failed to compute real estate projected totals for net worth', error);
+    }
 
     const updatedEl = document.getElementById('last-updated');
 
