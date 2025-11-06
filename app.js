@@ -1772,9 +1772,18 @@ async function fetchHistoricalPriceSeries(position){
         const json = await response.json();
         if(json && json.s === 'ok' && Array.isArray(json.t) && Array.isArray(json.c)){
             const series = json.t.map((ts, idx)=>{
-                const price = Number(json.c[idx]);
-                if(!Number.isFinite(price) || price <= 0) return null;
-                return { x: ts * 1000, y: price };
+                const open = Number(json.o?.[idx]);
+                const high = Number(json.h?.[idx]);
+                const low = Number(json.l?.[idx]);
+                const close = Number(json.c?.[idx]);
+                if(!Number.isFinite(close) || close <= 0) return null;
+                return {
+                    x: ts * 1000,
+                    o: Number.isFinite(open) ? open : close,
+                    h: Number.isFinite(high) ? high : close,
+                    l: Number.isFinite(low) ? low : close,
+                    c: close
+                };
             }).filter(Boolean);
             transactionPriceCache.set(cacheKey, series);
             return series;
@@ -1892,78 +1901,87 @@ function buildTransactionChartData(position){
 
 function buildTransactionChartConfig(data, position, priceSeries = []){
     const datasets = [];
-    if(data.purchases.length){
-        datasets.push({
-            type: 'scatter',
-            label: 'Purchases',
-            data: data.purchases,
-            backgroundColor: TRANSACTION_CHART_COLORS.buys,
-            borderColor: TRANSACTION_CHART_COLORS.buysBorder,
-            pointBorderWidth: 1.5,
-            pointRadius: ctx => ctx.raw ? ctx.raw.r : 6,
-            pointHoverRadius: ctx => ctx.raw ? ctx.raw.r + 2 : 8,
-            pointHoverBorderWidth: 2
-        });
-    }
-    if(data.sales.length){
-        datasets.push({
-            type: 'scatter',
-            label: 'Sales',
-            data: data.sales,
-            backgroundColor: TRANSACTION_CHART_COLORS.sells,
-            borderColor: TRANSACTION_CHART_COLORS.sellsBorder,
-            pointBorderWidth: 1.5,
-            pointRadius: ctx => ctx.raw ? ctx.raw.r : 6,
-            pointHoverRadius: ctx => ctx.raw ? ctx.raw.r + 2 : 8,
-            pointHoverBorderWidth: 2
-        });
-    }
     const effectivePriceSeries = priceSeries.length ? priceSeries : (data.fallbackPriceSeries || []);
+    const fallbackPrice = Number(position.displayPrice || position.currentPrice || position.lastKnownPrice || position.avgPrice || 0) || 0;
+    const chartHasTransactions = data.purchases.length || data.sales.length;
+
     if(effectivePriceSeries.length){
-        const avgPrice = effectivePriceSeries.reduce((sum, point)=> sum + Number(point.y || 0), 0) / effectivePriceSeries.length || 0;
         datasets.push({
-            type: 'line',
+            type: 'candlestick',
             label: 'Price history',
             data: effectivePriceSeries,
-            borderColor: TRANSACTION_CHART_COLORS.priceLine,
-            backgroundColor: 'rgba(59, 130, 246, 0.08)',
-            borderWidth: 2,
-            fill: false,
-            tension: 0.2,
-            pointRadius: 0,
+            color: {
+                up: '#34d399',
+                down: '#f87171',
+                unchanged: '#94a3b8'
+            },
+            borderColor: '#94a3b8',
             order: 0
         });
-        if(avgPrice){
-            datasets.push({
-                type: 'line',
-                label: 'Avg trade price',
-                data: effectivePriceSeries.map(point=> ({ x: point.x, y: avgPrice })),
-                borderColor: 'rgba(56, 189, 248, 0.55)',
-                borderDash: [4, 4],
-                borderWidth: 1.5,
-                pointRadius: 0,
-                tension: 0,
-                order: 0
-            });
-        }
-    }
-    if(data.baseline.length){
+        const avgClose = effectivePriceSeries.reduce((sum, point)=> sum + Number((point.c ?? point.y) || 0), 0) / effectivePriceSeries.length || fallbackPrice;
         datasets.push({
             type: 'line',
-            label: 'Avg price',
-            data: data.baseline,
-            borderColor: TRANSACTION_CHART_COLORS.baseline,
-            borderWidth: 2,
-            borderDash: [6, 4],
+            label: 'Avg trade price',
+            data: effectivePriceSeries.map(point=> ({ x: point.x, y: avgClose })),
+            borderColor: 'rgba(56, 189, 248, 0.55)',
+            borderDash: [4, 4],
+            borderWidth: 1.5,
             pointRadius: 0,
-            tension: 0.2
+            tension: 0,
+            order: 1
         });
     }
 
+    if(chartHasTransactions){
+        if(data.purchases.length){
+            datasets.push({
+                type: 'scatter',
+                label: 'Purchases',
+                data: data.purchases,
+                backgroundColor: TRANSACTION_CHART_COLORS.buys,
+                borderColor: TRANSACTION_CHART_COLORS.buysBorder,
+                pointBorderWidth: 1.5,
+                pointRadius: ctx => ctx.raw ? ctx.raw.r : 6,
+                pointHoverRadius: ctx => ctx.raw ? ctx.raw.r + 2 : 8,
+                pointHoverBorderWidth: 2,
+                order: 2
+            });
+        }
+        if(data.sales.length){
+            datasets.push({
+                type: 'scatter',
+                label: 'Sales',
+                data: data.sales,
+                backgroundColor: TRANSACTION_CHART_COLORS.sells,
+                borderColor: TRANSACTION_CHART_COLORS.sellsBorder,
+                pointBorderWidth: 1.5,
+                pointRadius: ctx => ctx.raw ? ctx.raw.r : 6,
+                pointHoverRadius: ctx => ctx.raw ? ctx.raw.r + 2 : 8,
+                pointHoverBorderWidth: 2,
+                order: 2
+            });
+        }
+        const baselineSource = data.baseline.length ? data.baseline : effectivePriceSeries.map(point=> ({ x: point.x, y: point.c ?? point.y ?? fallbackPrice }));
+        if(baselineSource.length){
+            datasets.push({
+                type: 'line',
+                label: 'Avg price baseline',
+                data: baselineSource,
+                borderColor: TRANSACTION_CHART_COLORS.baseline,
+                borderWidth: 1.5,
+                borderDash: [6, 4],
+                pointRadius: 0,
+                tension: 0.15,
+                order: 1
+            });
+        }
+    }
+
     const yValues = [...data.purchases, ...data.sales].map(point=> point.y);
-    const fallbackPrice = Number(position.avgPrice || position.displayPrice || position.currentPrice || 0) || 0;
-    const minY = yValues.length ? Math.min(...yValues) : fallbackPrice;
-    const maxY = yValues.length ? Math.max(...yValues) : fallbackPrice;
+    const priceYValues = effectivePriceSeries.map(point=> point.c ?? point.y);
+    const combinedValues = [...yValues, ...priceYValues].filter(value => Number.isFinite(value));
+    const minY = combinedValues.length ? Math.min(...combinedValues) : fallbackPrice;
+    const maxY = combinedValues.length ? Math.max(...combinedValues) : fallbackPrice;
 
     return {
         type: 'scatter',
@@ -1979,13 +1997,21 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
                     callbacks: {
                         label(ctx){
                             const raw = ctx.raw || {};
+                            if(ctx.dataset.type === 'candlestick'){
+                                return `O ${money(raw.o)} · H ${money(raw.h)} · L ${money(raw.l)} · C ${money(raw.c)}`;
+                            }
                             if(ctx.dataset.type === 'line'){
-                                return `Avg price ${money(raw.y)}`;
+                                if(ctx.dataset.label === 'Avg trade price'){
+                                    return `Avg trade price ${money(raw.y)}`;
+                                }
+                                if(ctx.dataset.label === 'Avg price baseline'){
+                                    return `Avg baseline ${money(raw.y)}`;
+                                }
                             }
                             const type = raw.quantity > 0 ? 'Buy' : 'Sell';
                             const qtyText = `Qty ${formatQty(Math.abs(raw.quantity || 0))}`;
-                            const priceText = `@ ${money(raw.price || 0)}`;
-                            const dateLabel = raw.date instanceof Date ? formatDateShort(raw.date) : '';
+                            const priceText = `@ ${money(raw.price || raw.y || 0)}`;
+                            const dateLabel = raw.date instanceof Date ? formatDateShort(raw.date) : formatDateShort(new Date(Number(raw.x || ctx.parsed.x)));
                             return `${type} ${qtyText} ${priceText}${dateLabel ? ' · ' + dateLabel : ''}`;
                         }
                     }
@@ -1993,17 +2019,15 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
             },
             scales: {
                 x: {
-                    type: 'linear',
-                    ticks: {
-                        callback: value => formatDateShort(new Date(Number(value)))
-                    },
+                    type: 'time',
+                    time: { tooltipFormat: 'PP' },
                     title: { display: true, text: 'Date' },
                     grid: { color: 'rgba(148, 163, 184, 0.25)' }
                 },
                 y: {
                     beginAtZero: false,
-                    suggestedMin: minY ? minY * 0.92 : undefined,
-                    suggestedMax: maxY ? maxY * 1.08 : undefined,
+                    suggestedMin: Number.isFinite(minY) ? minY * 0.92 : undefined,
+                    suggestedMax: Number.isFinite(maxY) ? maxY * 1.08 : undefined,
                     title: { display: true, text: 'Price' },
                     grid: { color: 'rgba(148, 163, 184, 0.25)' },
                     ticks: { callback: value => money(value) }
@@ -2075,6 +2099,10 @@ async function loadHistoricalPriceSeries(position){
     try{
         const series = await fetchHistoricalPriceSeries(position);
         if(!series.length){
+            if(transactionModalMeta){
+                const note = transactionModalMeta.querySelector('.price-history-note');
+                if(note) note.remove();
+            }
             if(transactionModalMeta && !transactionModalMeta.querySelector('.price-history-note')){
                 const note = document.createElement('div');
                 note.className = 'pos price-history-note';
@@ -2082,6 +2110,10 @@ async function loadHistoricalPriceSeries(position){
                 transactionModalMeta.appendChild(note);
             }
             return;
+        }
+        if(transactionModalMeta){
+            const note = transactionModalMeta.querySelector('.price-history-note');
+            if(note) note.remove();
         }
         if(!transactionChart || lastTransactionPosition !== position || !lastTransactionData) return;
         const config = buildTransactionChartConfig(lastTransactionData, position, series);
