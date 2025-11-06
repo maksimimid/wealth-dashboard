@@ -1744,48 +1744,84 @@ function closeTransactionModal(){
 }
 
 async function fetchHistoricalPriceSeries(position){
-    const rawSymbol = position.finnhubSymbol || mapFinnhubSymbol(position.Symbol || position.displayName || position.Name, position.type, false);
-    if(!rawSymbol || !FINNHUB_KEY) return [];
-    if(!position.finnhubSymbol){
-        position.finnhubSymbol = rawSymbol;
-        finnhubIndex.set(rawSymbol, position);
-        symbolSet.add(rawSymbol);
-        if(ws && ws.readyState === WebSocket.OPEN){
-            try{ ws.send(JSON.stringify({type:'subscribe', symbol: rawSymbol})); }
-            catch(error){ console.warn('Failed to subscribe for history symbol', rawSymbol, error); }
-        }
-    }
-    const cacheKey = `${rawSymbol}`;
+    const typeKey = String(position.type || '').toLowerCase();
+    const finnhubSymbol = position.finnhubSymbol || mapFinnhubSymbol(position.Symbol || position.displayName || position.Name, position.type, false);
+    const yahooSymbol = mapYahooSymbol(position);
+    const cacheKey = `${finnhubSymbol || ''}|${yahooSymbol || ''}|${typeKey}`;
     if(transactionPriceCache.has(cacheKey)){
         return transactionPriceCache.get(cacheKey);
     }
-    const nowSec = Math.floor(Date.now()/1000);
-    const fromSec = nowSec - TRANSACTION_HISTORY_LOOKBACK_DAYS * 24 * 3600;
-    const endpoint = (/crypto/i.test(position.type || '') || rawSymbol.includes(':')) ? 'crypto/candle' : 'stock/candle';
-    const url = `${FINNHUB_REST}/${endpoint}?symbol=${encodeURIComponent(rawSymbol)}&resolution=D&from=${fromSec}&to=${nowSec}&token=${FINNHUB_KEY}`;
-    try{
-        const response = await fetch(url);
-        if(!response.ok){
-            transactionPriceCache.set(cacheKey, []);
-            return [];
-        }
-        const json = await response.json();
-        if(json && json.s === 'ok' && Array.isArray(json.t) && Array.isArray(json.c)){
-        const series = json.t.map((ts, idx)=>{
-            const close = Number(json.c?.[idx]);
-            if(!Number.isFinite(close) || close <= 0) return null;
-            return {
-                x: ts * 1000,
-                y: close
-            };
-        }).filter(Boolean);
+
+    let series = [];
+    if(finnhubSymbol && FINNHUB_KEY){
+        series = await fetchFinnhubSeries(position, finnhubSymbol);
+        if(series.length){
             transactionPriceCache.set(cacheKey, series);
             return series;
+        }
+    }
+
+    if(yahooSymbol){
+        series = await fetchYahooSeries(yahooSymbol);
+        if(series.length){
+            transactionPriceCache.set(cacheKey, series);
+            return series;
+        }
+    }
+
+    transactionPriceCache.set(cacheKey, []);
+    return [];
+}
+
+async function fetchFinnhubSeries(position, rawSymbol){
+    try{
+        if(!position.finnhubSymbol){
+            position.finnhubSymbol = rawSymbol;
+            finnhubIndex.set(rawSymbol, position);
+            symbolSet.add(rawSymbol);
+            if(ws && ws.readyState === WebSocket.OPEN){
+                try{ ws.send(JSON.stringify({type:'subscribe', symbol: rawSymbol})); }
+                catch(error){ console.warn('Failed to subscribe for history symbol', rawSymbol, error); }
+            }
+        }
+        const nowSec = Math.floor(Date.now()/1000);
+        const fromSec = nowSec - TRANSACTION_HISTORY_LOOKBACK_DAYS * 24 * 3600;
+        const endpoint = (/crypto/i.test(position.type || '') || rawSymbol.includes(':')) ? 'crypto/candle' : 'stock/candle';
+        const url = `${FINNHUB_REST}/${endpoint}?symbol=${encodeURIComponent(rawSymbol)}&resolution=D&from=${fromSec}&to=${nowSec}&token=${FINNHUB_KEY}`;
+        const response = await fetch(url);
+        if(!response.ok) return [];
+        const json = await response.json();
+        if(json && json.s === 'ok' && Array.isArray(json.t) && Array.isArray(json.c)){
+            return json.t.map((ts, idx)=>{
+                const close = Number(json.c?.[idx]);
+                if(!Number.isFinite(close) || close <= 0) return null;
+                return { x: ts * 1000, y: close };
+            }).filter(Boolean);
         }
     }catch(error){
         console.warn('Historical price fetch failed', rawSymbol, error);
     }
-    transactionPriceCache.set(cacheKey, []);
+    return [];
+}
+
+async function fetchYahooSeries(symbol){
+    try{
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1wk&range=2y`;
+        const response = await fetch(url);
+        if(!response.ok) return [];
+        const json = await response.json();
+        const result = json?.chart?.result?.[0];
+        const timestamps = result?.timestamp;
+        const closes = result?.indicators?.quote?.[0]?.close;
+        if(!Array.isArray(timestamps) || !Array.isArray(closes)) return [];
+        return timestamps.map((ts, idx)=>{
+            const close = Number(closes[idx]);
+            if(!Number.isFinite(close) || close <= 0) return null;
+            return { x: ts * 1000, y: close };
+        }).filter(Boolean);
+    }catch(error){
+        console.warn('Yahoo Finance history fetch failed', symbol, error);
+    }
     return [];
 }
 
