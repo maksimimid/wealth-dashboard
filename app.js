@@ -3003,10 +3003,18 @@ function updateKpis(){
     try{
         const realEstateAnalytics = computeRealEstateAnalytics();
         if(realEstateAnalytics && Array.isArray(realEstateAnalytics.rows) && realEstateAnalytics.rows.length){
-            const projectedTotal = realEstateAnalytics.rows.reduce((sum, stat)=> sum + Number(stat.projectedValue || 0), 0);
-            if(Number.isFinite(projectedTotal)){
-                netWorthTotals.realestate = projectedTotal;
-            }
+            const projectedByCategory = realEstateAnalytics.rows.reduce((acc, stat)=>{
+                const value = Number(stat.projectedValue || 0);
+                if(!Number.isFinite(value) || value <= 0) return acc;
+                const key = getNetWorthKey(stat.positionRef || { type: stat.category, Name: stat.name });
+                acc[key] = (acc[key] || 0) + value;
+                return acc;
+            }, {});
+            Object.entries(projectedByCategory).forEach(([key, value])=>{
+                if(Number.isFinite(value)){
+                    netWorthTotals[key] = value;
+                }
+            });
         }
     }catch(error){
         console.warn('Failed to compute real estate projected totals for net worth', error);
