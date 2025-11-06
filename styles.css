@@ -141,7 +141,7 @@ body::before {
 
 .modal-content {
     position: relative;
-    width: min(820px, 95vw);
+    width: min(940px, 95vw);
     max-height: 90vh;
     background: rgba(15, 23, 42, 0.92);
     border: 1px solid rgba(148, 163, 184, 0.25);
