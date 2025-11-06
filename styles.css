@@ -73,6 +73,56 @@ body::before {
     line-height: 1;
 }
 
+.floating-view-toggle {
+    position: fixed;
+    top: 74px;
+    right: 24px;
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(15, 23, 42, 0.58);
+    color: #f8fafc;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 14px 30px rgba(15, 23, 42, 0.35);
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+    z-index: 1990;
+}
+
+.floating-view-toggle .view-toggle-icon {
+    display: block;
+    width: 22px;
+    height: 22px;
+    color: currentColor;
+}
+
+.floating-view-toggle .view-toggle-icon rect {
+    fill: currentColor;
+}
+
+.floating-view-toggle:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 18px 38px rgba(15, 23, 42, 0.45);
+}
+
+.floating-view-toggle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+}
+
+.floating-view-toggle.active {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.85), rgba(14, 165, 233, 0.85));
+    border-color: rgba(59, 130, 246, 0.85);
+    box-shadow: 0 18px 40px rgba(59, 130, 246, 0.45);
+}
+
+.floating-view-toggle.active .view-toggle-icon rect {
+    fill: #f8fafc;
+}
+
 .sr-only {
     position: absolute;
     width: 1px;
@@ -426,12 +476,6 @@ h1 {
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 18px;
     align-items: stretch;
-}
-
-.view-toggle {
-    display: flex;
-    justify-content: flex-end;
-    margin: 12px 0 8px;
 }
 
 .kpi {
@@ -1280,6 +1324,23 @@ body.light-theme .theme-toggle {
     color: #1e293b;
     border-color: rgba(148, 163, 184, 0.4);
     box-shadow: 0 14px 30px rgba(148, 163, 184, 0.35);
+}
+
+body.light-theme .floating-view-toggle {
+    background: rgba(255, 255, 255, 0.9);
+    color: #1e293b;
+    border-color: rgba(148, 163, 184, 0.4);
+    box-shadow: 0 12px 28px rgba(148, 163, 184, 0.35);
+}
+
+body.light-theme .floating-view-toggle:hover {
+    box-shadow: 0 16px 34px rgba(148, 163, 184, 0.42);
+}
+
+body.light-theme .floating-view-toggle.active {
+    background: linear-gradient(135deg, rgba(79, 70, 229, 0.9), rgba(14, 165, 233, 0.9));
+    border-color: rgba(79, 70, 229, 0.85);
+    color: #f8fafc;
 }
 
 body.light-theme .subtitle { color: #475569; }

@@ -2612,8 +2612,16 @@ function applyAssetViewMode(){
     });
     if(assetViewToggleButton){
         const isPlates = assetViewMode === 'plates';
-        assetViewToggleButton.textContent = isPlates ? 'View rows' : 'View plates';
+        const labelText = isPlates ? 'Switch to rows view' : 'Switch to plates view';
+        assetViewToggleButton.setAttribute('aria-label', labelText);
+        assetViewToggleButton.setAttribute('title', labelText);
+        const srLabel = assetViewToggleButton.querySelector('#asset-view-toggle-label');
+        if(srLabel){
+            srLabel.textContent = labelText;
+        }
         assetViewToggleButton.classList.toggle('active', isPlates);
+        assetViewToggleButton.classList.toggle('mode-plates', isPlates);
+        assetViewToggleButton.classList.toggle('mode-rows', !isPlates);
     }
 }
 

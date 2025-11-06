@@ -21,6 +21,16 @@
     <span class="sr-only">Toggle theme</span>
 </button>
 
+<button id="asset-view-toggle" type="button" class="floating-view-toggle" aria-label="Switch to plates view" title="Switch to plates view">
+    <svg class="view-toggle-icon" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <rect x="3" y="3" width="7" height="7" rx="1.5"></rect>
+        <rect x="14" y="3" width="7" height="7" rx="1.5"></rect>
+        <rect x="3" y="14" width="7" height="7" rx="1.5"></rect>
+        <rect x="14" y="14" width="7" height="7" rx="1.5"></rect>
+    </svg>
+    <span class="sr-only" id="asset-view-toggle-label">Switch to plates view</span>
+</button>
+
 <div id="loading-overlay">
     <div class="spinner"></div>
     <div class="loading-text">Loading portfolio&hellip;</div>
@@ -34,10 +44,6 @@
             <p class="subtitle">Live holdings pulled directly from Airtable Operations and enriched with Finnhub market data. Track allocations, intraday moves, and long-term performance in one glass dashboard.</p>
         </div>
     </header>
-
-    <div class="view-toggle">
-        <button id="asset-view-toggle" class="btn btn-secondary">View plates</button>
-    </div>
 
     <div class="top-summary">
         <div class="kpi" id="pnl-card">
