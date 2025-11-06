@@ -3023,7 +3023,6 @@ function updateKpis(){
 
     setMoneyWithFlash('total-pnl', totalPnl, 'totalPnl');
     setMoneyWithFlash('equity', totalMarketValue, 'netWorth');
-    setMoneyWithFlash('net-contribution-inline', netContributionTotal, 'netContribution');
     setMoneyWithFlash('cash-inline', cashAvailable, 'cashAvailable');
     setCategoryPnl('pnl-category-crypto', currentCategoryRangeTotals.crypto || 0, 'pnlCrypto');
     setCategoryPnl('pnl-category-stock', currentCategoryRangeTotals.stock || 0, 'pnlStock');
