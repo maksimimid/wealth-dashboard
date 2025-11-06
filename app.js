@@ -595,28 +595,52 @@ function mapCoinGeckoId(position){
     if(explicit) return String(explicit).toLowerCase();
     const candidates = [position.Symbol, position.displayName, position.Name, position.id].filter(Boolean);
     if(!candidates.length) return null;
-    const known = {
-        'btc': 'bitcoin',
-        'bitcoin': 'bitcoin',
-        'eth': 'ethereum',
-        'ethereum': 'ethereum',
-        'sol': 'solana',
-        'solana': 'solana',
-        'ada': 'cardano',
-        'cardano': 'cardano',
-        'dot': 'polkadot',
-        'polkadot': 'polkadot',
-        'doge': 'dogecoin',
-        'dogecoin': 'dogecoin',
-        'matic': 'matic-network',
-        'polygon': 'matic-network',
-        'xrp': 'ripple'
+    const known = new Map([
+        ['btc','bitcoin'], ['bitcoin','bitcoin'],
+        ['xbt','bitcoin'],
+        ['eth','ethereum'], ['ethereum','ethereum'],
+        ['sol','solana'], ['solana','solana'],
+        ['ada','cardano'], ['cardano','cardano'],
+        ['dot','polkadot'], ['polkadot','polkadot'],
+        ['doge','dogecoin'], ['dogecoin','dogecoin'],
+        ['matic','matic-network'], ['polygon','matic-network'],
+        ['xrp','ripple'],
+        ['ltc','litecoin'], ['litecoin','litecoin'],
+        ['bnb','binancecoin'], ['bch','bitcoin-cash'],
+        ['avax','avalanche-2'], ['atom','cosmos'],
+        ['link','chainlink'], ['uni','uniswap']
+    ]);
+
+    const normalize = value => {
+        if(!value) return '';
+        let raw = String(value).trim().toLowerCase();
+        if(raw.includes(':')) raw = raw.split(':').pop();
+        raw = raw.replace(/[^a-z0-9-]+/g,'-');
+        raw = raw.replace(/--+/g,'-').replace(/^-|-$/g,'');
+        if(raw.endsWith('-usdt') || raw.endsWith('-usd')){
+            raw = raw.replace(/-(usdt|usd)$/,'');
+        }
+        if(raw.endsWith('usdt') || raw.endsWith('usd')){
+            raw = raw.replace(/(usdt|usd)$/,'');
+        }
+        return raw;
     };
-    const raw = String(candidates[0]).toLowerCase();
-    if(known[raw]) return known[raw];
-    const slug = raw.replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
-    if(known[slug]) return known[slug];
-    return slug || null;
+
+    for(const candidate of candidates){
+        const normalized = normalize(candidate);
+        if(!normalized) continue;
+        if(known.has(normalized)) return known.get(normalized);
+        const hyphenLess = normalized.replace(/-/g,'');
+        if(known.has(hyphenLess)) return known.get(hyphenLess);
+        if(known.has(normalized.toUpperCase())) return known.get(normalized.toUpperCase());
+        if(known.has(normalized.toLowerCase())) return known.get(normalized.toLowerCase());
+        if(normalized.includes('-')){
+            const base = normalized.split('-')[0];
+            if(known.has(base)) return known.get(base);
+        }
+        return normalized;
+    }
+    return null;
 }
 
 async function refineFinnhubSymbols(progressCb){
