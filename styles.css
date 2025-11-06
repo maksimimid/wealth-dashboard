@@ -77,9 +77,9 @@ body::before {
     position: fixed;
     top: 104px;
     right: 24px;
-    width: 48px;
-    height: 48px;
-    border-radius: 14px;
+    width: 40.8px;
+    height: 40.8px;
+    border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.14);
     background: rgba(15, 23, 42, 0.58);
     color: #f8fafc;
@@ -94,8 +94,8 @@ body::before {
 
 .floating-view-toggle .view-toggle-icon {
     display: block;
-    width: 22px;
-    height: 22px;
+    width: 18.7px;
+    height: 18.7px;
     color: currentColor;
 }
 
