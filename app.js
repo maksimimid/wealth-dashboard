@@ -239,6 +239,31 @@ function deriveCryptoIconKey(position){
     return null;
 }
 
+function deriveAssetInitial(position){
+    if(!position) return '??';
+    const candidates = [position.displayName, position.Symbol, position.Name, position.id];
+    for(const value of candidates){
+        if(value === undefined || value === null) continue;
+        const raw = String(value).trim();
+        if(!raw) continue;
+        const wordParts = raw.split(/[^A-Za-z0-9]+/).filter(Boolean);
+        if(wordParts.length >= 2){
+            const first = wordParts[0].replace(/[^A-Za-z0-9]/g,'');
+            const second = wordParts[1].replace(/[^A-Za-z0-9]/g,'');
+            const combo = (first[0] || '') + (second[0] || '');
+            if(combo){
+                return combo.toUpperCase();
+            }
+        }
+        const cleaned = raw.replace(/[^A-Za-z0-9]/g,'');
+        if(cleaned.length){
+            const length = cleaned.length >= 2 ? 2 : 1;
+            return cleaned.slice(0, length).toUpperCase();
+        }
+    }
+    return '??';
+}
+
 function resolveAssetIcon(position){
     if(!position) return null;
     const typeKey = String(position.type || '').toLowerCase();
@@ -274,13 +299,47 @@ function getIconCacheKey(position){
 }
 
 function createAssetIconElement(position){
-    const icon = resolveAssetIcon(position);
-    if(!icon || !Array.isArray(icon.sources) || !icon.sources.length){
-        return null;
-    }
     const wrapper = document.createElement('span');
     wrapper.className = 'asset-icon-wrapper';
-    const img = document.createElement('img');
+    wrapper.setAttribute('aria-hidden','true');
+
+    const labelCandidates = [position?.displayName, position?.Symbol, position?.Name];
+    const tooltipLabel = labelCandidates.find(text => text !== undefined && text !== null && String(text).trim().length) || 'Asset';
+    wrapper.title = String(tooltipLabel).trim();
+
+    const fallbackInitial = deriveAssetInitial(position);
+    let img = null;
+
+    const applyFallback = ()=>{
+        if(img){
+            img.removeAttribute('src');
+            img.remove();
+            img = null;
+        }
+        if(wrapper.dataset.iconState === 'fallback'){
+            return wrapper;
+        }
+        wrapper.dataset.iconState = 'fallback';
+        wrapper.classList.add('asset-icon-fallback');
+        wrapper.innerHTML = '';
+        const textEl = document.createElement('span');
+        textEl.className = 'asset-icon-fallback-text';
+        textEl.textContent = fallbackInitial;
+        wrapper.appendChild(textEl);
+        return wrapper;
+    };
+
+    const icon = resolveAssetIcon(position);
+    const wrapper = document.createElement('span');
+    if(!icon || !Array.isArray(icon.sources) || !icon.sources.length){
+        const cacheKeyFallback = getIconCacheKey(position);
+        if(cacheKeyFallback && !assetIconSourceCache.has(cacheKeyFallback)){
+            assetIconSourceCache.set(cacheKeyFallback, null);
+        }
+        return applyFallback();
+    }
+
+    img = document.createElement('img');
     img.className = 'asset-icon';
     img.alt = icon.alt || '';
     img.loading = 'eager';
@@ -297,20 +356,21 @@ function createAssetIconElement(position){
         if(cachedSource){
             img.src = cachedSource;
             wrapper.appendChild(img);
+            wrapper.dataset.iconState = 'image';
+            wrapper.classList.remove('asset-icon-fallback');
             return wrapper;
         }
-        return null;
+        return applyFallback();
     }
 
     const sources = icon.sources.slice();
     let index = 0;
-    let failed = false;
-    const applyNextSource = ()=>{
+    const loadNextSource = ()=>{
         if(index >= sources.length){
-            failed = true;
             if(cacheKey){
                 assetIconSourceCache.set(cacheKey, null);
             }
+            applyFallback();
             return;
         }
         img.src = sources[index];
@@ -318,10 +378,7 @@ function createAssetIconElement(position){
     };
 
     img.addEventListener('error', ()=>{
-        applyNextSource();
-        if(failed){
-            wrapper.remove();
-        }
+        loadNextSource();
     });
 
     img.addEventListener('load', ()=>{
@@ -331,13 +388,14 @@ function createAssetIconElement(position){
                 assetIconSourceCache.set(cacheKey, resolvedSrc);
             }
         }
+        wrapper.dataset.iconState = 'image';
+        wrapper.classList.remove('asset-icon-fallback');
+        wrapper.innerHTML = '';
+        wrapper.appendChild(img);
     }, { once: true });
 
-    applyNextSource();
-    if(failed){
-        return null;
-    }
     wrapper.appendChild(img);
+    loadNextSource();
     return wrapper;
 }
 

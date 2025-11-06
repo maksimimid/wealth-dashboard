@@ -950,7 +950,7 @@ h1 {
 .analytics-main,
 .asset-heading {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 12px;
 }
 
