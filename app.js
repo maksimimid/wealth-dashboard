@@ -1937,7 +1937,7 @@ async function fetchCoinGeckoSeries(coinId, firstPurchaseTime){
             fromMs = Math.max(fromMs, firstPurchaseTime - marginMs);
         }
         const days = Math.max(30, Math.ceil((Date.now() - fromMs) / (24 * 3600 * 1000)));
-        const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}/market_chart?vs_currency=usd&days=${days}&interval=weekly`;
+        const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}/market_chart?vs_currency=usd&days=${days}`;
         const response = await fetch(url, { headers: { 'accept': 'application/json' } });
         if(!response.ok) return [];
         const json = await response.json();
