@@ -2992,7 +2992,6 @@ function updateKpis(){
     positions.forEach(recomputePositionMetrics);
     const totalPnl = currentCategoryRangeTotals.crypto + currentCategoryRangeTotals.stock + currentCategoryRangeTotals.realEstate;
     const cashAvailable = positions.filter(p=> (p.type||'').toLowerCase()==='cash').reduce((sum,p)=>sum + Number(p.marketValue||0),0);
-    const totalMarketValue = positions.reduce((sum,p)=> sum + Number(p.marketValue || 0), 0);
     const netWorthTotals = positions.reduce((acc, position)=>{
         const value = Number(position.marketValue || 0);
         if(!value) return acc;
@@ -3019,6 +3018,8 @@ function updateKpis(){
     }catch(error){
         console.warn('Failed to compute real estate projected totals for net worth', error);
     }
+
+    const totalMarketValue = Object.values(netWorthTotals).reduce((sum, value)=> sum + Number(value || 0), 0);
 
     const updatedEl = document.getElementById('last-updated');
 
