@@ -56,7 +56,6 @@ let transactionChart = null;
 let lastTransactionTrigger = null;
 let lastTransactionData = null;
 let lastTransactionPosition = null;
-let financialControllersRegistered = false;
 const previousCategorySummaries = {
     crypto: { market: null, pnl: null, allocation: null },
     stock: { market: null, pnl: null, allocation: null }
@@ -106,7 +105,7 @@ const TRANSACTION_CHART_COLORS = {
     sells: 'rgba(248, 113, 113, 0.85)',
     sellsBorder: 'rgba(248, 113, 113, 0.95)',
     baseline: 'rgba(148, 163, 184, 0.55)',
-    priceLine: 'rgba(59, 130, 246, 0.65)'
+    priceLine: 'rgba(59, 130, 246, 0.8)'
 };
 const TRANSACTION_HISTORY_LOOKBACK_DAYS = 180;
 const FLASH_DURATION = 1500;
@@ -1772,20 +1771,14 @@ async function fetchHistoricalPriceSeries(position){
         }
         const json = await response.json();
         if(json && json.s === 'ok' && Array.isArray(json.t) && Array.isArray(json.c)){
-            const series = json.t.map((ts, idx)=>{
-                const open = Number(json.o?.[idx]);
-                const high = Number(json.h?.[idx]);
-                const low = Number(json.l?.[idx]);
-                const close = Number(json.c?.[idx]);
-                if(!Number.isFinite(close) || close <= 0) return null;
-                return {
-                    x: ts * 1000,
-                    o: Number.isFinite(open) ? open : close,
-                    h: Number.isFinite(high) ? high : close,
-                    l: Number.isFinite(low) ? low : close,
-                    c: close
-                };
-            }).filter(Boolean);
+        const series = json.t.map((ts, idx)=>{
+            const close = Number(json.c?.[idx]);
+            if(!Number.isFinite(close) || close <= 0) return null;
+            return {
+                x: ts * 1000,
+                y: close
+            };
+        }).filter(Boolean);
             transactionPriceCache.set(cacheKey, series);
             return series;
         }
@@ -1794,26 +1787,6 @@ async function fetchHistoricalPriceSeries(position){
     }
     transactionPriceCache.set(cacheKey, []);
     return [];
-}
-
-function registerFinancialControllers(){
-    if(financialControllersRegistered) return;
-    if(typeof window === 'undefined' || !window.Chart) return;
-    const globalAny = window;
-    const financial = globalAny['chartjs-chart-financial'] || globalAny.chartjsChartFinancial || globalAny.ChartjsChartFinancial || globalAny;
-    const controllers = [];
-    if(financial.CandlestickController) controllers.push(financial.CandlestickController);
-    if(financial.OhlcController) controllers.push(financial.OhlcController);
-    if(financial.CandlestickElement) controllers.push(financial.CandlestickElement);
-    if(financial.OhlcElement) controllers.push(financial.OhlcElement);
-    if(financial.FinancialElement) controllers.push(financial.FinancialElement);
-    if(!controllers.length) return;
-    try{
-        window.Chart.register(...controllers);
-        financialControllersRegistered = true;
-    }catch(error){
-        console.warn('Financial chart registration failed', error);
-    }
 }
 
 function buildTransactionChartData(position){
@@ -1922,24 +1895,24 @@ function buildTransactionChartData(position){
 
 function buildTransactionChartConfig(data, position, priceSeries = []){
     const datasets = [];
-    const effectivePriceSeries = priceSeries.length ? priceSeries : (data.fallbackPriceSeries || []);
+    const effectivePriceSeries = (priceSeries.length ? priceSeries : (data.fallbackPriceSeries || [])).map(point=> ({ x: point.x, y: point.y ?? point.c ?? point.price ?? point.value }));
     const fallbackPrice = Number(position.displayPrice || position.currentPrice || position.lastKnownPrice || position.avgPrice || 0) || 0;
     const chartHasTransactions = data.purchases.length || data.sales.length;
 
     if(effectivePriceSeries.length){
         datasets.push({
-            type: 'candlestick',
+            type: 'line',
             label: 'Price history',
             data: effectivePriceSeries,
-            color: {
-                up: '#34d399',
-                down: '#f87171',
-                unchanged: '#94a3b8'
-            },
-            borderColor: '#94a3b8',
+            borderColor: TRANSACTION_CHART_COLORS.priceLine,
+            backgroundColor: 'rgba(59, 130, 246, 0.12)',
+            borderWidth: 2,
+            fill: 'origin',
+            tension: 0.25,
+            pointRadius: 0,
             order: 0
         });
-        const avgClose = effectivePriceSeries.reduce((sum, point)=> sum + Number((point.c ?? point.y) || 0), 0) / effectivePriceSeries.length || fallbackPrice;
+        const avgClose = effectivePriceSeries.reduce((sum, point)=> sum + Number(point.y || 0), 0) / effectivePriceSeries.length || fallbackPrice;
         datasets.push({
             type: 'line',
             label: 'Avg trade price',
@@ -1982,7 +1955,7 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
                 order: 2
             });
         }
-        const baselineSource = data.baseline.length ? data.baseline : effectivePriceSeries.map(point=> ({ x: point.x, y: point.c ?? point.y ?? fallbackPrice }));
+        const baselineSource = data.baseline.length ? data.baseline : effectivePriceSeries.map(point=> ({ x: point.x, y: point.y ?? fallbackPrice }));
         if(baselineSource.length){
             datasets.push({
                 type: 'line',
@@ -1999,7 +1972,7 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
     }
 
     const yValues = [...data.purchases, ...data.sales].map(point=> point.y);
-    const priceYValues = effectivePriceSeries.map(point=> point.c ?? point.y);
+    const priceYValues = effectivePriceSeries.map(point=> point.y);
     const combinedValues = [...yValues, ...priceYValues].filter(value => Number.isFinite(value));
     const minY = combinedValues.length ? Math.min(...combinedValues) : fallbackPrice;
     const maxY = combinedValues.length ? Math.max(...combinedValues) : fallbackPrice;
@@ -2018,9 +1991,6 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
                     callbacks: {
                         label(ctx){
                             const raw = ctx.raw || {};
-                            if(ctx.dataset.type === 'candlestick'){
-                                return `O ${money(raw.o)} · H ${money(raw.h)} · L ${money(raw.l)} · C ${money(raw.c)}`;
-                            }
                             if(ctx.dataset.type === 'line'){
                                 if(ctx.dataset.label === 'Avg trade price'){
                                     return `Avg trade price ${money(raw.y)}`;
@@ -2126,26 +2096,27 @@ async function loadHistoricalPriceSeries(position){
         const series = await fetchHistoricalPriceSeries(position);
         if(!series.length){
             if(transactionModalMeta){
-                const note = transactionModalMeta.querySelector('.price-history-note');
-                if(note) note.remove();
-            }
-            if(transactionModalMeta && !transactionModalMeta.querySelector('.price-history-note')){
-                const note = document.createElement('div');
-                note.className = 'pos price-history-note';
-                note.textContent = 'Historical price data unavailable.';
-                transactionModalMeta.appendChild(note);
+                const existing = transactionModalMeta.querySelector('.price-history-note');
+                if(!existing){
+                    const note = document.createElement('div');
+                    note.className = 'pos price-history-note';
+                    note.textContent = 'Historical price data unavailable.';
+                    transactionModalMeta.appendChild(note);
+                }
             }
             return;
         }
         if(transactionModalMeta){
-            const note = transactionModalMeta.querySelector('.price-history-note');
-            if(note) note.remove();
+            const existing = transactionModalMeta.querySelector('.price-history-note');
+            if(existing) existing.remove();
         }
-        if(!transactionChart || lastTransactionPosition !== position || !lastTransactionData) return;
+        if(!lastTransactionData || lastTransactionPosition !== position) return;
         const config = buildTransactionChartConfig(lastTransactionData, position, series);
-        transactionChart.data = config.data;
-        transactionChart.options = config.options;
-        transactionChart.update('none');
+        if(transactionChart){
+            transactionChart.destroy();
+        }
+        const ctx = transactionModalCanvas.getContext('2d');
+        transactionChart = new Chart(ctx, config);
     }catch(error){
         console.warn('Failed to load historical price series', error);
     }
