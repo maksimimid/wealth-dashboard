@@ -210,6 +210,14 @@ body::before {
     justify-content: flex-start;
 }
 
+.modal-toolbar-bottom {
+    margin-top: 12px;
+}
+
+.modal-toolbar-bottom .btn-secondary {
+    flex: 1;
+}
+
 .modal-chart canvas.hidden {
     display: none !important;
 }

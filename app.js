@@ -160,9 +160,11 @@ function pct(v){
     return `${num >= 0 ? '+' : ''}${num.toFixed(2)}%`;
 }
 
-function formatPercent(value){
+function formatPercent(value, digits = 1){
     if(value === null || value === undefined || !Number.isFinite(Number(value))) return '—';
-    return `${Number(value).toFixed(1)}%`;
+    const num = Number(value);
+    const sign = num > 0 ? '+' : '';
+    return `${sign}${num.toFixed(digits)}%`;
 }
 
 function monthsBetween(start, end){
@@ -2360,8 +2362,9 @@ function openTransactionModal(position){
         if(existing){
             existing.destroy();
         }
-        const ctx = transactionModalCanvas.getContext('2d');
-        transactionChart = new Chart(ctx, config);
+            const ctx = transactionModalCanvas.getContext('2d');
+            transactionChart = new Chart(ctx, config);
+            transactionChart.canvas.classList.remove('hidden');
     }
     if(hasData){
         renderTransactionMeta(position, data.summary);
@@ -2407,6 +2410,7 @@ async function loadHistoricalPriceSeries(position){
         }
         const ctx = transactionModalCanvas.getContext('2d');
         transactionChart = new Chart(ctx, config);
+        transactionChart.canvas.classList.remove('hidden');
     }catch(error){
         console.warn('Failed to load historical price series', error);
     }
