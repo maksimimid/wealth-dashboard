@@ -87,6 +87,7 @@ const categorySectionState = {
 };
 let marketStatusTimer = null;
 let marketStatusVisibilityBound = false;
+let netWorthSparklineChart = null;
 let lastCryptoUiSync = 0;
 let pendingCryptoUiSync = null;
 const CATEGORY_CONFIG = {
@@ -2729,6 +2730,137 @@ function updateNetWorthBreakdown(categoryMap){
     });
 }
 
+function buildNetWorthTrendPoints(totalValue){
+    const MS_PER_DAY = 24 * 60 * 60 * 1000;
+    const operations = positions.flatMap(position => Array.isArray(position.operations) ? position.operations : []);
+    const datedOps = operations.filter(op => op && op.date instanceof Date).map(op => {
+        let spent = Number(op.spent);
+        if(!Number.isFinite(spent)){
+            const amount = Number(op.amount || 0);
+            const price = Number(op.price || 0);
+            if(Number.isFinite(amount) && Number.isFinite(price)){
+                spent = amount * price;
+            }else{
+                spent = 0;
+            }
+        }
+        return { date: new Date(op.date), spent };
+    }).filter(entry => Number.isFinite(entry.spent) && entry.spent !== 0).sort((a,b)=> a.date - b.date);
+
+    const dayBuckets = new Map();
+    datedOps.forEach(({date, spent})=>{
+        const bucketDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        const key = bucketDate.getTime();
+        dayBuckets.set(key, (dayBuckets.get(key) || 0) + spent);
+    });
+
+    const sortedKeys = Array.from(dayBuckets.keys()).sort((a,b)=>a-b);
+    let cumulative = 0;
+    const points = [];
+    sortedKeys.forEach(ts=>{
+        cumulative += dayBuckets.get(ts);
+        const safeValue = Number.isFinite(cumulative) ? Math.max(0, cumulative) : 0;
+        points.push({ date: new Date(ts), value: safeValue });
+    });
+
+    if(points.length){
+        if(points[0].value !== 0){
+            const preDate = new Date(points[0].date.getTime() - MS_PER_DAY);
+            points.unshift({ date: preDate, value: 0 });
+        }
+    }else{
+        const start = new Date(Date.now() - 30 * MS_PER_DAY);
+        points.push({ date: start, value: 0 });
+    }
+
+    const now = new Date();
+    if(points.length){
+        const lastPoint = points[points.length - 1];
+        if(Math.abs(now - lastPoint.date) > 60 * 60 * 1000){
+            points.push({ date: now, value: totalValue });
+        }else{
+            points[points.length - 1] = { date: now, value: totalValue };
+        }
+    }else{
+        points.push({ date: now, value: totalValue });
+    }
+
+    return points.map(point => ({
+        date: point.date instanceof Date ? point.date : new Date(point.date),
+        value: Number.isFinite(point.value) ? point.value : 0
+    }));
+}
+
+function renderNetWorthSparkline(points){
+    const canvas = document.getElementById('networth-sparkline');
+    if(!canvas){
+        if(netWorthSparklineChart){
+            netWorthSparklineChart.destroy();
+            netWorthSparklineChart = null;
+        }
+        return;
+    }
+    if(!Array.isArray(points) || points.length < 2){
+        if(netWorthSparklineChart){
+            netWorthSparklineChart.destroy();
+            netWorthSparklineChart = null;
+        }
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        return;
+    }
+    const dataPoints = points.map(point => ({
+        x: point.date instanceof Date ? point.date : new Date(point.date),
+        y: Number.isFinite(point.value) ? Math.max(0, point.value) : 0
+    }));
+    if(netWorthSparklineChart){
+        netWorthSparklineChart.data.datasets[0].data = dataPoints;
+        netWorthSparklineChart.update('none');
+        return;
+    }
+    if(typeof Chart === 'undefined'){
+        return;
+    }
+    const ctx = canvas.getContext('2d');
+    netWorthSparklineChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            datasets: [{
+                data: dataPoints,
+                borderColor: 'rgba(56, 189, 248, 0.9)',
+                backgroundColor: 'rgba(56, 189, 248, 0.18)',
+                borderWidth: 2,
+                tension: 0.32,
+                pointRadius: 0,
+                pointHoverRadius: 0,
+                fill: 'origin'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: { enabled: false }
+            },
+            scales: {
+                x: {
+                    type: 'time',
+                    display: false
+                },
+                y: {
+                    display: false,
+                    beginAtZero: true
+                }
+            },
+            layout: {
+                padding: { top: 6, bottom: 0, left: 0, right: 0 }
+            }
+        }
+    });
+}
+
 function extractEtContext(date){
     const numericFormatter = new Intl.DateTimeFormat('en-US', {
         timeZone: MARKET_TIME_ZONE,
@@ -3019,6 +3151,9 @@ function updateKpis(){
     }
 
     const totalMarketValue = Object.values(netWorthTotals).reduce((sum, value)=> sum + Number(value || 0), 0);
+
+    const netWorthTrendPoints = buildNetWorthTrendPoints(totalMarketValue);
+    renderNetWorthSparkline(netWorthTrendPoints);
 
     setMoneyWithFlash('total-pnl', totalPnl, 'totalPnl');
     setMoneyWithFlash('equity', totalMarketValue, 'netWorth');
