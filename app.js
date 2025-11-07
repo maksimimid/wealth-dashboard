@@ -115,9 +115,9 @@ const CATEGORY_CONFIG = {
     }
 };
 const CRYPTO_ICON_PROVIDERS = [
-    symbol => `https://cryptoicons.org/api/icon/${symbol}/200`,
-    symbol => `https://assets.coincap.io/assets/icons/${symbol}@3x.png`,
-    symbol => `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/512/color/${symbol}.png`
+    symbol => `https://cryptoicons.org/api/icon/${symbol}/128`,
+    symbol => `https://assets.coincap.io/assets/icons/${symbol}@2x.png`,
+    symbol => `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/${symbol}.png`
 ];
 const assetIconSourceCache = new Map();
 const transactionPriceCache = new Map();
