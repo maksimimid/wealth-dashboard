@@ -2818,53 +2818,25 @@ function renderNetWorthSparkline(points){
         x: point.date instanceof Date ? point.date : new Date(point.date),
         y: Number.isFinite(point.value) ? Math.max(0, point.value) : 0
     }));
-    const tooltipEl = (()=> {
-        const existing = canvas.parentElement.querySelector('.networth-tooltip');
-        if(existing) return existing;
-        const div = document.createElement('div');
-        div.className = 'networth-tooltip hidden';
-        canvas.parentElement.appendChild(div);
-        return div;
-    })();
-    const updateTooltip = (value, date, x, y)=>{
-        if(!tooltipEl) return;
-        if(value === null){
-            tooltipEl.classList.add('hidden');
-            return;
-        }
-        tooltipEl.classList.remove('hidden');
-        const formattedValue = money(value);
-        const formatter = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-        const formattedDate = formatter.format(date);
-        tooltipEl.innerHTML = `<strong>${formattedValue}</strong><span>${formattedDate}</span>`;
-        const rect = canvas.getBoundingClientRect();
-        const offsetX = x !== undefined ? rect.left + window.scrollX + x : rect.left + window.scrollX + rect.width - 60;
-        const offsetY = y !== undefined ? rect.top + window.scrollY + 8 : rect.top + window.scrollY + 12;
-        tooltipEl.style.left = `${offsetX}px`;
-        tooltipEl.style.top = `${offsetY}px`;
-    };
-
     if(netWorthSparklineChart){
         netWorthSparklineChart.data.datasets[0].data = dataPoints;
         netWorthSparklineChart.options = Object.assign({}, netWorthSparklineChart.options, {
             plugins: {
                 legend: { display: false },
                 tooltip: {
-                    enabled: false,
-                    external(context){
-                        const {chart, tooltip} = context;
-                        if(!tooltip || tooltip.opacity === 0){
-                            updateTooltip(null);
-                            return;
+                    enabled: true,
+                    displayColors: false,
+                    callbacks: {
+                        title(items){
+                            const item = items && items[0];
+                            if(!item) return '';
+                            const date = item.raw?.x instanceof Date ? item.raw.x : new Date(item.raw?.x);
+                            return date ? formatDateShort(date) : '';
+                        },
+                        label(item){
+                            const value = item.raw?.y ?? item.parsed?.y ?? 0;
+                            return `Net worth ${money(value)}`;
                         }
-                        const datum = tooltip.dataPoints?.[0];
-                        if(!datum){
-                            updateTooltip(null);
-                            return;
-                        }
-                        const date = datum.raw?.x instanceof Date ? datum.raw.x : new Date(datum.raw?.x);
-                        const value = datum.raw?.y ?? datum.parsed?.y;
-                        updateTooltip(value, date, tooltip.caretX, tooltip.caretY);
                     }
                 }
             },
@@ -2927,21 +2899,19 @@ function renderNetWorthSparkline(points){
             plugins: {
                 legend: { display: false },
                 tooltip: {
-                    enabled: false,
-                    external(context){
-                        const {chart, tooltip} = context;
-                        if(!tooltip || tooltip.opacity === 0){
-                            updateTooltip(null);
-                            return;
+                    enabled: true,
+                    displayColors: false,
+                    callbacks: {
+                        title(items){
+                            const item = items && items[0];
+                            if(!item) return '';
+                            const date = item.raw?.x instanceof Date ? item.raw.x : new Date(item.raw?.x);
+                            return date ? formatDateShort(date) : '';
+                        },
+                        label(item){
+                            const value = item.raw?.y ?? item.parsed?.y ?? 0;
+                            return `Net worth ${money(value)}`;
                         }
-                        const datum = tooltip.dataPoints?.[0];
-                        if(!datum){
-                            updateTooltip(null);
-                            return;
-                        }
-                        const date = datum.raw?.x instanceof Date ? datum.raw.x : new Date(datum.raw?.x);
-                        const value = datum.raw?.y ?? datum.parsed?.y;
-                        updateTooltip(value, date, tooltip.caretX, tooltip.caretY);
                     }
                 }
             },

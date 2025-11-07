@@ -580,32 +580,6 @@ h1 {
     display: block;
 }
 
-.networth-tooltip {
-    position: absolute;
-    transform: translate(-50%, -110%);
-    background: rgba(15, 23, 42, 0.92);
-    color: #f8fafc;
-    padding: 6px 8px;
-    border-radius: 8px;
-    font-size: 11px;
-    line-height: 1.4;
-    pointer-events: none;
-    box-shadow: 0 10px 22px rgba(15, 23, 42, 0.35);
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    z-index: 5;
-}
-
-.networth-tooltip.hidden {
-    opacity: 0;
-    visibility: hidden;
-}
-
-.networth-tooltip strong {
-    font-size: 12px;
-}
-
 .networth-sub {
     display: flex;
     flex-direction: column;
@@ -1396,12 +1370,6 @@ body.light-theme .asset-icon-wrapper.asset-icon-fallback {
     background: rgba(59, 130, 246, 0.2);
     border-color: rgba(59, 130, 246, 0.35);
     color: #1d4ed8;
-}
-
-body.light-theme .networth-tooltip {
-    background: rgba(255, 255, 255, 0.96);
-    color: #0f172a;
-    box-shadow: 0 10px 22px rgba(148, 163, 184, 0.45);
 }
 
 body.light-theme .subtitle { color: #475569; }
