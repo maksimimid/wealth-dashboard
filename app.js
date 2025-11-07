@@ -2844,6 +2844,12 @@ function renderNetWorthSparkline(points){
                 x: {
                     type: 'time',
                     display: true,
+                    time: {
+                        unit: 'year',
+                        round: 'year',
+                        displayFormats: { year: 'yy' }
+                    },
+                    offset: false,
                     ticks: {
                         display: true,
                         font: { size: 9 },
@@ -2919,6 +2925,12 @@ function renderNetWorthSparkline(points){
                 x: {
                     type: 'time',
                     display: true,
+                    time: {
+                        unit: 'year',
+                        round: 'year',
+                        displayFormats: { year: 'yy' }
+                    },
+                    offset: false,
                     grid: { display: false },
                     ticks: {
                         display: true,
