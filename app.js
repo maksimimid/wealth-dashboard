@@ -2847,16 +2847,18 @@ function renderNetWorthSparkline(points){
                     time: {
                         unit: 'year',
                         round: 'year',
-                        displayFormats: { year: 'yy' }
+                        displayFormats: { year: 'yy' },
+                        stepSize: 1
                     },
                     offset: false,
                     ticks: {
                         display: true,
-                        font: { size: 9 },
+                        font: { size: 9, family: 'Inter, system-ui' },
                         source: 'auto',
                         maxRotation: 0,
-                        autoSkip: true,
-                        maxTicksLimit: 5,
+                        autoSkip: false,
+                        stepSize: 1,
+                        align: 'inner',
                         callback: (value, index, ticks)=>{
                             const ts = ticks[index]?.value;
                             if(ts === undefined) return '';
@@ -2892,9 +2894,13 @@ function renderNetWorthSparkline(points){
                 borderColor: 'rgba(56, 189, 248, 0.9)',
                 backgroundColor: 'rgba(56, 189, 248, 0.18)',
                 borderWidth: 2,
-                tension: 0.32,
+                tension: 0.48,
+                borderCapStyle: 'round',
+                borderJoinStyle: 'round',
                 pointRadius: 0,
                 pointHoverRadius: 0,
+                pointHitRadius: 12,
+                spanGaps: true,
                 fill: 'origin'
             }]
         },
@@ -2928,16 +2934,18 @@ function renderNetWorthSparkline(points){
                     time: {
                         unit: 'year',
                         round: 'year',
-                        displayFormats: { year: 'yy' }
+                        displayFormats: { year: 'yy' },
+                        stepSize: 1
                     },
                     offset: false,
                     grid: { display: false },
                     ticks: {
                         display: true,
-                        font: { size: 9 },
-                        maxTicksLimit: 5,
-                        autoSkip: true,
+                        font: { size: 9, family: 'Inter, system-ui' },
+                        autoSkip: false,
+                        stepSize: 1,
                         maxRotation: 0,
+                        align: 'inner',
                         callback: (value, index, ticks)=>{
                             const ts = ticks[index]?.value;
                             if(ts === undefined) return '';
