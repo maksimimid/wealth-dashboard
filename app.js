@@ -3000,78 +3000,59 @@ function renderNetWorthSparkline(points){
 }
 
 function createNetWorthDatasets(points){
-    const actual = [];
-    const projected = [];
-    let lastActual = null;
     const MS_DAY = 24 * 60 * 60 * 1000;
 
-    points.forEach(point => {
-        const base = {
-            x: point.date instanceof Date ? point.date : new Date(point.date),
-            y: Number.isFinite(point.value) ? Math.max(0, point.value) : 0,
-            projected: Boolean(point.projected)
-        };
-        if(point.projected){
-            if(lastActual && projected.length === 0){
-                projected.push({ x: lastActual.x, y: lastActual.y, projected: false });
-            }
-            projected.push(base);
-        }else{
-            actual.push(base);
-            lastActual = base;
-        }
-    });
+    const actualPoints = points.filter(point => !point.projected).map(point => ({
+        x: point.date instanceof Date ? point.date : new Date(point.date),
+        y: Number.isFinite(point.value) ? Math.max(0, point.value) : 0
+    }));
+
+    const futurePoints = points.filter(point => point.projected).map(point => ({
+        x: point.date instanceof Date ? point.date : new Date(point.date),
+        y: Number.isFinite(point.value) ? Math.max(0, point.value) : 0
+    }));
 
     const datasets = [];
-    if(actual.length >= 2){
+    if(actualPoints.length){
+        const actualData = actualPoints.length === 1
+            ? [
+                { x: new Date(actualPoints[0].x.getTime() - MS_DAY * 21), y: actualPoints[0].y },
+                actualPoints[0]
+            ]
+            : actualPoints;
         datasets.push({
             type: 'line',
-            data: actual,
+            data: actualData,
             borderColor: 'rgba(56, 189, 248, 0.9)',
-            backgroundColor: 'rgba(56, 189, 248, 0.16)',
+            backgroundColor: 'rgba(56, 189, 248, 0.14)',
             borderWidth: 2,
-            tension: 0.68,
+            tension: 0.6,
             borderCapStyle: 'round',
             borderJoinStyle: 'round',
             pointRadius: 0,
             pointHoverRadius: 0,
-            pointHitRadius: 14,
-            spanGaps: true,
-            fill: 'origin',
-            label: 'Net worth'
-        });
-    }else if(actual.length === 1){
-        const anchor = {
-            x: new Date(actual[0].x.getTime() - MS_DAY * 7),
-            y: actual[0].y,
-            projected: false
-        };
-        datasets.push({
-            type: 'line',
-            data: [anchor, actual[0]],
-            borderColor: 'rgba(56, 189, 248, 0.9)',
-            backgroundColor: 'rgba(56, 189, 248, 0.16)',
-            borderWidth: 2,
-            tension: 0.68,
-            borderCapStyle: 'round',
-            borderJoinStyle: 'round',
-            pointRadius: 0,
-            pointHoverRadius: 0,
-            pointHitRadius: 14,
+            pointHitRadius: 16,
             spanGaps: true,
             fill: 'origin',
             label: 'Net worth'
         });
     }
 
-    if(projected.length >= 2){
+    if(actualPoints.length && futurePoints.length){
+        const projectedData = [
+            {
+                x: actualPoints[actualPoints.length - 1].x,
+                y: actualPoints[actualPoints.length - 1].y
+            },
+            ...futurePoints
+        ];
         datasets.push({
             type: 'line',
-            data: projected,
+            data: projectedData,
             borderColor: 'rgba(129, 140, 248, 0.9)',
             borderDash: [6, 4],
             borderWidth: 2,
-            tension: 0.55,
+            tension: 0.5,
             pointRadius: 0,
             pointHoverRadius: 0,
             pointHitRadius: 14,
