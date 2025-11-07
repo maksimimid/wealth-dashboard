@@ -931,13 +931,56 @@ h1 {
 }
 
 .analytics-list.plates .analytics-row {
+    position: relative;
     flex-direction: column;
     align-items: flex-start;
     min-height: 180px;
+    padding: 18px;
+    border: 0;
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.78), rgba(15, 23, 42, 0.55));
+    color: #f8fafc;
+    overflow: hidden;
+    box-shadow: 0 22px 48px rgba(15, 23, 42, 0.45);
+}
+
+.analytics-list.plates .analytics-row::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background-image: var(--plate-image, none);
+    background-size: cover;
+    background-position: center;
+    transform: scale(1.05);
+    filter: saturate(1.2);
+    opacity: 0.42;
+    z-index: 0;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.analytics-list.plates .analytics-row::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.92) 0%, rgba(15, 23, 42, 0.55) 50%, rgba(15, 23, 42, 0.35) 100%);
+    z-index: 1;
+    backdrop-filter: blur(1px);
+}
+
+.analytics-list.plates .analytics-row:hover::after {
+    opacity: 0.55;
+    transform: scale(1.075);
 }
 
 .analytics-list.plates .analytics-values {
     align-items: flex-start;
+}
+
+.analytics-list.plates .analytics-main,
+.analytics-list.plates .analytics-values {
+    position: relative;
+    z-index: 2;
 }
 
 .analytics-row:hover {
@@ -1370,6 +1413,22 @@ body.light-theme .asset-icon-wrapper.asset-icon-fallback {
     background: rgba(59, 130, 246, 0.2);
     border-color: rgba(59, 130, 246, 0.35);
     color: #1d4ed8;
+}
+
+body.light-theme .analytics-list.plates .analytics-row {
+    background: linear-gradient(135deg, rgba(248, 250, 252, 0.94), rgba(226, 232, 240, 0.75));
+    color: #0f172a;
+    box-shadow: 0 22px 48px rgba(148, 163, 184, 0.35);
+}
+
+body.light-theme .analytics-list.plates .analytics-row::before {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(226, 232, 240, 0.55) 60%, rgba(226, 232, 240, 0.35) 100%);
+    backdrop-filter: blur(2px);
+}
+
+body.light-theme .analytics-list.plates .analytics-row::after {
+    opacity: 0.35;
+    filter: saturate(1.05);
 }
 
 body.light-theme .subtitle { color: #475569; }

@@ -399,6 +399,21 @@ function createAssetIconElement(position){
     return wrapper;
 }
 
+function getAssetPlateImage(position){
+    const cacheKey = getIconCacheKey(position);
+    if(cacheKey && assetIconSourceCache.has(cacheKey)){
+        const cached = assetIconSourceCache.get(cacheKey);
+        if(cached){
+            return cached;
+        }
+    }
+    const icon = resolveAssetIcon(position);
+    if(icon && Array.isArray(icon.sources) && icon.sources.length){
+        return icon.sources[0];
+    }
+    return null;
+}
+
 function ensurePositionDefaults(position){
     if(position.displayPrice === undefined){
         const base = position.currentPrice ?? position.lastKnownPrice ?? position.lastPurchasePrice ?? position.avgPrice ?? 0;
@@ -2603,6 +2618,15 @@ function createOpenPositionRow(position, totalCategoryValue){
         values.appendChild(reinvestEl);
     }
     row.appendChild(values);
+
+    const plateImage = getAssetPlateImage(position);
+    if(plateImage){
+        row.style.setProperty('--plate-image', `url("${plateImage}")`);
+        row.dataset.plateImage = plateImage;
+    }else{
+        row.style.removeProperty('--plate-image');
+        delete row.dataset.plateImage;
+    }
 
     row.classList.add('interactive-asset-row');
     row.setAttribute('role', 'button');
