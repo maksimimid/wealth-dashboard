@@ -2844,65 +2844,56 @@ function renderNetWorthSparkline(points){
     }));
     if(netWorthSparklineChart){
         netWorthSparklineChart.data.datasets[0].data = dataPoints;
-        netWorthSparklineChart.options = Object.assign({}, netWorthSparklineChart.options, {
-            plugins: {
-                legend: { display: false },
-                tooltip: {
-                    enabled: true,
-                    displayColors: false,
-                    callbacks: {
-                        title(items){
-                            const item = items && items[0];
-                            if(!item) return '';
-                            const date = item.raw?.x instanceof Date ? item.raw.x : new Date(item.raw?.x);
-                            return date ? formatDateShort(date) : '';
-                        },
-                        label(item){
-                            const value = item.raw?.y ?? item.parsed?.y ?? 0;
-                            return `Net worth ${money(value)}`;
-                        }
-                    }
-                }
+        netWorthSparklineChart.options.plugins.tooltip.enabled = true;
+        netWorthSparklineChart.options.plugins.tooltip.displayColors = false;
+        netWorthSparklineChart.options.plugins.tooltip.callbacks = {
+            title(items){
+                const item = items && items[0];
+                if(!item) return '';
+                const date = item.raw?.x instanceof Date ? item.raw.x : new Date(item.raw?.x);
+                return date ? formatDateShort(date) : '';
             },
-            scales: {
-                x: {
-                    type: 'time',
-                    display: true,
-                    time: {
-                        unit: 'year',
-                        round: 'year',
-                        displayFormats: { year: 'yy' },
-                        stepSize: 1
-                    },
-                    offset: false,
-                    ticks: {
-                        display: true,
-                        font: { size: 9, family: 'Inter, system-ui' },
-                        source: 'auto',
-                        maxRotation: 0,
-                        autoSkip: false,
-                        stepSize: 1,
-                        align: 'inner',
-                        callback: (value, index, ticks)=>{
-                            const ts = ticks[index]?.value;
-                            if(ts === undefined) return '';
-                            const date = new Date(ts);
-                            const year = date.getFullYear();
-                            return String(year).slice(-2);
-                        }
-                    },
-                    grid: { display: false }
-                },
-                y: {
-                    display: false,
-                    beginAtZero: true
-                }
-            },
-            interaction: {
-                intersect: false,
-                mode: 'index'
+            label(item){
+                const value = item.raw?.y ?? item.parsed?.y ?? 0;
+                return `Net worth ${money(value)}`;
+            }
+        };
+        netWorthSparklineChart.options.scales.x.time = {
+            unit: 'year',
+            round: 'year',
+            displayFormats: { year: 'yy' },
+            stepSize: 1
+        };
+        netWorthSparklineChart.options.scales.x.ticks = Object.assign({}, netWorthSparklineChart.options.scales.x.ticks, {
+            display: true,
+            font: { size: 9, family: 'Inter, system-ui' },
+            source: 'auto',
+            maxRotation: 0,
+            autoSkip: false,
+            stepSize: 1,
+            align: 'inner',
+            callback: (value, index, ticks)=>{
+                const ts = ticks[index]?.value;
+                if(ts === undefined) return '';
+                const date = new Date(ts);
+                const year = date.getFullYear();
+                return String(year).slice(-2);
             }
         });
+        netWorthSparklineChart.options.scales.x.grid = { display: false };
+        netWorthSparklineChart.options.scales.y.display = false;
+        netWorthSparklineChart.options.scales.y.beginAtZero = true;
+        netWorthSparklineChart.options.interaction = Object.assign({}, netWorthSparklineChart.options.interaction, {
+            intersect: false,
+            mode: 'index'
+        });
+        netWorthSparklineChart.config.data.datasets[0].tension = 0.58;
+        netWorthSparklineChart.config.data.datasets[0].borderCapStyle = 'round';
+        netWorthSparklineChart.config.data.datasets[0].borderJoinStyle = 'round';
+        netWorthSparklineChart.config.data.datasets[0].pointRadius = 0;
+        netWorthSparklineChart.config.data.datasets[0].pointHoverRadius = 0;
+        netWorthSparklineChart.config.data.datasets[0].pointHitRadius = 14;
+        netWorthSparklineChart.config.data.datasets[0].spanGaps = true;
         netWorthSparklineChart.update('none');
         return;
     }
