@@ -115,9 +115,9 @@ const CATEGORY_CONFIG = {
     }
 };
 const CRYPTO_ICON_PROVIDERS = [
-    symbol => `https://cryptoicons.org/api/icon/${symbol}/64`,
-    symbol => `https://assets.coincap.io/assets/icons/${symbol}@2x.png`,
-    symbol => `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/${symbol}.png`
+    symbol => `https://cryptoicons.org/api/icon/${symbol}/200`,
+    symbol => `https://assets.coincap.io/assets/icons/${symbol}@3x.png`,
+    symbol => `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/512/color/${symbol}.png`
 ];
 const assetIconSourceCache = new Map();
 const transactionPriceCache = new Map();
@@ -2801,7 +2801,8 @@ function buildNetWorthTrendPoints(totalValue){
     const startOfYear = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
     const hasYearStart = points.some(point => point.date && point.date.getFullYear() === now.getFullYear() && point.date.getMonth() === 0 && point.date.getDate() === 1);
     if(!hasYearStart){
-        const prior = points.length ? points[points.length - 1].value : 0;
+        const baselineCandidates = points.filter(point => point.date && point.date <= startOfYear && !point.projected);
+        const prior = baselineCandidates.length ? baselineCandidates[baselineCandidates.length - 1].value : 0;
         points.push({ date: startOfYear, value: prior, baseline: true });
     }
     if(points.length){
@@ -2873,8 +2874,8 @@ function renderNetWorthSparkline(points){
             },
             label(item){
                 const value = item.raw?.y ?? item.parsed?.y ?? 0;
-                const label = item.raw?.projected ? 'Projected net worth' : 'Net worth';
-                return `${label} ${money(value)}`;
+                const label = item.dataset?.label || 'Net worth';
+                return `${label}: ${money(value)}`;
             }
         };
         netWorthSparklineChart.options.scales.x.time = {
@@ -2904,11 +2905,15 @@ function renderNetWorthSparkline(points){
         netWorthSparklineChart.options.scales.y.beginAtZero = true;
         netWorthSparklineChart.options.interaction = Object.assign({}, netWorthSparklineChart.options.interaction, {
             intersect: false,
-            mode: 'index'
+            mode: 'index',
+            axis: 'x'
         });
         netWorthSparklineChart.options.animation = Object.assign({}, netWorthSparklineChart.options.animation, {
             duration: 420,
             easing: 'easeInOutCubic'
+        });
+        netWorthSparklineChart.options.layout = Object.assign({}, netWorthSparklineChart.options.layout, {
+            padding: { top: 10, bottom: 4, left: 4, right: 4 }
         });
         netWorthSparklineChart.update('none');
         return;
@@ -2943,8 +2948,8 @@ function renderNetWorthSparkline(points){
                         },
                         label(item){
                             const value = item.raw?.y ?? item.parsed?.y ?? 0;
-                            const label = item.raw?.projected ? 'Projected net worth' : 'Net worth';
-                            return `${label} ${money(value)}`;
+                            const label = item.dataset?.label || 'Net worth';
+                            return `${label}: ${money(value)}`;
                         }
                     }
                 }
@@ -2984,10 +2989,11 @@ function renderNetWorthSparkline(points){
             },
             interaction: {
                 intersect: false,
-                mode: 'index'
+                mode: 'index',
+                axis: 'x'
             },
             layout: {
-                padding: { top: 6, bottom: 0, left: 0, right: 0 }
+                padding: { top: 10, bottom: 4, left: 4, right: 4 }
             }
         }
     });
@@ -2997,15 +3003,17 @@ function createNetWorthDatasets(points){
     const actual = [];
     const projected = [];
     let lastActual = null;
+    const MS_DAY = 24 * 60 * 60 * 1000;
 
     points.forEach(point => {
         const base = {
             x: point.date instanceof Date ? point.date : new Date(point.date),
-            y: Number.isFinite(point.value) ? Math.max(0, point.value) : 0
+            y: Number.isFinite(point.value) ? Math.max(0, point.value) : 0,
+            projected: Boolean(point.projected)
         };
         if(point.projected){
             if(lastActual && projected.length === 0){
-                projected.push({ x: lastActual.x, y: lastActual.y });
+                projected.push({ x: lastActual.x, y: lastActual.y, projected: false });
             }
             projected.push(base);
         }else{
@@ -3022,14 +3030,37 @@ function createNetWorthDatasets(points){
             borderColor: 'rgba(56, 189, 248, 0.9)',
             backgroundColor: 'rgba(56, 189, 248, 0.16)',
             borderWidth: 2,
-            tension: 0.6,
+            tension: 0.68,
             borderCapStyle: 'round',
             borderJoinStyle: 'round',
             pointRadius: 0,
             pointHoverRadius: 0,
             pointHitRadius: 14,
             spanGaps: true,
-            fill: 'origin'
+            fill: 'origin',
+            label: 'Net worth'
+        });
+    }else if(actual.length === 1){
+        const anchor = {
+            x: new Date(actual[0].x.getTime() - MS_DAY * 7),
+            y: actual[0].y,
+            projected: false
+        };
+        datasets.push({
+            type: 'line',
+            data: [anchor, actual[0]],
+            borderColor: 'rgba(56, 189, 248, 0.9)',
+            backgroundColor: 'rgba(56, 189, 248, 0.16)',
+            borderWidth: 2,
+            tension: 0.68,
+            borderCapStyle: 'round',
+            borderJoinStyle: 'round',
+            pointRadius: 0,
+            pointHoverRadius: 0,
+            pointHitRadius: 14,
+            spanGaps: true,
+            fill: 'origin',
+            label: 'Net worth'
         });
     }
 
@@ -3040,11 +3071,12 @@ function createNetWorthDatasets(points){
             borderColor: 'rgba(129, 140, 248, 0.9)',
             borderDash: [6, 4],
             borderWidth: 2,
-            tension: 0.45,
+            tension: 0.55,
             pointRadius: 0,
             pointHoverRadius: 0,
             pointHitRadius: 14,
-            fill: false
+            fill: false,
+            label: 'Projected net worth'
         });
     }
 

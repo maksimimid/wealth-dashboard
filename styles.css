@@ -946,17 +946,17 @@ h1 {
 .analytics-list.plates .analytics-row::after {
     content: '';
     position: absolute;
-    top: -12%;
-    left: -12%;
-    right: -12%;
-    bottom: -12%;
+    top: -6%;
+    left: -6%;
+    right: -6%;
+    bottom: -6%;
     border-radius: inherit;
     background-image: var(--plate-image, none);
     background-size: cover;
     background-position: center;
-    transform: scale(1.02);
-    filter: saturate(1.15);
-    opacity: 0.38;
+    transform: scale(1.01);
+    filter: saturate(1.08);
+    opacity: 0.32;
     z-index: 0;
     transition: opacity 0.3s ease, transform 0.3s ease;
 }
@@ -972,8 +972,8 @@ h1 {
 }
 
 .analytics-list.plates .analytics-row:hover::after {
-    opacity: 0.5;
-    transform: scale(1.05);
+    opacity: 0.44;
+    transform: scale(1.035);
 }
 
 .analytics-list.plates .analytics-values {
@@ -1430,8 +1430,8 @@ body.light-theme .analytics-list.plates .analytics-row::before {
 }
 
 body.light-theme .analytics-list.plates .analytics-row::after {
-    opacity: 0.32;
-    filter: saturate(1.05);
+    opacity: 0.28;
+    filter: saturate(1.02);
 }
 
 body.light-theme .subtitle { color: #475569; }
