@@ -2798,20 +2798,41 @@ function buildNetWorthTrendPoints(totalValue){
     }
 
     const now = new Date();
+    const startOfYear = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
+    const hasYearStart = points.some(point => point.date && point.date.getFullYear() === now.getFullYear() && point.date.getMonth() === 0 && point.date.getDate() === 1);
+    if(!hasYearStart){
+        const prior = points.length ? points[points.length - 1].value : 0;
+        points.push({ date: startOfYear, value: prior, baseline: true });
+    }
     if(points.length){
         const lastPoint = points[points.length - 1];
+        const lastValue = Number.isFinite(lastPoint.value) ? lastPoint.value : 0;
         if(Math.abs(now - lastPoint.date) > 60 * 60 * 1000){
-            points.push({ date: now, value: totalValue });
-        }else{
-            points[points.length - 1] = { date: now, value: totalValue };
+            points.push({ date: now, value: lastValue, baseline: true });
+        }else if(lastPoint){
+            lastPoint.value = lastValue;
+            lastPoint.baseline = true;
+            lastPoint.date = now;
+        }
+        const endOfYear = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+        if(endOfYear.getTime() > now.getTime()){
+            points.push({ date: endOfYear, value: totalValue, projected: true });
         }
     }else{
-        points.push({ date: now, value: totalValue });
+        points.push({ date: now, value: totalValue, baseline: true });
+        const endOfYear = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+        if(endOfYear.getTime() > now.getTime()){
+            points.push({ date: endOfYear, value: totalValue, projected: true });
+        }
     }
+
+    points.sort((a,b)=> a.date - b.date);
 
     return points.map(point => ({
         date: point.date instanceof Date ? point.date : new Date(point.date),
-        value: Number.isFinite(point.value) ? point.value : 0
+        value: Number.isFinite(point.value) ? point.value : 0,
+        projected: Boolean(point.projected),
+        baseline: Boolean(point.baseline)
     }));
 }
 
@@ -2831,19 +2852,16 @@ function renderNetWorthSparkline(points){
         }
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        const tooltipEl = canvas.nextElementSibling;
-        if(tooltipEl && tooltipEl.classList && tooltipEl.classList.contains('networth-tooltip')){
-            tooltipEl.remove();
-        }
         return;
     }
     const dataPoints = points.map(point => ({
         x: point.date instanceof Date ? point.date : new Date(point.date),
-        y: Number.isFinite(point.value) ? Math.max(0, point.value) : 0
+        y: Number.isFinite(point.value) ? Math.max(0, point.value) : 0,
+        projected: point.projected,
+        baseline: point.baseline
     }));
     if(netWorthSparklineChart){
-        netWorthSparklineChart.data.datasets[0].data = dataPoints;
+        netWorthSparklineChart.data.datasets = createNetWorthDatasets(dataPoints);
         netWorthSparklineChart.options.plugins.tooltip.enabled = true;
         netWorthSparklineChart.options.plugins.tooltip.displayColors = false;
         netWorthSparklineChart.options.plugins.tooltip.callbacks = {
@@ -2855,7 +2873,8 @@ function renderNetWorthSparkline(points){
             },
             label(item){
                 const value = item.raw?.y ?? item.parsed?.y ?? 0;
-                return `Net worth ${money(value)}`;
+                const label = item.raw?.projected ? 'Projected net worth' : 'Net worth';
+                return `${label} ${money(value)}`;
             }
         };
         netWorthSparklineChart.options.scales.x.time = {
@@ -2887,13 +2906,10 @@ function renderNetWorthSparkline(points){
             intersect: false,
             mode: 'index'
         });
-        netWorthSparklineChart.config.data.datasets[0].tension = 0.58;
-        netWorthSparklineChart.config.data.datasets[0].borderCapStyle = 'round';
-        netWorthSparklineChart.config.data.datasets[0].borderJoinStyle = 'round';
-        netWorthSparklineChart.config.data.datasets[0].pointRadius = 0;
-        netWorthSparklineChart.config.data.datasets[0].pointHoverRadius = 0;
-        netWorthSparklineChart.config.data.datasets[0].pointHitRadius = 14;
-        netWorthSparklineChart.config.data.datasets[0].spanGaps = true;
+        netWorthSparklineChart.options.animation = Object.assign({}, netWorthSparklineChart.options.animation, {
+            duration: 420,
+            easing: 'easeInOutCubic'
+        });
         netWorthSparklineChart.update('none');
         return;
     }
@@ -2904,25 +2920,15 @@ function renderNetWorthSparkline(points){
     netWorthSparklineChart = new Chart(ctx, {
         type: 'line',
         data: {
-            datasets: [{
-                data: dataPoints,
-                borderColor: 'rgba(56, 189, 248, 0.9)',
-                backgroundColor: 'rgba(56, 189, 248, 0.18)',
-                borderWidth: 2,
-                tension: 0.48,
-                borderCapStyle: 'round',
-                borderJoinStyle: 'round',
-                pointRadius: 0,
-                pointHoverRadius: 0,
-                pointHitRadius: 12,
-                spanGaps: true,
-                fill: 'origin'
-            }]
+            datasets: createNetWorthDatasets(dataPoints)
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            animation: false,
+            animation: {
+                duration: 420,
+                easing: 'easeInOutCubic'
+            },
             plugins: {
                 legend: { display: false },
                 tooltip: {
@@ -2937,7 +2943,8 @@ function renderNetWorthSparkline(points){
                         },
                         label(item){
                             const value = item.raw?.y ?? item.parsed?.y ?? 0;
-                            return `Net worth ${money(value)}`;
+                            const label = item.raw?.projected ? 'Projected net worth' : 'Net worth';
+                            return `${label} ${money(value)}`;
                         }
                     }
                 }
@@ -2984,6 +2991,64 @@ function renderNetWorthSparkline(points){
             }
         }
     });
+}
+
+function createNetWorthDatasets(points){
+    const actual = [];
+    const projected = [];
+    let lastActual = null;
+
+    points.forEach(point => {
+        const base = {
+            x: point.date instanceof Date ? point.date : new Date(point.date),
+            y: Number.isFinite(point.value) ? Math.max(0, point.value) : 0
+        };
+        if(point.projected){
+            if(lastActual && projected.length === 0){
+                projected.push({ x: lastActual.x, y: lastActual.y });
+            }
+            projected.push(base);
+        }else{
+            actual.push(base);
+            lastActual = base;
+        }
+    });
+
+    const datasets = [];
+    if(actual.length >= 2){
+        datasets.push({
+            type: 'line',
+            data: actual,
+            borderColor: 'rgba(56, 189, 248, 0.9)',
+            backgroundColor: 'rgba(56, 189, 248, 0.16)',
+            borderWidth: 2,
+            tension: 0.6,
+            borderCapStyle: 'round',
+            borderJoinStyle: 'round',
+            pointRadius: 0,
+            pointHoverRadius: 0,
+            pointHitRadius: 14,
+            spanGaps: true,
+            fill: 'origin'
+        });
+    }
+
+    if(projected.length >= 2){
+        datasets.push({
+            type: 'line',
+            data: projected,
+            borderColor: 'rgba(129, 140, 248, 0.9)',
+            borderDash: [6, 4],
+            borderWidth: 2,
+            tension: 0.45,
+            pointRadius: 0,
+            pointHoverRadius: 0,
+            pointHitRadius: 14,
+            fill: false
+        });
+    }
+
+    return datasets;
 }
 
 function extractEtContext(date){
