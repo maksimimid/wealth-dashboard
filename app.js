@@ -1779,7 +1779,9 @@ function updateRealEstateRentals(){
     const headerAllocationEl = document.getElementById('realestate-allocation');
     if(headerValueEl){
         const totalValue = analytics && typeof analytics.totalValue === 'number' ? analytics.totalValue : 0;
-        headerValueEl.textContent = money(totalValue);
+        const projectedSum = stats.reduce((sum, stat)=> sum + Number(stat.projectedValue || 0), 0);
+        const displayValue = Number.isFinite(projectedSum) && projectedSum > 0 ? projectedSum : totalValue;
+        headerValueEl.textContent = money(displayValue);
     }
     if(headerAllocationEl){
         const allocationValue = analytics && typeof analytics.allocation === 'number' ? analytics.allocation : null;
@@ -3026,12 +3028,6 @@ function createNetWorthDatasets(points){
 
     if(!actualPoints.length && projectedPoints.length){
         actualPoints.push({...projectedPoints[0]});
-    }
-
-    if(actualPoints.length <= 1){
-        const base = actualPoints.length ? actualPoints[0] : { x: new Date(), y: 0 };
-        const anchor = { x: new Date(base.x.getTime() - MS_DAY * 21), y: base.y };
-        actualPoints.unshift(anchor);
     }
 
     const datasets = [{
