@@ -243,6 +243,18 @@
     </footer>
 </div>
 
+<div id="networth-detail-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-content networth-detail-content" role="dialog" aria-modal="true" aria-labelledby="networth-detail-title">
+        <button type="button" class="modal-close" aria-label="Close net worth detail chart">&times;</button>
+        <h3 class="modal-title" id="networth-detail-title">Net Worth Timeline</h3>
+        <div class="modal-subtitle" id="networth-detail-subtitle"></div>
+        <div class="modal-chart networth-detail-chart">
+            <canvas id="networth-detail-chart"></canvas>
+        </div>
+        <div class="modal-meta" id="networth-detail-meta"></div>
+    </div>
+</div>
+
 <div id="transaction-modal" class="modal hidden" aria-hidden="true">
     <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="transaction-modal-title">
         <button type="button" class="modal-close" aria-label="Close transactions chart">&times;</button>

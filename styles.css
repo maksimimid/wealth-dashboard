@@ -249,6 +249,32 @@ body::before {
     overflow: hidden;
 }
 
+.modal-content.networth-detail-content {
+    width: min(820px, 94vw);
+    max-height: 92vh;
+    gap: 20px;
+}
+
+#networth-detail-modal .modal-chart {
+    min-height: 360px;
+}
+
+#networth-detail-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+#networth-detail-meta div {
+    font-size: 0.95rem;
+    color: var(--muted);
+}
+
+#networth-detail-meta strong {
+    font-weight: 600;
+    color: inherit;
+}
+
 .modal-close {
     position: absolute;
     top: 14px;
@@ -574,6 +600,21 @@ h1 {
     margin-top: 8px;
     font-variant-numeric: tabular-nums;
     min-height: 18px;
+}
+
+.networth-note {
+    display: block;
+    margin-top: 6px;
+    font-size: 11px;
+    letter-spacing: 0.35px;
+    text-transform: uppercase;
+    color: rgba(226, 232, 240, 0.42);
+    font-variant-numeric: tabular-nums;
+    transition: opacity 0.2s ease;
+}
+
+.networth-note.unavailable {
+    opacity: 0.55;
 }
 
 /* inline amount styles removed */
@@ -1487,6 +1528,14 @@ body.light-theme .floating-view-toggle.active {
     background: linear-gradient(135deg, rgba(79, 70, 229, 0.9), rgba(14, 165, 233, 0.9));
     border-color: rgba(79, 70, 229, 0.85);
     color: #f8fafc;
+}
+
+body.light-theme .networth-note {
+    color: rgba(30, 41, 59, 0.55);
+}
+
+body.light-theme .networth-note.unavailable {
+    opacity: 0.6;
 }
 
 body.light-theme .floating-pnl-toggle {

@@ -2092,7 +2092,9 @@ function closeTransactionModal(){
     if(!transactionModal) return;
     transactionModal.classList.add('hidden');
     transactionModal.setAttribute('aria-hidden','true');
-    document.body.classList.remove('modal-open');
+    if(!netWorthDetailModal || netWorthDetailModal.classList.contains('hidden')){
+        document.body.classList.remove('modal-open');
+    }
     if(lastTransactionTrigger && typeof lastTransactionTrigger.focus === 'function'){
         lastTransactionTrigger.focus({ preventScroll: false });
     }
@@ -2587,6 +2589,7 @@ function renderTransactionMeta(position, summary){
 
 function openTransactionModal(position){
     ensureTransactionModalElements();
+    ensureNetWorthDetailModalElements();
     if(!transactionModal || !transactionModalCanvas) return;
     const data = buildTransactionChartData(position);
     lastTransactionData = data;
@@ -2980,22 +2983,35 @@ function computeNetWorthTimeline(totalValue){
     const startOfFirstYear = new Date(firstDate.getFullYear(), 0, 1);
     const lastActual = actual[actual.length - 1];
     const baseProjectedValue = actual.reduce((max, point)=> Math.max(max, point.y), lastActual.y);
-    const projectedYearOneValue = Math.max(lastActual.y, baseProjectedValue) * 1.1;
-    const projectedYearTwoValue = projectedYearOneValue * 1.1;
-    const projectedYearOneDate = new Date(now.getFullYear() + 1, 0, 1);
-    const projectedYearTwoDate = new Date(now.getFullYear() + 2, 0, 1);
-    const projected = [
-        { x: lastActual.x, y: lastActual.y },
-        { x: projectedYearOneDate, y: projectedYearOneValue },
-        { x: projectedYearTwoDate, y: projectedYearTwoValue }
-    ];
+    const projected = [{ x: lastActual.x, y: lastActual.y }];
+    const MAX_PROJECTION_YEARS = 40;
+    let projectedValue = Math.max(lastActual.y, baseProjectedValue);
+    let yearCursor = now.getFullYear() + 1;
+    for(let i = 0; i < MAX_PROJECTION_YEARS; i += 1){
+        projectedValue = projectedValue * 1.1;
+        const point = {
+            x: new Date(yearCursor + i, 0, 1),
+            y: Number.isFinite(projectedValue) && projectedValue > 0 ? projectedValue : 0
+        };
+        projected.push(point);
+        if(projectedValue >= MILLION_TARGET){
+            break;
+        }
+    }
+    if(projected.length < 2){
+        projected.push({
+            x: new Date(yearCursor, 0, 1),
+            y: projectedValue
+        });
+    }
+    const lastProjectedPoint = projected[projected.length - 1];
 
     return {
         actual,
         projected,
         domain: {
             min: startOfFirstYear,
-            max: projectedYearTwoDate
+            max: lastProjectedPoint?.x || projected[projected.length - 1].x
         }
     };
 }
@@ -3048,6 +3064,21 @@ function renderNetWorthSparkline(timeline){
             netWorthSparklineChart = null;
         }
         return;
+    }
+    netWorthSparklineCanvas = canvas;
+    if(!canvas.dataset.networthDetailBound){
+        canvas.style.cursor = 'pointer';
+        canvas.setAttribute('role', 'button');
+        canvas.setAttribute('tabindex', '0');
+        canvas.setAttribute('aria-label', 'Open detailed net worth chart');
+        canvas.addEventListener('click', openNetWorthDetailModal);
+        canvas.addEventListener('keydown', event => {
+            if(event.key === 'Enter' || event.key === ' '){
+                event.preventDefault();
+                openNetWorthDetailModal();
+            }
+        });
+        canvas.dataset.networthDetailBound = 'true';
     }
     const actualRaw = Array.isArray(timeline?.actual) ? timeline.actual : [];
     const projectedRaw = Array.isArray(timeline?.projected) ? timeline.projected : [];
@@ -3193,6 +3224,9 @@ function renderNetWorthSparkline(timeline){
         netWorthSparklineChart.data.datasets = [dataset];
         netWorthSparklineChart.options = options;
         netWorthSparklineChart.update('none');
+        if(netWorthDetailModal && !netWorthDetailModal.classList.contains('hidden')){
+            renderNetWorthDetailChart(timeline);
+        }
         return;
     }
 
@@ -3207,6 +3241,9 @@ function renderNetWorthSparkline(timeline){
         options,
         plugins: [sparklineCrosshairPlugin]
     });
+    if(netWorthDetailModal && !netWorthDetailModal.classList.contains('hidden')){
+        renderNetWorthDetailChart(timeline);
+    }
 }
 
 function flattenTimelinePoints(timeline, options = {}){
@@ -3272,6 +3309,238 @@ function updateMillionTargetNote(timeline){
     }else{
         noteEl.textContent = '1M target: —';
         noteEl.classList.add('unavailable');
+    }
+}
+
+function ensureNetWorthDetailModalElements(){
+    if(netWorthDetailModal && netWorthDetailCanvas){
+        return;
+    }
+    netWorthDetailModal = document.getElementById('networth-detail-modal');
+    if(!netWorthDetailModal){
+        return;
+    }
+    netWorthDetailCanvas = document.getElementById('networth-detail-chart');
+    netWorthDetailSubtitle = document.getElementById('networth-detail-subtitle');
+    netWorthDetailMeta = document.getElementById('networth-detail-meta');
+    const closeButton = netWorthDetailModal.querySelector('.modal-close');
+    if(closeButton && !closeButton.dataset.networthBound){
+        closeButton.addEventListener('click', closeNetWorthDetailModal);
+        closeButton.dataset.networthBound = 'true';
+    }
+    if(!netWorthDetailModal.dataset.networthBound){
+        netWorthDetailModal.addEventListener('click', event => {
+            if(event.target === netWorthDetailModal){
+                closeNetWorthDetailModal();
+            }
+        });
+        netWorthDetailModal.dataset.networthBound = 'true';
+    }
+}
+
+function renderNetWorthDetailChart(timeline){
+    ensureNetWorthDetailModalElements();
+    if(!netWorthDetailCanvas){
+        return;
+    }
+    const usableTimeline = timeline || lastNetWorthTimeline;
+    if(!usableTimeline){
+        return;
+    }
+    if(typeof Chart === 'undefined'){
+        return;
+    }
+    const actualSeries = generateSmoothSeries(usableTimeline.actual || [], {
+        stepDays: 5,
+        smoothing: 0.2
+    });
+    if(!actualSeries.length){
+        if(netWorthDetailChart){
+            netWorthDetailChart.destroy();
+            netWorthDetailChart = null;
+        }
+        return;
+    }
+    let projectedSeries = [];
+    if(Array.isArray(usableTimeline.projected) && usableTimeline.projected.length > 1){
+        const stitched = [
+            usableTimeline.actual?.[usableTimeline.actual.length - 1],
+            ...usableTimeline.projected.slice(1)
+        ].filter(Boolean);
+        projectedSeries = generateSmoothSeries(stitched, {
+            stepDays: 10,
+            smoothing: 0.26
+        });
+    }
+    const datasets = [{
+        label: 'Net worth (actual)',
+        data: actualSeries,
+        borderColor: 'rgba(56, 189, 248, 0.95)',
+        backgroundColor: 'rgba(56, 189, 248, 0.16)',
+        borderWidth: 2.4,
+        tension: 0.55,
+        fill: 'origin',
+        pointRadius: 0,
+        pointHoverRadius: 3,
+        pointHitRadius: 12,
+        spanGaps: true
+    }];
+    if(projectedSeries.length){
+        datasets.push({
+            label: 'Net worth (projected)',
+            data: projectedSeries,
+            borderColor: 'rgba(129, 140, 248, 0.95)',
+            backgroundColor: 'rgba(129, 140, 248, 0.08)',
+            borderDash: [6, 4],
+            borderWidth: 2.1,
+            tension: 0.6,
+            fill: false,
+            pointRadius: 0,
+            pointHoverRadius: 3,
+            pointHitRadius: 12,
+            spanGaps: true
+        });
+    }
+    const firstPoint = actualSeries[0];
+    const lastActualPoint = actualSeries[actualSeries.length - 1];
+    const endPoint = (projectedSeries.length ? projectedSeries[projectedSeries.length - 1] : lastActualPoint);
+    const targetDate = computeMillionTargetDate(usableTimeline);
+    if(netWorthDetailSubtitle){
+        netWorthDetailSubtitle.textContent = `${formatDateShort(firstPoint.x)} – ${formatDateShort(endPoint.x)}`;
+    }
+    if(netWorthDetailMeta){
+        const targetText = targetDate ? formatDateShort(targetDate) : '—';
+        netWorthDetailMeta.innerHTML = `
+            <div>Current net worth: <strong>${money(lastActualPoint.y)}</strong></div>
+            <div>Projection horizon: <strong>${money(endPoint.y)}</strong></div>
+            <div>1M target: <strong>${targetText}</strong></div>
+        `;
+    }
+    const isLightTheme = document.body.classList.contains('light-theme');
+    const gridColor = isLightTheme ? 'rgba(148, 163, 184, 0.28)' : 'rgba(148, 163, 184, 0.18)';
+    const tickColor = isLightTheme ? 'rgba(30, 41, 59, 0.78)' : 'rgba(226, 232, 240, 0.82)';
+    const legendColor = isLightTheme ? 'rgba(30, 41, 59, 0.85)' : 'rgba(226, 232, 240, 0.88)';
+    const tooltipBg = isLightTheme ? 'rgba(255, 255, 255, 0.95)' : 'rgba(15, 23, 42, 0.95)';
+    const tooltipText = isLightTheme ? '#0f172a' : '#f8fafc';
+    const options = {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'nearest', intersect: false },
+        plugins: {
+            legend: {
+                display: true,
+                labels: {
+                    color: legendColor,
+                    usePointStyle: true,
+                    padding: 12
+                }
+            },
+            tooltip: {
+                enabled: true,
+                backgroundColor: tooltipBg,
+                titleColor: tooltipText,
+                bodyColor: tooltipText,
+                borderColor: isLightTheme ? 'rgba(148, 163, 184, 0.45)' : 'rgba(51, 65, 85, 0.45)',
+                borderWidth: 1,
+                callbacks: {
+                    title(items){
+                        const item = items && items[0];
+                        if(!item) return '';
+                        const rawDate = item.raw?.x;
+                        const date = rawDate instanceof Date ? rawDate : new Date(rawDate);
+                        return date ? formatDateShort(date) : '';
+                    },
+                    label(item){
+                        const value = item.raw?.y ?? item.parsed?.y ?? 0;
+                        return `${item.dataset?.label || 'Value'}: ${money(value)}`;
+                    }
+                }
+            }
+        },
+        scales: {
+            x: {
+                type: 'time',
+                grid: {
+                    color: gridColor,
+                    borderDash: [2, 6],
+                    drawTicks: false
+                },
+                ticks: {
+                    color: tickColor,
+                    autoSkip: true,
+                    maxRotation: 0,
+                    major: { enabled: false }
+                },
+                time: {
+                    unit: 'month',
+                    displayFormats: { month: 'MMM yyyy' }
+                }
+            },
+            y: {
+                grid: {
+                    color: gridColor,
+                    borderDash: [4, 6]
+                },
+                ticks: {
+                    color: tickColor,
+                    callback: value => money(value)
+                }
+            }
+        },
+        layout: {
+            padding: { top: 8, right: 12, bottom: 8, left: 8 }
+        }
+    };
+    const data = { datasets };
+    if(netWorthDetailChart){
+        netWorthDetailChart.data = data;
+        netWorthDetailChart.options = options;
+        netWorthDetailChart.update('none');
+    }else{
+        const ctx = netWorthDetailCanvas.getContext('2d');
+        netWorthDetailChart = new Chart(ctx, {
+            type: 'line',
+            data,
+            options
+        });
+    }
+}
+
+function openNetWorthDetailModal(){
+    ensureNetWorthDetailModalElements();
+    if(!netWorthDetailModal){
+        return;
+    }
+    if(netWorthDetailModal && !netWorthDetailModal.classList.contains('hidden')){
+        renderNetWorthDetailChart(lastNetWorthTimeline);
+        return;
+    }
+    const fallbackTotal = positions.reduce((sum, position)=> sum + Number(position.marketValue || 0), 0);
+    const timeline = lastNetWorthTimeline || computeNetWorthTimeline(fallbackTotal);
+    if(!lastNetWorthTimeline && timeline){
+        lastNetWorthTimeline = timeline;
+    }
+    renderNetWorthDetailChart(timeline);
+    netWorthDetailModal.classList.remove('hidden');
+    netWorthDetailModal.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('modal-open');
+    const closeButton = netWorthDetailModal.querySelector('.modal-close');
+    if(closeButton && typeof closeButton.focus === 'function'){
+        closeButton.focus({ preventScroll: true });
+    }
+}
+
+function closeNetWorthDetailModal(){
+    if(!netWorthDetailModal){
+        return;
+    }
+    netWorthDetailModal.classList.add('hidden');
+    netWorthDetailModal.setAttribute('aria-hidden', 'true');
+    if(netWorthSparklineCanvas && typeof netWorthSparklineCanvas.focus === 'function'){
+        netWorthSparklineCanvas.focus({ preventScroll: false });
+    }
+    if(!transactionModal || transactionModal.classList.contains('hidden')){
+        document.body.classList.remove('modal-open');
     }
 }
 
@@ -3573,6 +3842,7 @@ function updateKpis(){
     const totalMarketValue = Object.values(netWorthTotals).reduce((sum, value)=> sum + Number(value || 0), 0);
 
     const netWorthTimeline = computeNetWorthTimeline(totalMarketValue);
+    lastNetWorthTimeline = netWorthTimeline;
     renderNetWorthSparkline(netWorthTimeline);
     updateMillionTargetNote(netWorthTimeline);
 
@@ -3810,9 +4080,21 @@ document.addEventListener('DOMContentLoaded', ()=>{
         setLoadingState('visible','Loading Airtable…');
     }
     ensureTransactionModalElements();
+    ensureNetWorthDetailModalElements();
     document.addEventListener('keydown', event => {
-        if(event.key === 'Escape' && transactionModal && !transactionModal.classList.contains('hidden')){
-            closeTransactionModal();
+        if(event.key === 'Escape'){
+            let handled = false;
+            if(netWorthDetailModal && !netWorthDetailModal.classList.contains('hidden')){
+                closeNetWorthDetailModal();
+                handled = true;
+            }
+            if(transactionModal && !transactionModal.classList.contains('hidden')){
+                closeTransactionModal();
+                handled = true;
+            }
+            if(handled){
+                event.preventDefault();
+            }
         }
     });
     const themeToggle = document.getElementById('theme-toggle');
@@ -3821,6 +4103,9 @@ document.addEventListener('DOMContentLoaded', ()=>{
         themeToggle.addEventListener('click', ()=>{
             const isLight = document.body.classList.toggle('light-theme');
             updateThemeToggleIcon(themeToggle, isLight);
+            if(netWorthDetailModal && !netWorthDetailModal.classList.contains('hidden')){
+                renderNetWorthDetailChart(lastNetWorthTimeline);
+            }
         });
     }
 
