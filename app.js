@@ -92,6 +92,9 @@ const SPARKLINE_ACTUAL_STEP_DAYS = 7;
 const SPARKLINE_PROJECTED_STEP_DAYS = 14;
 const SPARKLINE_ACTUAL_SMOOTHING = 0.24;
 const SPARKLINE_PROJECTED_SMOOTHING = 0.32;
+let pnlPercentageToggleButton = null;
+let showPnlPercentages = false;
+const PNL_PERCENTAGE_STORAGE_KEY = 'showPnlPercentages';
 const sparklineCrosshairPlugin = {
     id: 'sparklineCrosshair',
     afterDraw(chart){
@@ -211,6 +214,17 @@ function formatPercent(value, digits = 1){
     const num = Number(value);
     const sign = num > 0 ? '+' : '';
     return `${sign}${num.toFixed(digits)}%`;
+}
+
+function formatMoneyWithPercent(amount, percent, digits = 1){
+    if(amount === null || amount === undefined || !Number.isFinite(Number(amount))){
+        return '—';
+    }
+    const numericAmount = Number(amount);
+    const base = money(numericAmount);
+    if(!showPnlPercentages) return base;
+    if(percent === null || percent === undefined || !Number.isFinite(Number(percent))) return base;
+    return `${base} (${formatPercent(percent, digits)})`;
 }
 
 function monthsBetween(start, end){
@@ -574,22 +588,27 @@ function setCategoryPnl(elementId, value, key){
     if(!el) return;
     el.classList.remove('delta-positive','delta-negative');
     const numeric = Number(value || 0);
-    const formattedValue = money(numeric);
-    let formattedPercent = '';
     const totals = currentCategoryRangeTotals || {};
     const grandTotal = Number(totals.crypto || 0) + Number(totals.stock || 0) + Number(totals.realEstate || 0);
-    if(grandTotal){
-        const pct = (numeric / grandTotal) * 100;
-        if(Number.isFinite(pct)){
-            formattedPercent = ` (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)`;
-        }
-    }
-    el.textContent = `${formattedValue}${formattedPercent}`;
+    const pct = grandTotal ? (numeric / grandTotal) * 100 : null;
+    el.textContent = formatMoneyWithPercent(numeric, pct, 1);
     if(numeric > 0){
         el.classList.add('delta-positive');
     }else if(numeric < 0){
         el.classList.add('delta-negative');
     }
+}
+
+function formatCategorySummaryPnl(amount, categoryMarketValue){
+    if(amount === null || amount === undefined || !Number.isFinite(Number(amount))){
+        return '—';
+    }
+    const numericAmount = Number(amount);
+    const denominator = Number(categoryMarketValue);
+    const percent = Number.isFinite(denominator) && Math.abs(denominator) > 1e-6
+        ? (numericAmount / denominator) * 100
+        : null;
+    return formatMoneyWithPercent(numericAmount, percent, 1);
 }
 
 function updateThemeToggleIcon(button, isLight){
@@ -2720,7 +2739,8 @@ function createOpenPositionRow(position, totalCategoryValue){
     marketEl.textContent = money(marketValue);
     const pnlEl = document.createElement('div');
     pnlEl.className = pnlValue >= 0 ? 'delta-positive' : 'delta-negative';
-    pnlEl.textContent = money(pnlValue);
+    const pnlPercent = Number(position.rangeChangePct);
+    pnlEl.textContent = formatMoneyWithPercent(pnlValue, Number.isFinite(pnlPercent) ? pnlPercent : null, 1);
     const shareEl = document.createElement('div');
     shareEl.className = 'muted';
     shareEl.textContent = `Category ${shareText}`;
@@ -2781,7 +2801,8 @@ function createClosedPositionRow(position){
     nameEl.textContent = position.displayName || position.Symbol || position.Name;
     const metaEl = document.createElement('div');
     metaEl.className = 'pos';
-    metaEl.textContent = `Realized P&L ${money(realized)}`;
+    const realizedPercent = Number(position.rangeChangePct);
+    metaEl.textContent = `Realized P&L ${formatMoneyWithPercent(realized, Number.isFinite(realizedPercent) ? realizedPercent : null, 1)}`;
     label.appendChild(nameEl);
     label.appendChild(metaEl);
     main.appendChild(label);
@@ -2791,7 +2812,7 @@ function createClosedPositionRow(position){
     values.className = 'analytics-values';
     const pnlEl = document.createElement('div');
     pnlEl.className = realized >= 0 ? 'delta-positive' : 'delta-negative';
-    pnlEl.textContent = money(realized);
+    pnlEl.textContent = formatMoneyWithPercent(realized, Number.isFinite(realizedPercent) ? realizedPercent : null, 1);
     const statusEl = document.createElement('div');
     statusEl.className = 'muted';
     statusEl.textContent = 'Position closed';
@@ -3355,7 +3376,13 @@ function renderCategoryAnalytics(categoryKey, config){
     const allocation = totalPortfolioValue ? (totalCategoryValue / totalPortfolioValue) * 100 : null;
 
     setCategoryMetric(config.metricKey, 'market', totalCategoryValue, config.summary.market, money);
-    setCategoryMetric(config.metricKey, 'pnl', totalPnl, config.summary.pnl, money);
+    setCategoryMetric(
+        config.metricKey,
+        'pnl',
+        totalPnl,
+        config.summary.pnl,
+        value => formatCategorySummaryPnl(value, totalCategoryValue)
+    );
     setCategoryMetric(config.metricKey, 'allocation', allocation, config.summary.allocation, value => {
         if(value === null) return '—';
         return `${value.toFixed(1)}%`;
@@ -3470,6 +3497,11 @@ function updateKpis(){
     renderNetWorthSparkline(netWorthTimeline);
 
     setMoneyWithFlash('total-pnl', totalPnl, 'totalPnl');
+    const totalPnlEl = document.getElementById('total-pnl');
+    if(totalPnlEl){
+        const totalPct = totalMarketValue ? (totalPnl / totalMarketValue) * 100 : null;
+        totalPnlEl.textContent = formatMoneyWithPercent(totalPnl, Number.isFinite(totalPct) ? totalPct : null, 1);
+    }
     setMoneyWithFlash('equity', totalMarketValue, 'netWorth');
     setCategoryPnl('pnl-category-crypto', currentCategoryRangeTotals.crypto || 0, 'pnlCrypto');
     setCategoryPnl('pnl-category-stock', currentCategoryRangeTotals.stock || 0, 'pnlStock');
@@ -3615,6 +3647,41 @@ function scheduleCryptoUiUpdate(){
     }
 }
 
+function updatePnlPercentageButtonState(){
+    if(!pnlPercentageToggleButton) return;
+    const active = showPnlPercentages;
+    const label = active ? 'Hide P&L percentages' : 'Show P&L percentages';
+    pnlPercentageToggleButton.classList.toggle('active', active);
+    pnlPercentageToggleButton.setAttribute('aria-pressed', active ? 'true' : 'false');
+    pnlPercentageToggleButton.setAttribute('aria-label', label);
+    pnlPercentageToggleButton.setAttribute('title', label);
+    const srLabel = pnlPercentageToggleButton.querySelector('#pnl-percentage-toggle-label');
+    if(srLabel){
+        srLabel.textContent = label;
+    }
+}
+
+function setPnlPercentageVisibility(enabled){
+    const next = Boolean(enabled);
+    if(showPnlPercentages === next){
+        updatePnlPercentageButtonState();
+        return;
+    }
+    showPnlPercentages = next;
+    if(typeof document !== 'undefined' && document.body){
+        document.body.classList.toggle('show-pnl-percentages', showPnlPercentages);
+    }
+    updatePnlPercentageButtonState();
+    try{
+        if(typeof window !== 'undefined' && window.localStorage){
+            window.localStorage.setItem(PNL_PERCENTAGE_STORAGE_KEY, showPnlPercentages ? 'true' : 'false');
+        }
+    }catch(error){
+        console.warn('Failed to persist P&L percentage preference', error);
+    }
+    scheduleUIUpdate({immediate:true});
+}
+
 // ----------------- BOOTSTRAP LOGIC -----------------
 async function bootstrap(){
     await loadPositions();
@@ -3693,6 +3760,27 @@ document.addEventListener('DOMContentLoaded', ()=>{
         assetViewToggleButton.addEventListener('click', ()=>{
             const nextMode = assetViewMode === 'plates' ? 'rows' : 'plates';
             setAssetViewMode(nextMode);
+        });
+    }
+
+    pnlPercentageToggleButton = document.getElementById('pnl-percentage-toggle');
+    if(pnlPercentageToggleButton){
+        try{
+            if(typeof window !== 'undefined' && window.localStorage){
+                const storedPercentPref = window.localStorage.getItem(PNL_PERCENTAGE_STORAGE_KEY);
+                if(storedPercentPref === 'true' || storedPercentPref === 'false'){
+                    showPnlPercentages = storedPercentPref === 'true';
+                }
+            }
+        }catch(error){
+            console.warn('Failed to read P&L percentage preference', error);
+        }
+        if(typeof document !== 'undefined' && document.body){
+            document.body.classList.toggle('show-pnl-percentages', showPnlPercentages);
+        }
+        updatePnlPercentageButtonState();
+        pnlPercentageToggleButton.addEventListener('click', ()=>{
+            setPnlPercentageVisibility(!showPnlPercentages);
         });
     }
 
