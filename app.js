@@ -96,6 +96,11 @@ let pnlPercentageToggleButton = null;
 let showPnlPercentages = false;
 const PNL_PERCENTAGE_STORAGE_KEY = 'showPnlPercentages';
 const MILLION_TARGET = 1_000_000;
+let netWorthViewMode = 'chart';
+const NET_WORTH_VIEW_STORAGE_KEY = 'netWorthViewMode';
+let netWorthViewToggleButton = null;
+let lastNetWorthTotals = null;
+let lastNetWorthTotalValue = 0;
 let netWorthSparklineCanvas = null;
 let lastNetWorthTimeline = null;
 let netWorthDetailModal = null;
@@ -3318,6 +3323,182 @@ function updateMillionTargetNote(timeline){
     }
 }
 
+function createMindmapNode(options = {}){
+    const size = Math.max(60, Math.min(220, Number(options.size) || 80));
+    const wrapper = document.createElement('div');
+    wrapper.className = 'mindmap-node';
+    if(options.className){
+        wrapper.classList.add(options.className);
+    }
+    wrapper.style.width = `${size}px`;
+    wrapper.style.height = `${size}px`;
+    const inner = document.createElement('div');
+    inner.className = 'mindmap-node-inner';
+    const titleEl = document.createElement('div');
+    titleEl.className = 'mindmap-node-title';
+    titleEl.textContent = options.label || '';
+    inner.appendChild(titleEl);
+    if(options.valueText){
+        const valueEl = document.createElement('div');
+        valueEl.className = 'mindmap-node-value';
+        valueEl.textContent = options.valueText;
+        inner.appendChild(valueEl);
+    }
+    if(options.detailText){
+        const detailEl = document.createElement('div');
+        detailEl.className = 'mindmap-node-detail';
+        detailEl.textContent = options.detailText;
+        inner.appendChild(detailEl);
+    }
+    const duration = options.animationDuration || 16 + Math.random() * 6;
+    const delay = options.animationDelay || Math.random() * -10;
+    inner.style.animationDuration = `${duration.toFixed(2)}s`;
+    inner.style.animationDelay = `${delay.toFixed(2)}s`;
+    wrapper.appendChild(inner);
+    return { node: wrapper, inner, size };
+}
+
+function renderNetWorthMindmap(categoryMap = {}, totalValue = 0){
+    const container = document.getElementById('networth-mindmap');
+    const linksLayer = document.getElementById('networth-mindmap-links');
+    const nodesLayer = document.getElementById('networth-mindmap-nodes');
+    if(!container || !linksLayer || !nodesLayer){
+        return;
+    }
+    nodesLayer.innerHTML = '';
+    linksLayer.innerHTML = '';
+    const width = container.clientWidth || container.offsetWidth || 0;
+    const height = container.clientHeight || container.offsetHeight || 0;
+    if(width <= 0 || height <= 0){
+        return;
+    }
+    linksLayer.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    linksLayer.setAttribute('width', width);
+    linksLayer.setAttribute('height', height);
+    linksLayer.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const total = Number(totalValue) || 0;
+    const entries = Object.entries(categoryMap || {}).filter(([, value])=> Math.abs(Number(value)) > 1e-2);
+    entries.sort((a,b)=> Number(b[1] || 0) - Number(a[1] || 0));
+
+    const nodesData = entries.map(([key, rawValue])=>{
+        const numericValue = Number(rawValue) || 0;
+        const magnitude = Math.abs(numericValue);
+        const normalized = total > 0 ? Math.sqrt(Math.min(magnitude, total) / total) : 0;
+        const size = Math.max(62, Math.min(150, 62 + normalized * 160));
+        const labelKey = key || 'other';
+        const label = NET_WORTH_LABEL_MAP[labelKey] || labelKey.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, letter => letter.toUpperCase());
+        const percent = total > 0 ? (magnitude / total) * 100 : 0;
+        return {
+            key: labelKey,
+            label,
+            value: numericValue,
+            size,
+            percent
+        };
+    });
+
+    const maxDiameter = nodesData.reduce((max, node)=> Math.max(max, node.size), 0);
+    const radius = Math.max(70, Math.min(width, height) / 2 - (maxDiameter / 2) - 12);
+
+    const mainDetail = total > 0 ? 'Total value' : 'Awaiting data';
+    const minDimension = Math.max(120, Math.min(width, height));
+    const sizeLimit = Math.max(110, Math.min(minDimension - 24, 220));
+    const mainSize = Math.min(sizeLimit, Math.max(110, Math.min(minDimension * 0.6, 200)));
+    const mainNode = createMindmapNode({
+        label: 'Net Worth',
+        valueText: money(total),
+        detailText: mainDetail,
+        size: mainSize,
+        className: 'mindmap-node-main',
+        animationDuration: 20,
+        animationDelay: -6
+    });
+    mainNode.node.style.left = `${centerX}px`;
+    mainNode.node.style.top = `${centerY}px`;
+    mainNode.node.title = `Net Worth: ${money(total)}`;
+    nodesLayer.appendChild(mainNode.node);
+
+    if(!nodesData.length){
+        return;
+    }
+
+    const twoPi = Math.PI * 2;
+    nodesData.forEach((node, index)=>{
+        const angle = twoPi * (index / nodesData.length) - Math.PI / 2;
+        const rawX = centerX + Math.cos(angle) * radius;
+        const rawY = centerY + Math.sin(angle) * radius;
+        const half = node.size / 2;
+        const clampedX = Math.min(width - half - 8, Math.max(half + 8, rawX));
+        const clampedY = Math.min(height - half - 8, Math.max(half + 8, rawY));
+        const nodeDetail = node.percent > 0 ? `${node.percent.toFixed(1)}% share` : '';
+        const bubble = createMindmapNode({
+            label: node.label,
+            valueText: money(node.value),
+            detailText: nodeDetail,
+            size: node.size
+        });
+        bubble.node.style.left = `${clampedX}px`;
+        bubble.node.style.top = `${clampedY}px`;
+        bubble.node.title = `${node.label}: ${money(node.value)}${nodeDetail ? ` (${nodeDetail})` : ''}`;
+        bubble.inner.style.animationDuration = `${(14 + Math.random() * 6).toFixed(2)}s`;
+        bubble.inner.style.animationDelay = `${(Math.random() * -12).toFixed(2)}s`;
+        nodesLayer.appendChild(bubble.node);
+
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', centerX);
+        line.setAttribute('y1', centerY);
+        line.setAttribute('x2', clampedX);
+        line.setAttribute('y2', clampedY);
+        linksLayer.appendChild(line);
+    });
+}
+
+function applyNetWorthViewMode(){
+    const isMindmap = netWorthViewMode === 'mindmap';
+    if(netWorthViewToggleButton){
+        netWorthViewToggleButton.classList.toggle('active', isMindmap);
+        netWorthViewToggleButton.setAttribute('aria-pressed', isMindmap ? 'true' : 'false');
+        const labelText = isMindmap ? 'Show net worth chart' : 'Show mindmap view';
+        netWorthViewToggleButton.textContent = labelText;
+        netWorthViewToggleButton.setAttribute('aria-label', labelText);
+        netWorthViewToggleButton.setAttribute('title', labelText);
+    }
+    const chartEl = document.querySelector('.networth-chart');
+    if(chartEl){
+        chartEl.classList.toggle('hidden', isMindmap);
+    }
+    const breakdownEl = document.getElementById('networth-breakdown');
+    if(breakdownEl){
+        breakdownEl.classList.toggle('hidden', isMindmap);
+    }
+    const mindmapEl = document.getElementById('networth-mindmap');
+    if(mindmapEl){
+        mindmapEl.classList.toggle('hidden', !isMindmap);
+    }
+    if(isMindmap){
+        renderNetWorthMindmap(lastNetWorthTotals, lastNetWorthTotalValue);
+    }
+}
+
+function setNetWorthViewMode(mode){
+    const next = mode === 'mindmap' ? 'mindmap' : 'chart';
+    if(netWorthViewMode === next){
+        return;
+    }
+    netWorthViewMode = next;
+    try{
+        if(typeof window !== 'undefined' && window.localStorage){
+            window.localStorage.setItem(NET_WORTH_VIEW_STORAGE_KEY, netWorthViewMode);
+        }
+    }catch(error){
+        console.warn('Failed to persist net worth view mode', error);
+    }
+    applyNetWorthViewMode();
+}
+
 function ensureNetWorthDetailModalElements(){
     if(netWorthDetailModal && netWorthDetailCanvas){
         return;
@@ -3850,6 +4031,9 @@ function updateKpis(){
 
     const totalMarketValue = Object.values(netWorthTotals).reduce((sum, value)=> sum + Number(value || 0), 0);
 
+    lastNetWorthTotals = { ...(netWorthTotals || {}) };
+    lastNetWorthTotalValue = totalMarketValue;
+
     const netWorthTimeline = computeNetWorthTimeline(totalMarketValue);
     lastNetWorthTimeline = netWorthTimeline;
     renderNetWorthSparkline(netWorthTimeline);
@@ -3866,6 +4050,9 @@ function updateKpis(){
     setCategoryPnl('pnl-category-stock', currentCategoryRangeTotals.stock || 0, 'pnlStock');
     setCategoryPnl('pnl-category-realestate', currentCategoryRangeTotals.realEstate || 0, 'pnlRealEstate');
     updateNetWorthBreakdown(netWorthTotals);
+    if(netWorthViewMode === 'mindmap'){
+        renderNetWorthMindmap(lastNetWorthTotals, lastNetWorthTotalValue);
+    }
 
     const bestNameEl = document.getElementById('best-performer-name');
     const bestPnlEl = document.getElementById('best-performer-pnl');
@@ -4137,6 +4324,24 @@ document.addEventListener('DOMContentLoaded', ()=>{
         });
     }
 
+    netWorthViewToggleButton = document.getElementById('networth-view-toggle');
+    try{
+        if(typeof window !== 'undefined' && window.localStorage){
+            const storedView = window.localStorage.getItem(NET_WORTH_VIEW_STORAGE_KEY);
+            if(storedView === 'mindmap' || storedView === 'chart'){
+                netWorthViewMode = storedView;
+            }
+        }
+    }catch(error){
+        console.warn('Failed to read stored net worth view mode', error);
+    }
+    if(netWorthViewToggleButton){
+        netWorthViewToggleButton.addEventListener('click', ()=>{
+            setNetWorthViewMode(netWorthViewMode === 'mindmap' ? 'chart' : 'mindmap');
+        });
+    }
+    applyNetWorthViewMode();
+
     pnlPercentageToggleButton = document.getElementById('pnl-percentage-toggle');
     if(pnlPercentageToggleButton){
         try{
@@ -4180,6 +4385,9 @@ document.addEventListener('DOMContentLoaded', ()=>{
         clearTimeout(resizeTimer);
         resizeTimer = setTimeout(()=>{
             Object.values(charts).forEach(chart=>chart && chart.resize());
+            if(netWorthViewMode === 'mindmap'){
+                renderNetWorthMindmap(lastNetWorthTotals, lastNetWorthTotalValue);
+            }
         }, 160);
     });
 

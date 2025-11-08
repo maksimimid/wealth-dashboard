@@ -617,6 +617,48 @@ h1 {
     opacity: 0.55;
 }
 
+.networth-controls {
+    margin-top: 10px;
+    display: flex;
+    justify-content: flex-start;
+}
+
+.networth-view-toggle {
+    border: 1px solid rgba(56, 189, 248, 0.45);
+    background: rgba(15, 23, 42, 0.25);
+    color: #e0f2fe;
+    border-radius: 999px;
+    padding: 6px 16px;
+    font-size: 12px;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+}
+
+.networth-view-toggle:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 12px 26px rgba(56, 189, 248, 0.25);
+    background: rgba(56, 189, 248, 0.18);
+}
+
+.networth-view-toggle.active {
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.35), rgba(129, 140, 248, 0.42));
+    border-color: rgba(129, 140, 248, 0.65);
+    color: #f8fafc;
+    box-shadow: 0 16px 28px rgba(56, 189, 248, 0.25);
+}
+
+.networth-view-toggle:focus-visible {
+    outline: 2px solid rgba(56, 189, 248, 0.9);
+    outline-offset: 2px;
+}
+
+.networth-visualization {
+    position: relative;
+    margin-top: 16px;
+}
+
 /* inline amount styles removed */
 
 .pnl-breakdown {
@@ -656,7 +698,6 @@ h1 {
 .networth-chart {
     width: 100%;
     height: 130px;
-    margin-top: 16px;
     position: relative;
 }
 
@@ -696,6 +737,107 @@ h1 {
 .networth-tooltip span {
     font-size: 10px;
     color: rgba(226, 232, 240, 0.75);
+}
+
+.networth-mindmap {
+    position: relative;
+    height: 170px;
+}
+
+.networth-mindmap.hidden {
+    display: none !important;
+}
+
+.mindmap-links {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.35));
+    pointer-events: none;
+}
+
+.mindmap-links line {
+    stroke: rgba(56, 189, 248, 0.55);
+    stroke-width: 2;
+    stroke-dasharray: 6 6;
+    stroke-linecap: round;
+}
+
+.mindmap-nodes {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+.mindmap-node {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+}
+
+.mindmap-node-inner {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    border: 2px solid rgba(56, 189, 248, 0.75);
+    box-shadow:
+        0 0 22px rgba(56, 189, 248, 0.35),
+        inset 0 0 18px rgba(14, 116, 144, 0.45);
+    background: radial-gradient(circle at 30% 30%, rgba(56, 189, 248, 0.65), rgba(15, 23, 42, 0.35));
+    color: #f8fafc;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 12px;
+    text-align: center;
+    backdrop-filter: blur(6px);
+    animation: mindmapFloat 16s ease-in-out infinite;
+}
+
+.mindmap-node-title {
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    opacity: 0.85;
+}
+
+.mindmap-node-value {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.mindmap-node-detail {
+    font-size: 11px;
+    opacity: 0.75;
+}
+
+.mindmap-node-main .mindmap-node-inner {
+    border-width: 3px;
+    border-color: rgba(129, 140, 248, 0.85);
+    background: radial-gradient(circle at 35% 35%, rgba(129, 140, 248, 0.75), rgba(56, 189, 248, 0.55));
+    box-shadow:
+        0 0 28px rgba(129, 140, 248, 0.45),
+        inset 0 0 24px rgba(37, 99, 235, 0.55);
+    animation-duration: 18s;
+}
+
+.mindmap-node-main .mindmap-node-title {
+    font-size: 12px;
+    letter-spacing: 0.6px;
+}
+
+.mindmap-node-main .mindmap-node-value {
+    font-size: 18px;
+}
+
+@keyframes mindmapFloat {
+    0% { transform: translate3d(0, -4px, 0) scale(1); }
+    50% { transform: translate3d(0, 6px, 0) scale(1.02); }
+    100% { transform: translate3d(0, -4px, 0) scale(1); }
 }
 
 .networth-sub {
@@ -1538,6 +1680,23 @@ body.light-theme .networth-note.unavailable {
     opacity: 0.6;
 }
 
+body.light-theme .networth-view-toggle {
+    border-color: rgba(59, 130, 246, 0.45);
+    background: rgba(255, 255, 255, 0.65);
+    color: #1e3a8a;
+}
+
+body.light-theme .networth-view-toggle:hover {
+    box-shadow: 0 12px 24px rgba(59, 130, 246, 0.25);
+    background: rgba(59, 130, 246, 0.18);
+}
+
+body.light-theme .networth-view-toggle.active {
+    background: linear-gradient(135deg, rgba(96, 165, 250, 0.42), rgba(165, 180, 252, 0.52));
+    border-color: rgba(79, 70, 229, 0.6);
+    color: #0f172a;
+}
+
 body.light-theme .floating-pnl-toggle {
     background: rgba(255, 255, 255, 0.9);
     color: #1e293b;
@@ -1585,6 +1744,34 @@ body.light-theme .networth-tooltip {
 
 body.light-theme .networth-tooltip span {
     color: rgba(71, 85, 105, 0.75);
+}
+
+body.light-theme .mindmap-links {
+    filter: drop-shadow(0 0 10px rgba(59, 130, 246, 0.35));
+}
+
+body.light-theme .mindmap-links line {
+    stroke: rgba(37, 99, 235, 0.55);
+}
+
+body.light-theme .mindmap-node-inner {
+    background: radial-gradient(circle at 35% 35%, rgba(96, 165, 250, 0.75), rgba(191, 219, 254, 0.4));
+    color: #0f172a;
+    box-shadow:
+        0 0 24px rgba(59, 130, 246, 0.3),
+        inset 0 0 20px rgba(59, 130, 246, 0.35);
+}
+
+body.light-theme .mindmap-node-main .mindmap-node-inner {
+    background: radial-gradient(circle at 40% 35%, rgba(129, 140, 248, 0.8), rgba(191, 219, 254, 0.45));
+    border-color: rgba(79, 70, 229, 0.85);
+    box-shadow:
+        0 0 28px rgba(129, 140, 248, 0.35),
+        inset 0 0 24px rgba(79, 70, 229, 0.45);
+}
+
+body.light-theme .mindmap-node-detail {
+    color: #475569;
 }
 
 body.light-theme .subtitle { color: #475569; }

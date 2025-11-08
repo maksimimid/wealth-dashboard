@@ -73,9 +73,18 @@
             <div class="label">Net Worth</div>
             <div class="big" id="equity">$0.00</div>
         <small class="networth-note unavailable" id="networth-million-note">1M target: —</small>
+        <div class="networth-controls">
+            <button id="networth-view-toggle" type="button" class="networth-view-toggle" aria-pressed="false">Show mindmap view</button>
+        </div>
+        <div class="networth-visualization">
             <div class="networth-chart">
                 <canvas id="networth-sparkline"></canvas>
             </div>
+            <div class="networth-mindmap hidden" id="networth-mindmap">
+                <svg class="mindmap-links" id="networth-mindmap-links" role="presentation" aria-hidden="true"></svg>
+                <div class="mindmap-nodes" id="networth-mindmap-nodes"></div>
+            </div>
+        </div>
             <div class="networth-breakdown" id="networth-breakdown">
                 <div class="pos">Awaiting holdings data…</div>
             </div>
