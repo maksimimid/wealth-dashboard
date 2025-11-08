@@ -432,9 +432,20 @@ function resolveAssetIcon(position){
         ISAC: 'assets/tickers/isac.svg',
         IBIT: 'assets/tickers/ibit.svg'
     };
-    const symbolUpper = (position.Symbol || position.id || position.displayName || '').toUpperCase();
-    if(overrides[symbolUpper]){
-        return { sources: [overrides[symbolUpper]], alt: `${symbolUpper} logo`, override: overrides[symbolUpper] };
+    const rawSymbol = position.Symbol || position.id || position.displayName || '';
+    const symbolUpper = rawSymbol.toUpperCase();
+    if(symbolUpper){
+        const symbolCandidates = [
+            symbolUpper,
+            symbolUpper.includes('.') ? symbolUpper.split('.')[0] : null,
+            symbolUpper.includes(' ') ? symbolUpper.split(' ')[0] : null,
+            symbolUpper.replace(/[^A-Z0-9]/g, '')
+        ].filter(candidate => candidate && candidate.length);
+        const matchedKey = symbolCandidates.find(candidate => overrides[candidate]);
+        if(matchedKey){
+            const overridePath = overrides[matchedKey];
+            return { sources: [overridePath], alt: `${matchedKey} logo`, override: overridePath };
+        }
     }
     if(typeKey === 'real estate'){
         return { sources: ['assets/real-estate.svg'], alt: 'Real estate asset' };
@@ -537,6 +548,9 @@ function createAssetIconElement(position){
     const cacheKey = getIconCacheKey(position);
     if(cacheKey && position.iconCacheKey !== cacheKey){
         position.iconCacheKey = cacheKey;
+    }
+    if(icon.override && cacheKey && assetIconSourceCache.get(cacheKey) === null){
+        assetIconSourceCache.delete(cacheKey);
     }
     if(cacheKey && assetIconSourceCache.has(cacheKey)){
         const cachedSource = assetIconSourceCache.get(cacheKey);
