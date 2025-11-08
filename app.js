@@ -544,16 +544,11 @@ function setCategoryPnl(elementId, value, key){
     const numeric = Number(value || 0);
     const formattedValue = money(numeric);
     let formattedPercent = '';
-    if(key){
-        const total = positions.reduce((sum, position)=>{
-            const cat = (position.type || '').toLowerCase();
-            if(cat === key.replace('pnl','').toLowerCase()){
-                return sum + Number((position.rangePnl ?? position.pnl) || 0);
-            }
-            return sum;
-        }, 0);
-        if(total){
-            const pct = total ? (numeric / total) * 100 : 0;
+    const totals = currentCategoryRangeTotals || {};
+    const grandTotal = Number(totals.crypto || 0) + Number(totals.stock || 0) + Number(totals.realEstate || 0);
+    if(grandTotal){
+        const pct = (numeric / grandTotal) * 100;
+        if(Number.isFinite(pct)){
             formattedPercent = ` (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)`;
         }
     }
