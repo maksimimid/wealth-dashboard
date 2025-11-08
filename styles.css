@@ -994,10 +994,13 @@ h1 {
     font-size: 1rem;
 }
 
-.best-performer-card {
-    min-height: 150px;
+.best-performer-inline {
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px dashed rgba(56, 189, 248, 0.25);
+    display: flex;
     flex-direction: column;
-    align-items: flex-start;
+    gap: 8px;
 }
 
 .best-performer-header {
