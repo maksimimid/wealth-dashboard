@@ -303,6 +303,16 @@ function deriveAssetInitial(position){
 function resolveAssetIcon(position){
     if(!position) return null;
     const typeKey = String(position.type || '').toLowerCase();
+    const overrides = {
+        GOOG: 'assets/tickers/goog.svg',
+        GOOGLE: 'assets/tickers/goog.svg',
+        ISAC: 'assets/tickers/isac.svg',
+        IBIT: 'assets/tickers/ibit.svg'
+    };
+    const symbolUpper = (position.Symbol || position.id || position.displayName || '').toUpperCase();
+    if(overrides[symbolUpper]){
+        return { sources: [overrides[symbolUpper]], alt: `${symbolUpper} logo`, override: overrides[symbolUpper] };
+    }
     if(typeKey === 'real estate'){
         return { sources: ['assets/real-estate.svg'], alt: 'Real estate asset' };
     }
@@ -382,6 +392,9 @@ function createAssetIconElement(position){
     };
 
     const icon = resolveAssetIcon(position);
+    if(icon && icon.override){
+        wrapper.dataset.plateOverride = icon.override;
+    }
     if(!icon || !Array.isArray(icon.sources) || !icon.sources.length){
         const cacheKeyFallback = getIconCacheKey(position);
         if(cacheKeyFallback && !assetIconSourceCache.has(cacheKeyFallback)){
