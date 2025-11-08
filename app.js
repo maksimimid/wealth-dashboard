@@ -3358,7 +3358,7 @@ function createMindmapNode(options = {}){
     return { node: wrapper, inner, size };
 }
 
-function renderNetWorthMindmap(categoryMap = {}, totalValue = 0){
+function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
     const container = document.getElementById('networth-mindmap');
     const linksLayer = document.getElementById('networth-mindmap-links');
     const nodesLayer = document.getElementById('networth-mindmap-nodes');
@@ -3369,6 +3369,10 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0){
     linksLayer.innerHTML = '';
     const width = container.clientWidth || container.offsetWidth || 0;
     const height = container.clientHeight || container.offsetHeight || 0;
+    if((width <= 0 || height <= 0) && attempt < 3){
+        requestAnimationFrame(()=> renderNetWorthMindmap(categoryMap, totalValue, attempt + 1));
+        return;
+    }
     if(width <= 0 || height <= 0){
         return;
     }
@@ -3479,7 +3483,9 @@ function applyNetWorthViewMode(){
         mindmapEl.classList.toggle('hidden', !isMindmap);
     }
     if(isMindmap){
-        renderNetWorthMindmap(lastNetWorthTotals, lastNetWorthTotalValue);
+        requestAnimationFrame(()=>{
+            renderNetWorthMindmap(lastNetWorthTotals, lastNetWorthTotalValue);
+        });
     }
 }
 
