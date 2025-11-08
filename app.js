@@ -115,9 +115,9 @@ const CATEGORY_CONFIG = {
     }
 };
 const CRYPTO_ICON_PROVIDERS = [
-    symbol => `https://cryptoicons.org/api/icon/${symbol}/128`,
-    symbol => `https://assets.coincap.io/assets/icons/${symbol}@2x.png`,
-    symbol => `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/${symbol}.png`
+    symbol => `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/svg/color/${symbol}.svg`,
+    symbol => `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/svg/black/${symbol}.svg`,
+    symbol => `https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/svg/color/${symbol}.svg`
 ];
 const assetIconSourceCache = new Map();
 const transactionPriceCache = new Map();
@@ -257,6 +257,24 @@ function deriveCryptoIconKey(position){
     return null;
 }
 
+function deriveStockIconKey(position){
+    const candidates = [position.Symbol, position.finnhubSymbol, position.displayName, position.Name, position.id];
+    for(const value of candidates){
+        if(!value) continue;
+        let token = String(value).trim().toUpperCase();
+        if(!token) continue;
+        if(token.includes(':')){
+            const parts = token.split(':');
+            token = parts[parts.length - 1];
+        }
+        token = token.replace(/[^A-Z0-9.-]/g, '');
+        if(token.length >= 1 && token.length <= 8){
+            return token;
+        }
+    }
+    return null;
+}
+
 function deriveAssetInitial(position){
     if(!position) return '??';
     const candidates = [position.displayName, position.Symbol, position.Name, position.id];
@@ -298,6 +316,22 @@ function resolveAssetIcon(position){
                 sources: CRYPTO_ICON_PROVIDERS.map(provider => provider(symbolKey)),
                 alt: `${symbolKey.toUpperCase()} icon`
             };
+        }
+    }
+    if(typeKey === 'stock'){
+        const stockKey = deriveStockIconKey(position);
+        if(stockKey){
+            const cleanSecondary = stockKey.toLowerCase().replace(/[^a-z0-9]/g,'');
+            const sources = [
+                `https://storage.googleapis.com/iex/api/logos/${encodeURIComponent(stockKey)}.svg`,
+                cleanSecondary ? `https://raw.githubusercontent.com/andreasbm/web-logos/master/logos/${cleanSecondary}.svg` : null
+            ].filter(Boolean);
+            if(sources.length){
+                return {
+                    sources,
+                    alt: `${stockKey} logo`
+                };
+            }
         }
     }
     return null;
@@ -2921,6 +2955,11 @@ function renderNetWorthSparkline(timeline){
     const axisMin = timeline?.domain?.min || new Date(firstDate.getFullYear(), 0, 1);
     const axisMax = timeline?.domain?.max || new Date(lastDate.getFullYear(), 11, 31, 23, 59, 59, 999);
 
+    if(actualPoints.length && actualPoints[0].x > axisMin){
+        actualPoints.unshift({ x: axisMin, y: actualPoints[0].y });
+        datasets[0].data = actualPoints;
+    }
+
     const options = {
         responsive: true,
         maintainAspectRatio: false,
@@ -2953,8 +2992,8 @@ function renderNetWorthSparkline(timeline){
                 offset: false,
                 grid: {
                     display: true,
-                    color: 'rgba(148, 163, 184, 0.16)',
-                    borderDash: [3, 6],
+                    color: 'rgba(148, 163, 184, 0.12)',
+                    borderDash: [2, 6],
                     drawTicks: false
                 },
                 ticks: {
@@ -2991,7 +3030,9 @@ function renderNetWorthSparkline(timeline){
 
     if(netWorthSparklineChart){
         netWorthSparklineChart.data.datasets = datasets;
+        netWorthSparklineChart.config.data.datasets = datasets;
         netWorthSparklineChart.options = options;
+        netWorthSparklineChart.config.options = options;
         netWorthSparklineChart.update('none');
         return;
     }
@@ -3006,73 +3047,6 @@ function renderNetWorthSparkline(timeline){
         data: { datasets },
         options
     });
-}
-
-function createNetWorthDatasets(points){
-    if(!Array.isArray(points) || !points.length){
-        return [];
-    }
-
-    const MS_DAY = 24 * 60 * 60 * 1000;
-    const makePoint = point => ({
-        x: point.date instanceof Date ? point.date : new Date(point.date),
-        y: Number.isFinite(point.value) ? Math.max(0, point.value) : 0
-    });
-
-    const actualPoints = [];
-    const projectedPoints = [];
-
-    points.forEach(point=>{
-        if(point.projected){
-            projectedPoints.push(makePoint(point));
-        }else{
-            actualPoints.push(makePoint(point));
-        }
-    });
-
-    actualPoints.sort((a,b)=> a.x - b.x);
-    projectedPoints.sort((a,b)=> a.x - b.x);
-
-    if(!actualPoints.length && projectedPoints.length){
-        actualPoints.push({...projectedPoints[0]});
-    }
-
-    const datasets = [{
-        type: 'line',
-        data: actualPoints,
-        borderColor: 'rgba(56, 189, 248, 0.92)',
-        backgroundColor: 'rgba(56, 189, 248, 0.15)',
-        borderWidth: 2,
-        tension: 0.58,
-        borderCapStyle: 'round',
-        borderJoinStyle: 'round',
-        pointRadius: 0,
-        pointHoverRadius: 0,
-        pointHitRadius: 16,
-        spanGaps: true,
-        fill: 'origin',
-        label: 'Net worth'
-    }];
-
-    if(projectedPoints.length){
-        const lastActual = actualPoints[actualPoints.length - 1];
-        const projectedData = [ lastActual, ...projectedPoints.filter(point => point.x.getTime() !== lastActual.x.getTime()) ];
-        datasets.push({
-            type: 'line',
-            data: projectedData,
-            borderColor: 'rgba(129, 140, 248, 0.92)',
-            borderDash: [6, 4],
-            borderWidth: 2,
-            tension: 0.52,
-            pointRadius: 0,
-            pointHoverRadius: 0,
-            pointHitRadius: 16,
-            fill: false,
-            label: 'Projected net worth'
-        });
-    }
-
-    return datasets;
 }
 
 function extractEtContext(date){
