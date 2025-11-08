@@ -2830,7 +2830,7 @@ function createOpenPositionRow(position, totalCategoryValue){
             : `Price ${money(price)}`
     ];
     if(Math.abs(reinvestedValue) > 1e-6){
-        metaParts.push(`<span class="reinvested-inline">Reinvested ${money(reinvestedValue)}</span>`);
+        metaParts.push(`Reinvested ${money(reinvestedValue)}`);
     }
     metaEl.innerHTML = metaParts.join(' · ');
     label.appendChild(nameEl);
@@ -2912,7 +2912,7 @@ function createClosedPositionRow(position){
         `Realized P&L ${formatMoneyWithPercent(realized, Number.isFinite(realizedPercent) ? realizedPercent : null, 1)}`
     ];
     if(Math.abs(reinvestedValue) > 1e-6){
-        metaParts.push(`<span class="reinvested-inline">Reinvested ${money(reinvestedValue)}</span>`);
+        metaParts.push(`Reinvested ${money(reinvestedValue)}`);
     }
     metaEl.innerHTML = metaParts.join(' · ');
     label.appendChild(nameEl);
