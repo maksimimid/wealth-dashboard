@@ -951,11 +951,6 @@ h1 {
     font-weight: 600;
 }
 
-.mindmap-node-detail {
-    font-size: 11px;
-    opacity: 0.75;
-}
-
 .mindmap-node-main .mindmap-node-inner {
     border-width: 3px;
     border-color: rgba(129, 140, 248, 0.85);
@@ -1928,10 +1923,6 @@ body.light-theme .mindmap-node-main .mindmap-node-inner {
     box-shadow:
         0 0 28px rgba(129, 140, 248, 0.35),
         inset 0 0 24px rgba(79, 70, 229, 0.45);
-}
-
-body.light-theme .mindmap-node-detail {
-    color: #475569;
 }
 
 body.light-theme .networth-bubble-container {

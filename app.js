@@ -191,7 +191,6 @@ const MINDMAP_MAIN_STYLE = {
     boxShadow: '0 0 32px rgba(16, 185, 129, 0.45), inset 0 0 28px rgba(5, 150, 105, 0.55)',
     textColor: '#ecfdf5',
     titleColor: '#bbf7d0',
-    detailColor: 'rgba(209, 250, 229, 0.85)',
     lineColor: 'rgba(52, 211, 153, 0.5)'
 };
 const MINDMAP_COLOR_PALETTE = [
@@ -200,7 +199,6 @@ const MINDMAP_COLOR_PALETTE = [
         borderColor: 'rgba(59, 130, 246, 0.95)',
         boxShadow: '0 0 24px rgba(59, 130, 246, 0.35), inset 0 0 20px rgba(29, 78, 216, 0.45)',
         textColor: '#f8fafc',
-        detailColor: 'rgba(191, 219, 254, 0.85)',
         lineColor: 'rgba(59, 130, 246, 0.6)'
     },
     {
@@ -208,7 +206,6 @@ const MINDMAP_COLOR_PALETTE = [
         borderColor: 'rgba(129, 140, 248, 0.9)',
         boxShadow: '0 0 24px rgba(129, 140, 248, 0.35), inset 0 0 20px rgba(91, 33, 182, 0.45)',
         textColor: '#eef2ff',
-        detailColor: 'rgba(199, 210, 254, 0.85)',
         lineColor: 'rgba(99, 102, 241, 0.58)'
     },
     {
@@ -216,7 +213,6 @@ const MINDMAP_COLOR_PALETTE = [
         borderColor: 'rgba(245, 158, 11, 0.85)',
         boxShadow: '0 0 24px rgba(245, 158, 11, 0.4), inset 0 0 20px rgba(217, 119, 6, 0.45)',
         textColor: '#0f172a',
-        detailColor: 'rgba(254, 243, 199, 0.9)',
         lineColor: 'rgba(245, 158, 11, 0.58)'
     },
     {
@@ -224,7 +220,6 @@ const MINDMAP_COLOR_PALETTE = [
         borderColor: 'rgba(244, 114, 182, 0.9)',
         boxShadow: '0 0 24px rgba(244, 114, 182, 0.35), inset 0 0 20px rgba(190, 24, 93, 0.45)',
         textColor: '#fdf2f8',
-        detailColor: 'rgba(251, 207, 232, 0.85)',
         lineColor: 'rgba(236, 72, 153, 0.58)'
     },
     {
@@ -232,7 +227,6 @@ const MINDMAP_COLOR_PALETTE = [
         borderColor: 'rgba(45, 212, 191, 0.9)',
         boxShadow: '0 0 24px rgba(45, 212, 191, 0.35), inset 0 0 20px rgba(13, 148, 136, 0.45)',
         textColor: '#ecfeff',
-        detailColor: 'rgba(165, 243, 252, 0.85)',
         lineColor: 'rgba(20, 184, 166, 0.55)'
     },
     {
@@ -240,7 +234,6 @@ const MINDMAP_COLOR_PALETTE = [
         borderColor: 'rgba(99, 102, 241, 0.9)',
         boxShadow: '0 0 24px rgba(99, 102, 241, 0.35), inset 0 0 20px rgba(67, 56, 202, 0.45)',
         textColor: '#eef2ff',
-        detailColor: 'rgba(199, 210, 254, 0.85)',
         lineColor: 'rgba(99, 102, 241, 0.58)'
     }
 ];
@@ -3415,23 +3408,16 @@ function createMindmapNode(options = {}){
         valueEl.textContent = options.valueText;
         inner.appendChild(valueEl);
     }
-    let detailEl = null;
     if(options.detailText){
-        detailEl = document.createElement('div');
-        detailEl.className = 'mindmap-node-detail';
-        detailEl.textContent = options.detailText;
-        inner.appendChild(detailEl);
+        titleEl.dataset.fullLabel = options.detailText;
     }
     if(options.styles){
-        const { background, borderColor, boxShadow, textColor, titleColor, detailColor } = options.styles;
+        const { background, borderColor, boxShadow, textColor, titleColor } = options.styles;
         if(background) inner.style.background = background;
         if(borderColor) inner.style.borderColor = borderColor;
         if(boxShadow) inner.style.boxShadow = boxShadow;
         if(textColor) inner.style.color = textColor;
         if(titleColor) titleEl.style.color = titleColor;
-        if(detailColor && detailEl){
-            detailEl.style.color = detailColor;
-        }
     }
     const duration = options.animationDuration || 16 + Math.random() * 6;
     const delay = options.animationDelay || Math.random() * -10;
