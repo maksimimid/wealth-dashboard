@@ -3363,18 +3363,19 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
     const linksLayer = document.getElementById('networth-mindmap-links');
     const nodesLayer = document.getElementById('networth-mindmap-nodes');
     if(!container || !linksLayer || !nodesLayer){
-        return;
+        return false;
     }
     nodesLayer.innerHTML = '';
     linksLayer.innerHTML = '';
-    const width = container.clientWidth || container.offsetWidth || 0;
-    const height = container.clientHeight || container.offsetHeight || 0;
+    const rect = container.getBoundingClientRect();
+    const width = rect.width || container.clientWidth || container.offsetWidth || 0;
+    const height = rect.height || container.clientHeight || container.offsetHeight || 0;
     if((width <= 0 || height <= 0) && attempt < 3){
         requestAnimationFrame(()=> renderNetWorthMindmap(categoryMap, totalValue, attempt + 1));
-        return;
+        return null;
     }
     if(width <= 0 || height <= 0){
-        return;
+        return false;
     }
     linksLayer.setAttribute('viewBox', `0 0 ${width} ${height}`);
     linksLayer.setAttribute('width', width);
@@ -3426,7 +3427,7 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
     nodesLayer.appendChild(mainNode.node);
 
     if(!nodesData.length){
-        return;
+        return true;
     }
 
     const twoPi = Math.PI * 2;
@@ -3458,6 +3459,7 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
         line.setAttribute('y2', clampedY);
         linksLayer.appendChild(line);
     });
+    return true;
 }
 
 function applyNetWorthViewMode(){
@@ -3484,7 +3486,11 @@ function applyNetWorthViewMode(){
     }
     if(isMindmap){
         requestAnimationFrame(()=>{
-            renderNetWorthMindmap(lastNetWorthTotals, lastNetWorthTotalValue);
+            const result = renderNetWorthMindmap(lastNetWorthTotals, lastNetWorthTotalValue);
+            if(result === false){
+                console.warn('Mindmap view failed to render; reverting to chart view.');
+                setNetWorthViewMode('chart');
+            }
         });
     }
 }
@@ -4057,7 +4063,10 @@ function updateKpis(){
     setCategoryPnl('pnl-category-realestate', currentCategoryRangeTotals.realEstate || 0, 'pnlRealEstate');
     updateNetWorthBreakdown(netWorthTotals);
     if(netWorthViewMode === 'mindmap'){
-        renderNetWorthMindmap(lastNetWorthTotals, lastNetWorthTotalValue);
+        const result = renderNetWorthMindmap(lastNetWorthTotals, lastNetWorthTotalValue);
+        if(result === false){
+            setNetWorthViewMode('chart');
+        }
     }
 
     const bestNameEl = document.getElementById('best-performer-name');
