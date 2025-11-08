@@ -108,6 +108,9 @@ let lastNetWorthTimeline = null;
 let netWorthDetailModal = null;
 let netWorthDetailCanvas = null;
 let netWorthDetailChart = null;
+let netWorthBubbleNeedsRender = false;
+let netWorthBubbleSnapshot = null;
+let netWorthBubbleSnapshotTotal = 0;
 let netWorthDetailSubtitle = null;
 let netWorthDetailMeta = null;
 const sparklineCrosshairPlugin = {
@@ -3648,14 +3651,32 @@ function applyNetWorthInlineViewMode(){
     if(bubbleContainer){
         bubbleContainer.classList.toggle('hidden', !isBubble);
         bubbleContainer.setAttribute('aria-hidden', isBubble ? 'false' : 'true');
-        if(isBubble){
-            lastMindmapRenderHash = null;
-            requestAnimationFrame(()=> renderNetWorthMindmap(lastNetWorthTotals, lastNetWorthTotalValue));
-        }
     }
     const noteEl = document.getElementById('networth-million-note');
     if(noteEl){
         noteEl.setAttribute('aria-hidden', isBubble ? 'true' : 'false');
+    }
+
+    if(isBubble){
+        netWorthBubbleSnapshot = { ...(lastNetWorthTotals || {}) };
+        netWorthBubbleSnapshotTotal = lastNetWorthTotalValue;
+        netWorthBubbleNeedsRender = true;
+        lastMindmapRenderHash = null;
+        const attemptRender = ()=>{
+            const sourceTotals = netWorthBubbleSnapshot || lastNetWorthTotals;
+            const sourceTotalValue = netWorthBubbleSnapshot ? netWorthBubbleSnapshotTotal : lastNetWorthTotalValue;
+            const result = renderNetWorthMindmap(sourceTotals, sourceTotalValue);
+            if(result === null){
+                requestAnimationFrame(attemptRender);
+            }else if(result){
+                netWorthBubbleNeedsRender = false;
+            }
+        };
+        attemptRender();
+    }else{
+        netWorthBubbleNeedsRender = false;
+        netWorthBubbleSnapshot = null;
+        netWorthBubbleSnapshotTotal = 0;
     }
 }
 
@@ -4231,7 +4252,21 @@ function updateKpis(){
     setCategoryPnl('pnl-category-realestate', currentCategoryRangeTotals.realEstate || 0, 'pnlRealEstate');
     updateNetWorthBreakdown(netWorthTotals);
     if(netWorthInlineViewMode === 'bubble'){
-        renderNetWorthMindmap(lastNetWorthTotals, lastNetWorthTotalValue);
+        const snapshotHasData = netWorthBubbleSnapshot && Object.keys(netWorthBubbleSnapshot).length > 0;
+        const currentHasData = lastNetWorthTotals && Object.keys(lastNetWorthTotals).length > 0;
+        if(!snapshotHasData && currentHasData){
+            netWorthBubbleSnapshot = { ...lastNetWorthTotals };
+            netWorthBubbleSnapshotTotal = lastNetWorthTotalValue;
+            netWorthBubbleNeedsRender = true;
+        }
+    }
+    if(netWorthInlineViewMode === 'bubble' && netWorthBubbleNeedsRender){
+        const sourceTotals = netWorthBubbleSnapshot || lastNetWorthTotals;
+        const sourceTotalValue = netWorthBubbleSnapshot ? netWorthBubbleSnapshotTotal : lastNetWorthTotalValue;
+        const result = renderNetWorthMindmap(sourceTotals, sourceTotalValue);
+        if(result){
+            netWorthBubbleNeedsRender = false;
+        }
     }
 
     const bestNameEl = document.getElementById('best-performer-name');
@@ -4483,7 +4518,13 @@ document.addEventListener('DOMContentLoaded', ()=>{
                 renderNetWorthDetailChart(lastNetWorthTimeline);
             }
             if(netWorthInlineViewMode === 'bubble'){
-                renderNetWorthMindmap(lastNetWorthTotals, lastNetWorthTotalValue);
+                netWorthBubbleNeedsRender = true;
+                const sourceTotals = netWorthBubbleSnapshot || lastNetWorthTotals;
+                const sourceTotalValue = netWorthBubbleSnapshot ? netWorthBubbleSnapshotTotal : lastNetWorthTotalValue;
+                const result = renderNetWorthMindmap(sourceTotals, sourceTotalValue);
+                if(result){
+                    netWorthBubbleNeedsRender = false;
+                }
             }
         });
     }
@@ -4570,7 +4611,13 @@ document.addEventListener('DOMContentLoaded', ()=>{
         resizeTimer = setTimeout(()=>{
             Object.values(charts).forEach(chart=>chart && chart.resize());
             if(netWorthInlineViewMode === 'bubble'){
-                renderNetWorthMindmap(lastNetWorthTotals, lastNetWorthTotalValue);
+                netWorthBubbleNeedsRender = true;
+                const sourceTotals = netWorthBubbleSnapshot || lastNetWorthTotals;
+                const sourceTotalValue = netWorthBubbleSnapshot ? netWorthBubbleSnapshotTotal : lastNetWorthTotalValue;
+                const result = renderNetWorthMindmap(sourceTotals, sourceTotalValue);
+                if(result){
+                    netWorthBubbleNeedsRender = false;
+                }
             }
         }, 160);
     });
