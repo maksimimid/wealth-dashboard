@@ -72,19 +72,13 @@
         <div class="kpi" id="net-worth-card">
             <div class="label">Net Worth</div>
             <div class="big" id="equity">$0.00</div>
-        <small class="networth-note unavailable" id="networth-million-note">1M target: —</small>
-        <div class="networth-controls">
-            <button id="networth-view-toggle" type="button" class="networth-view-toggle" aria-pressed="false">Show mindmap view</button>
-        </div>
-        <div class="networth-visualization">
+            <small class="networth-note unavailable" id="networth-million-note">1M target: —</small>
+            <div class="networth-controls">
+                <button id="networth-mindmap-button" type="button" class="networth-view-toggle" aria-haspopup="dialog" aria-controls="networth-mindmap-modal" aria-expanded="false">Open mindmap view</button>
+            </div>
             <div class="networth-chart">
                 <canvas id="networth-sparkline"></canvas>
             </div>
-            <div class="networth-mindmap hidden" id="networth-mindmap">
-                <svg class="mindmap-links" id="networth-mindmap-links" role="presentation" aria-hidden="true"></svg>
-                <div class="mindmap-nodes" id="networth-mindmap-nodes"></div>
-            </div>
-        </div>
             <div class="networth-breakdown" id="networth-breakdown">
                 <div class="pos">Awaiting holdings data…</div>
             </div>
@@ -230,6 +224,20 @@
         <div><span class="status-dot"></span><span id="status">&nbsp;</span></div>
         <div>Powered by Airtable &middot; Finnhub &middot; Chart.js</div>
     </footer>
+</div>
+
+<div id="networth-mindmap-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-content mindmap-modal-content" role="dialog" aria-modal="true" aria-labelledby="networth-mindmap-title">
+        <button type="button" class="modal-close" aria-label="Close mindmap view">&times;</button>
+        <h3 class="modal-title" id="networth-mindmap-title">Net Worth Mindmap</h3>
+        <div class="modal-subtitle" id="networth-mindmap-subtitle"></div>
+        <div class="mindmap-modal-area">
+            <div class="networth-mindmap" id="networth-mindmap">
+                <svg class="mindmap-links" id="networth-mindmap-links" role="presentation" aria-hidden="true"></svg>
+                <div class="mindmap-nodes" id="networth-mindmap-nodes"></div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <div id="networth-detail-modal" class="modal hidden" aria-hidden="true">
