@@ -3182,8 +3182,10 @@ function renderNetWorthSparkline(timeline){
     };
 
     if(netWorthSparklineChart){
-        netWorthSparklineChart.destroy();
-        netWorthSparklineChart = null;
+        netWorthSparklineChart.data.datasets = [dataset];
+        netWorthSparklineChart.options = options;
+        netWorthSparklineChart.update('none');
+        return;
     }
 
     if(typeof Chart === 'undefined'){
