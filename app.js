@@ -2756,6 +2756,15 @@ function createClosedPositionRow(position){
     values.appendChild(pnlEl);
     values.appendChild(statusEl);
     row.appendChild(values);
+
+    const plateImage = getAssetPlateImage(position);
+    if(plateImage){
+        row.style.setProperty('--plate-image', `url("${plateImage}")`);
+        row.dataset.plateImage = plateImage;
+    }else{
+        row.style.removeProperty('--plate-image');
+        delete row.dataset.plateImage;
+    }
     return row;
 }
 
