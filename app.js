@@ -2983,35 +2983,38 @@ function computeNetWorthTimeline(totalValue){
     const startOfFirstYear = new Date(firstDate.getFullYear(), 0, 1);
     const lastActual = actual[actual.length - 1];
     const baseProjectedValue = actual.reduce((max, point)=> Math.max(max, point.y), lastActual.y);
-    const projected = [{ x: lastActual.x, y: lastActual.y }];
-    const MAX_PROJECTION_YEARS = 40;
+    const projectedShort = [{ x: lastActual.x, y: lastActual.y }];
     let projectedValue = Math.max(lastActual.y, baseProjectedValue);
-    let yearCursor = now.getFullYear() + 1;
-    for(let i = 0; i < MAX_PROJECTION_YEARS; i += 1){
+    for(let offset = 1; offset <= 2; offset += 1){
         projectedValue = projectedValue * 1.1;
-        const point = {
-            x: new Date(yearCursor + i, 0, 1),
+        projectedShort.push({
+            x: new Date(now.getFullYear() + offset, 0, 1),
             y: Number.isFinite(projectedValue) && projectedValue > 0 ? projectedValue : 0
-        };
-        projected.push(point);
-        if(projectedValue >= MILLION_TARGET){
-            break;
-        }
-    }
-    if(projected.length < 2){
-        projected.push({
-            x: new Date(yearCursor, 0, 1),
-            y: projectedValue
         });
     }
-    const lastProjectedPoint = projected[projected.length - 1];
+
+    const projectedExtended = [...projectedShort];
+    const MAX_PROJECTION_YEARS = 40;
+    let yearOffset = projectedShort.length - 1;
+    let extendedValue = projectedShort[projectedShort.length - 1].y;
+    while(projectedExtended[projectedExtended.length - 1].y < MILLION_TARGET && yearOffset < MAX_PROJECTION_YEARS){
+        yearOffset += 1;
+        extendedValue = extendedValue * 1.1;
+        projectedExtended.push({
+            x: new Date(now.getFullYear() + yearOffset, 0, 1),
+            y: Number.isFinite(extendedValue) && extendedValue > 0 ? extendedValue : 0
+        });
+    }
+
+    const lastProjectedPoint = projectedShort[projectedShort.length - 1];
 
     return {
         actual,
-        projected,
+        projected: projectedShort,
+        projectedExtended,
         domain: {
             min: startOfFirstYear,
-            max: lastProjectedPoint?.x || projected[projected.length - 1].x
+            max: lastProjectedPoint?.x || projectedShort[projectedShort.length - 1].x
         }
     };
 }
@@ -3266,6 +3269,9 @@ function flattenTimelinePoints(timeline, options = {}){
     if(includeProjected && Array.isArray(timeline?.projected)){
         timeline.projected.forEach(addPoint);
     }
+    if(includeProjected && Array.isArray(timeline?.projectedExtended)){
+        timeline.projectedExtended.forEach(addPoint);
+    }
     return Array.from(map.values()).sort((a,b)=> a.x - b.x);
 }
 
@@ -3362,10 +3368,13 @@ function renderNetWorthDetailChart(timeline){
         return;
     }
     let projectedSeries = [];
-    if(Array.isArray(usableTimeline.projected) && usableTimeline.projected.length > 1){
+    const projectedSource = Array.isArray(usableTimeline.projectedExtended) && usableTimeline.projectedExtended.length > 1
+        ? usableTimeline.projectedExtended
+        : usableTimeline.projected;
+    if(Array.isArray(projectedSource) && projectedSource.length > 1){
         const stitched = [
             usableTimeline.actual?.[usableTimeline.actual.length - 1],
-            ...usableTimeline.projected.slice(1)
+            ...projectedSource.slice(1)
         ].filter(Boolean);
         projectedSeries = generateSmoothSeries(stitched, {
             stepDays: 10,
