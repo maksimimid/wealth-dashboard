@@ -1237,8 +1237,18 @@ function transformOperations(records, progressCb){
                 const fallbackAmount = Math.abs(Number(price || 0) * Number(amount || 0));
                 if(fallbackAmount) reinvestAmount = fallbackAmount;
             }
-            if(reinvestAmount){
-                entry.reinvested = (entry.reinvested || 0) + reinvestAmount;
+            let reinvestQty = Math.abs(Number(amount || 0));
+            if((!reinvestQty || !Number.isFinite(reinvestQty)) && Number.isFinite(reinvestAmount)){
+                const effectivePrice = Number(price || entry.lastKnownPrice || entry.lastPurchasePrice || 0);
+                if(Number.isFinite(effectivePrice) && Math.abs(effectivePrice) > 1e-9){
+                    const derivedQty = Math.abs(reinvestAmount) / Math.abs(effectivePrice);
+                    if(Number.isFinite(derivedQty) && derivedQty > 0){
+                        reinvestQty = derivedQty;
+                    }
+                }
+            }
+            if(Number.isFinite(reinvestQty) && reinvestQty > 0){
+                entry.reinvested = (entry.reinvested || 0) + reinvestQty;
             }
         }else{
             entry.realized += spent;
@@ -2803,11 +2813,29 @@ function buildAnalyticsSection(categoryKey, title, positions, options){
 function createOpenPositionRow(position, totalCategoryValue){
     const row = document.createElement('div');
     row.className = 'analytics-row';
-    const price = Number(position.displayPrice ?? position.currentPrice ?? position.lastKnownPrice ?? position.avgPrice ?? 0);
+    const priceCandidates = [
+        position.displayPrice,
+        position.currentPrice,
+        position.lastKnownPrice,
+        position.lastPurchasePrice,
+        position.avgPrice
+    ].map(value=> Number(value)).filter(value=> Number.isFinite(value));
+    const prioritizedPrice = priceCandidates.find(value => Math.abs(value) > 1e-9);
+    const fallbackPrice = Number(position.displayPrice ?? position.currentPrice ?? position.lastKnownPrice ?? position.avgPrice ?? position.lastPurchasePrice ?? 0) || 0;
+    const price = Number.isFinite(prioritizedPrice) ? prioritizedPrice : fallbackPrice;
     const marketValue = Number(position.marketValue || 0);
     const pnlValue = Number((position.rangePnl ?? position.pnl) || 0);
     const share = totalCategoryValue ? (marketValue / totalCategoryValue) * 100 : null;
-    const reinvestedValue = Number(position.reinvested || 0);
+    const reinvestedQty = Math.max(0, Number(position.reinvested || 0));
+    const reinvestPrice = Math.abs(price) > 1e-9 ? price : fallbackPrice;
+    const reinvestedValue = reinvestedQty > 1e-6 && Math.abs(reinvestPrice) > 1e-9
+        ? reinvestPrice * reinvestedQty
+        : 0;
+    const reinvestedDisplay = reinvestedQty > 1e-6
+        ? (Math.abs(reinvestPrice) > 1e-9
+            ? `${money(reinvestedValue)} (${formatQty(reinvestedQty)} units)`
+            : `${formatQty(reinvestedQty)} units`)
+        : null;
     const shareText = Number.isFinite(share) ? `${share.toFixed(1)}%` : '—';
     const main = document.createElement('div');
     main.className = 'analytics-main';
@@ -2829,8 +2857,8 @@ function createOpenPositionRow(position, totalCategoryValue){
             ? `Price <span class="price-warning">${money(price)} · ${position.priceStatus}</span>`
             : `Price ${money(price)}`
     ];
-    if(Math.abs(reinvestedValue) > 1e-6){
-        metaParts.push(`Reinvested ${money(reinvestedValue)}`);
+    if(reinvestedDisplay){
+        metaParts.push(`Reinvested ${reinvestedDisplay}`);
     }
     metaEl.innerHTML = metaParts.join(' · ');
     label.appendChild(nameEl);
@@ -2853,10 +2881,10 @@ function createOpenPositionRow(position, totalCategoryValue){
     values.appendChild(marketEl);
     values.appendChild(pnlEl);
     values.appendChild(shareEl);
-    if(Math.abs(reinvestedValue) > 1e-6){
+    if(reinvestedDisplay){
         const reinvestEl = document.createElement('div');
         reinvestEl.className = 'reinvested-chip';
-        reinvestEl.textContent = `Reinvested ${money(reinvestedValue)}`;
+        reinvestEl.textContent = `Reinvested ${reinvestedDisplay}`;
         values.appendChild(reinvestEl);
     }
     row.appendChild(values);
@@ -2893,7 +2921,26 @@ function createClosedPositionRow(position){
     const row = document.createElement('div');
     row.className = 'analytics-row';
     const realized = Number(position.realized || 0);
-    const reinvestedValue = Number(position.reinvested || 0);
+    const priceCandidates = [
+        position.displayPrice,
+        position.currentPrice,
+        position.lastKnownPrice,
+        position.lastPurchasePrice,
+        position.avgPrice
+    ].map(value=> Number(value)).filter(value=> Number.isFinite(value));
+    const prioritizedPrice = priceCandidates.find(value => Math.abs(value) > 1e-9);
+    const fallbackPrice = Number(position.displayPrice ?? position.currentPrice ?? position.lastKnownPrice ?? position.lastPurchasePrice ?? position.avgPrice ?? 0) || 0;
+    const price = Number.isFinite(prioritizedPrice) ? prioritizedPrice : fallbackPrice;
+    const reinvestedQty = Math.max(0, Number(position.reinvested || 0));
+    const reinvestPrice = Math.abs(price) > 1e-9 ? price : fallbackPrice;
+    const reinvestedValue = reinvestedQty > 1e-6 && Math.abs(reinvestPrice) > 1e-9
+        ? reinvestPrice * reinvestedQty
+        : 0;
+    const reinvestedDisplay = reinvestedQty > 1e-6
+        ? (Math.abs(reinvestPrice) > 1e-9
+            ? `${money(reinvestedValue)} (${formatQty(reinvestedQty)} units)`
+            : `${formatQty(reinvestedQty)} units`)
+        : null;
     const main = document.createElement('div');
     main.className = 'analytics-main';
     const iconEl = createAssetIconElement(position);
@@ -2911,8 +2958,8 @@ function createClosedPositionRow(position){
     const metaParts = [
         `Realized P&L ${formatMoneyWithPercent(realized, Number.isFinite(realizedPercent) ? realizedPercent : null, 1)}`
     ];
-    if(Math.abs(reinvestedValue) > 1e-6){
-        metaParts.push(`Reinvested ${money(reinvestedValue)}`);
+    if(reinvestedDisplay){
+        metaParts.push(`Reinvested ${reinvestedDisplay}`);
     }
     metaEl.innerHTML = metaParts.join(' · ');
     label.appendChild(nameEl);
@@ -2930,10 +2977,10 @@ function createClosedPositionRow(position){
     statusEl.textContent = 'Position closed';
     values.appendChild(pnlEl);
     values.appendChild(statusEl);
-    if(Math.abs(reinvestedValue) > 1e-6){
+    if(reinvestedDisplay){
         const reinvestEl = document.createElement('div');
         reinvestEl.className = 'reinvested-chip';
-        reinvestEl.textContent = `Reinvested ${money(reinvestedValue)}`;
+        reinvestEl.textContent = `Reinvested ${reinvestedDisplay}`;
         values.appendChild(reinvestEl);
     }
     row.appendChild(values);
