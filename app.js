@@ -538,11 +538,26 @@ function setMoneyWithFlash(elementId, value, key){
 }
 
 function setCategoryPnl(elementId, value, key){
-    setMoneyWithFlash(elementId, value, key);
     const el = document.getElementById(elementId);
     if(!el) return;
     el.classList.remove('delta-positive','delta-negative');
-    const numeric = Number(value);
+    const numeric = Number(value || 0);
+    const formattedValue = money(numeric);
+    let formattedPercent = '';
+    if(key){
+        const total = positions.reduce((sum, position)=>{
+            const cat = (position.type || '').toLowerCase();
+            if(cat === key.replace('pnl','').toLowerCase()){
+                return sum + Number((position.rangePnl ?? position.pnl) || 0);
+            }
+            return sum;
+        }, 0);
+        if(total){
+            const pct = total ? (numeric / total) * 100 : 0;
+            formattedPercent = ` (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)`;
+        }
+    }
+    el.textContent = `${formattedValue}${formattedPercent}`;
     if(numeric > 0){
         el.classList.add('delta-positive');
     }else if(numeric < 0){
