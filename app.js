@@ -95,6 +95,7 @@ const SPARKLINE_PROJECTED_SMOOTHING = 0.32;
 let pnlPercentageToggleButton = null;
 let showPnlPercentages = false;
 const PNL_PERCENTAGE_STORAGE_KEY = 'showPnlPercentages';
+const MILLION_TARGET = 1_000_000;
 const sparklineCrosshairPlugin = {
     id: 'sparklineCrosshair',
     afterDraw(chart){
@@ -3201,6 +3202,68 @@ function renderNetWorthSparkline(timeline){
     });
 }
 
+function updateMillionTargetNote(timeline){
+    const noteEl = document.getElementById('networth-million-note');
+    if(!noteEl){
+        return;
+    }
+    const points = [];
+    if(Array.isArray(timeline?.actual)){
+        points.push(...timeline.actual);
+    }
+    if(Array.isArray(timeline?.projected)){
+        points.push(...timeline.projected);
+    }
+    const normalized = points.map(point => {
+        const rawDate = point?.x ?? point?.date;
+        const date = rawDate instanceof Date ? rawDate : new Date(rawDate);
+        const value = Number(point?.y ?? point?.value ?? 0);
+        if(!(date instanceof Date) || Number.isNaN(date.getTime())){
+            return null;
+        }
+        return { x: date, y: Number.isFinite(value) ? value : 0 };
+    }).filter(Boolean).sort((a, b) => a.x - b.x);
+
+    if(!normalized.length){
+        noteEl.textContent = '1M target: —';
+        noteEl.classList.add('unavailable');
+        return;
+    }
+
+    let targetDate = null;
+    for(let i = 0; i < normalized.length; i += 1){
+        const current = normalized[i];
+        if(current.y >= MILLION_TARGET){
+            if(i === 0){
+                targetDate = current.x;
+                break;
+            }
+            const prev = normalized[i - 1];
+            if(!prev || prev.y >= MILLION_TARGET){
+                targetDate = current.x;
+                break;
+            }
+            const span = current.x.getTime() - prev.x.getTime();
+            if(span <= 0 || current.y === prev.y){
+                targetDate = current.x;
+                break;
+            }
+            const ratio = (MILLION_TARGET - prev.y) / (current.y - prev.y);
+            const clamped = Math.max(0, Math.min(1, ratio));
+            targetDate = new Date(prev.x.getTime() + clamped * span);
+            break;
+        }
+    }
+
+    if(targetDate){
+        noteEl.textContent = `1M target: ${formatDateShort(targetDate)}`;
+        noteEl.classList.remove('unavailable');
+    }else{
+        noteEl.textContent = '1M target: —';
+        noteEl.classList.add('unavailable');
+    }
+}
+
 function extractEtContext(date){
     const numericFormatter = new Intl.DateTimeFormat('en-US', {
         timeZone: MARKET_TIME_ZONE,
@@ -3500,6 +3563,7 @@ function updateKpis(){
 
     const netWorthTimeline = computeNetWorthTimeline(totalMarketValue);
     renderNetWorthSparkline(netWorthTimeline);
+    updateMillionTargetNote(netWorthTimeline);
 
     setMoneyWithFlash('total-pnl', totalPnl, 'totalPnl');
     const totalPnlEl = document.getElementById('total-pnl');
