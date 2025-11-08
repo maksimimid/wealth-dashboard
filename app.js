@@ -96,6 +96,13 @@ let pnlPercentageToggleButton = null;
 let showPnlPercentages = false;
 const PNL_PERCENTAGE_STORAGE_KEY = 'showPnlPercentages';
 const MILLION_TARGET = 1_000_000;
+let netWorthSparklineCanvas = null;
+let lastNetWorthTimeline = null;
+let netWorthDetailModal = null;
+let netWorthDetailCanvas = null;
+let netWorthDetailChart = null;
+let netWorthDetailSubtitle = null;
+let netWorthDetailMeta = null;
 const sparklineCrosshairPlugin = {
     id: 'sparklineCrosshair',
     afterDraw(chart){
@@ -3202,59 +3209,63 @@ function renderNetWorthSparkline(timeline){
     });
 }
 
+function flattenTimelinePoints(timeline, options = {}){
+    const includeProjected = options.includeProjected !== false;
+    const map = new Map();
+    const addPoint = point => {
+        if(!point) return;
+        const rawDate = point.x ?? point.date;
+        const date = rawDate instanceof Date ? new Date(rawDate) : new Date(rawDate || Date.now());
+        if(!(date instanceof Date) || Number.isNaN(date.getTime())){
+            return;
+        }
+        const valueRaw = point.y ?? point.value ?? 0;
+        const value = Number.isFinite(Number(valueRaw)) ? Number(valueRaw) : 0;
+        map.set(date.getTime(), { x: date, y: value });
+    };
+    if(Array.isArray(timeline?.actual)){
+        timeline.actual.forEach(addPoint);
+    }
+    if(includeProjected && Array.isArray(timeline?.projected)){
+        timeline.projected.forEach(addPoint);
+    }
+    return Array.from(map.values()).sort((a,b)=> a.x - b.x);
+}
+
+function computeMillionTargetDate(timeline){
+    const points = flattenTimelinePoints(timeline, { includeProjected: true });
+    if(!points.length){
+        return null;
+    }
+    for(let i = 0; i < points.length; i += 1){
+        const current = points[i];
+        if(current.y >= MILLION_TARGET){
+            if(i === 0){
+                return current.x;
+            }
+            const previous = points[i - 1];
+            if(!previous || previous.y >= MILLION_TARGET){
+                return current.x;
+            }
+            const span = current.x.getTime() - previous.x.getTime();
+            if(span <= 0 || current.y === previous.y){
+                return current.x;
+            }
+            const ratio = (MILLION_TARGET - previous.y) / (current.y - previous.y);
+            const clamped = Math.max(0, Math.min(1, ratio));
+            const interpolated = new Date(previous.x.getTime() + clamped * span);
+            return interpolated;
+        }
+    }
+    return null;
+}
+
 function updateMillionTargetNote(timeline){
     const noteEl = document.getElementById('networth-million-note');
     if(!noteEl){
         return;
     }
-    const points = [];
-    if(Array.isArray(timeline?.actual)){
-        points.push(...timeline.actual);
-    }
-    if(Array.isArray(timeline?.projected)){
-        points.push(...timeline.projected);
-    }
-    const normalized = points.map(point => {
-        const rawDate = point?.x ?? point?.date;
-        const date = rawDate instanceof Date ? rawDate : new Date(rawDate);
-        const value = Number(point?.y ?? point?.value ?? 0);
-        if(!(date instanceof Date) || Number.isNaN(date.getTime())){
-            return null;
-        }
-        return { x: date, y: Number.isFinite(value) ? value : 0 };
-    }).filter(Boolean).sort((a, b) => a.x - b.x);
-
-    if(!normalized.length){
-        noteEl.textContent = '1M target: —';
-        noteEl.classList.add('unavailable');
-        return;
-    }
-
-    let targetDate = null;
-    for(let i = 0; i < normalized.length; i += 1){
-        const current = normalized[i];
-        if(current.y >= MILLION_TARGET){
-            if(i === 0){
-                targetDate = current.x;
-                break;
-            }
-            const prev = normalized[i - 1];
-            if(!prev || prev.y >= MILLION_TARGET){
-                targetDate = current.x;
-                break;
-            }
-            const span = current.x.getTime() - prev.x.getTime();
-            if(span <= 0 || current.y === prev.y){
-                targetDate = current.x;
-                break;
-            }
-            const ratio = (MILLION_TARGET - prev.y) / (current.y - prev.y);
-            const clamped = Math.max(0, Math.min(1, ratio));
-            targetDate = new Date(prev.x.getTime() + clamped * span);
-            break;
-        }
-    }
-
+    const targetDate = computeMillionTargetDate(timeline);
     if(targetDate){
         noteEl.textContent = `1M target: ${formatDateShort(targetDate)}`;
         noteEl.classList.remove('unavailable');
