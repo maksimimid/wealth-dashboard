@@ -102,6 +102,7 @@ let netWorthMindmapSubtitle = null;
 let netWorthMindmapLastTrigger = null;
 let lastNetWorthTotals = {};
 let lastNetWorthTotalValue = 0;
+let lastMindmapRenderHash = null;
 let netWorthSparklineCanvas = null;
 let lastNetWorthTimeline = null;
 let netWorthDetailModal = null;
