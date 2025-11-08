@@ -74,7 +74,14 @@
             <div class="big" id="equity">$0.00</div>
             <small class="networth-note unavailable" id="networth-million-note">1M target: —</small>
             <div class="networth-controls">
-                <button id="networth-mindmap-button" type="button" class="networth-view-toggle" aria-controls="networth-bubble-container" aria-expanded="false" aria-pressed="false">Show bubbles</button>
+                <button id="networth-mindmap-button" type="button" class="networth-view-toggle" aria-controls="networth-bubble-container" aria-expanded="false" aria-pressed="false">
+                    <span class="bubbles-icon" aria-hidden="true">
+                        <span class="bubble-dot bubble-dot-main"></span>
+                        <span class="bubble-dot bubble-dot-mid"></span>
+                        <span class="bubble-dot bubble-dot-small"></span>
+                    </span>
+                    <span class="sr-only" id="networth-mindmap-button-label">Show bubbles</span>
+                </button>
             </div>
             <div class="networth-chart">
                 <canvas id="networth-sparkline"></canvas>

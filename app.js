@@ -3517,7 +3517,8 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
         const numericValue = Number(rawValue) || 0;
         const magnitude = Math.abs(numericValue);
         const percent = magnitudeSum > 0 ? (magnitude / magnitudeSum) * 100 : 0;
-        const size = Math.max(68, Math.min(200, 68 + percent * 1.6));
+        const baseSize = Math.max(68, Math.min(200, 68 + percent * 1.6));
+        const size = Math.max(58, Math.min(180, Math.round(baseSize * 0.85)));
         const labelKey = key || 'other';
         const fullLabel = NET_WORTH_LABEL_MAP[labelKey] || labelKey.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, letter => letter.toUpperCase());
         const shortLabel = getMindmapLabel(labelKey, fullLabel);
@@ -3536,7 +3537,8 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
     const mainDisplayValue = total === 0 ? '$0' : formatCompactMoney(total);
     const minDimension = Math.max(120, Math.min(width, height));
     const sizeLimit = Math.max(110, Math.min(minDimension - 24, 220));
-    const mainSize = Math.min(sizeLimit, Math.max(110, Math.min(minDimension * 0.6, 200)));
+    const baseMainSize = Math.min(sizeLimit, Math.max(110, Math.min(minDimension * 0.6, 200)));
+    const mainSize = Math.max(94, Math.min(sizeLimit, Math.round(baseMainSize * 0.85)));
 
     const maxDiameter = nodesData.reduce((max, node)=> Math.max(max, node.size), 0);
     const availableRadius = Math.max(110, Math.min(width, height) / 2 - 30);
@@ -3632,7 +3634,12 @@ function applyNetWorthInlineViewMode(){
         netWorthBubbleToggleButton.classList.toggle('active', isBubble);
         netWorthBubbleToggleButton.setAttribute('aria-expanded', isBubble ? 'true' : 'false');
         netWorthBubbleToggleButton.setAttribute('aria-pressed', isBubble ? 'true' : 'false');
-        netWorthBubbleToggleButton.textContent = labelText;
+        const srLabel = netWorthBubbleToggleButton.querySelector('.sr-only');
+        if(srLabel){
+            srLabel.textContent = labelText;
+        }else{
+            netWorthBubbleToggleButton.textContent = labelText;
+        }
         netWorthBubbleToggleButton.setAttribute('aria-label', labelText);
         netWorthBubbleToggleButton.setAttribute('title', labelText);
     }
