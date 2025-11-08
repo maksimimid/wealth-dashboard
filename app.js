@@ -720,6 +720,10 @@ function mapFinnhubSymbol(asset, category, isOverride = false){
     if(isOverride) return asset;
     const cat = (category||'').toLowerCase();
     const cleaned = String(asset).trim().toUpperCase();
+    const overrides = {
+        ISAC: 'NASDAQ:ISAC'
+    };
+    if(overrides[cleaned]) return overrides[cleaned];
     if(cat==='cash') return null;
     if(cat==='crypto'){
         const base = cleaned.replace(/[^A-Z0-9]/g,'');
@@ -749,6 +753,11 @@ function mapYahooSymbol(position){
         return `${base}-USD`;
     }
     let symbol = rawSymbol.replace(/\s+/g,'').toUpperCase();
+    const overrides = {
+        'NASDAQ:ISAC': 'ISAC',
+        'ISAC': 'ISAC'
+    };
+    if(overrides[symbol]) return overrides[symbol];
     if(symbol.includes(':')){
         symbol = symbol.replace(':','-');
     }
