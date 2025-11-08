@@ -215,6 +215,23 @@ function formatQty(qty){
     return qty.toFixed(4).replace(/0+$/,'').replace(/\.$/,'');
 }
 
+function formatCompactMoney(value){
+    if(value === null || value === undefined || !Number.isFinite(value)){
+        return '$0';
+    }
+    const sign = value < 0 ? '-' : '';
+    const abs = Math.abs(value);
+    const format = (num, suffix)=>{
+        const trimmed = Number.isInteger(num) ? num.toString() : num.toFixed(1).replace(/\.0$/, '');
+        return `${sign}$${trimmed}${suffix}`;
+    };
+    if(abs >= 1e12) return format(abs / 1e12, 't');
+    if(abs >= 1e9) return format(abs / 1e9, 'b');
+    if(abs >= 1e6) return format(abs / 1e6, 'm');
+    if(abs >= 1e3) return format(abs / 1e3, 'k');
+    return `${sign}$${Math.round(abs).toString()}`;
+}
+
 function deriveCryptoIconKey(position){
     const candidates = [position.Symbol, position.finnhubSymbol, position.displayName, position.Name, position.id];
     for(const value of candidates){
@@ -2756,7 +2773,7 @@ function updateNetWorthBreakdown(categoryMap){
     });
 }
 
-function buildNetWorthTrendPoints(totalValue){
+function computeNetWorthTimeline(totalValue){
     const MS_PER_DAY = 24 * 60 * 60 * 1000;
     const operations = positions.flatMap(position => Array.isArray(position.operations) ? position.operations : []);
     const datedOps = operations.filter(op => op && op.date instanceof Date).map(op => {
@@ -2782,64 +2799,52 @@ function buildNetWorthTrendPoints(totalValue){
 
     const sortedKeys = Array.from(dayBuckets.keys()).sort((a,b)=>a-b);
     let cumulative = 0;
-    const points = [];
+    const actualRaw = [];
     sortedKeys.forEach(ts=>{
         cumulative += dayBuckets.get(ts);
         const safeValue = Number.isFinite(cumulative) ? Math.max(0, cumulative) : 0;
-        points.push({ date: new Date(ts), value: safeValue });
+        actualRaw.push({ date: new Date(ts), value: safeValue });
     });
 
-    if(points.length){
-        if(points[0].value !== 0){
-            const preDate = new Date(points[0].date.getTime() - MS_PER_DAY);
-            points.unshift({ date: preDate, value: 0 });
-        }
-    }else{
-        const start = new Date(Date.now() - 30 * MS_PER_DAY);
-        points.push({ date: start, value: 0 });
-    }
-
     const now = new Date();
-    const startOfYear = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
-    const hasYearStart = points.some(point => point.date && point.date.getFullYear() === now.getFullYear() && point.date.getMonth() === 0 && point.date.getDate() === 1);
-    if(!hasYearStart){
-        const baselineCandidates = points.filter(point => point.date && point.date <= startOfYear && !point.projected);
-        const prior = baselineCandidates.length ? baselineCandidates[baselineCandidates.length - 1].value : 0;
-        points.push({ date: startOfYear, value: prior, baseline: true });
+    if(!actualRaw.length){
+        actualRaw.push({ date: new Date(now.getTime() - 90 * MS_PER_DAY), value: 0 });
     }
-    if(points.length){
-        const lastPoint = points[points.length - 1];
-        const lastValue = Number.isFinite(lastPoint.value) ? lastPoint.value : 0;
-        if(Math.abs(now - lastPoint.date) > 60 * 60 * 1000){
-            points.push({ date: now, value: lastValue, baseline: true });
-        }else if(lastPoint){
-            lastPoint.value = lastValue;
-            lastPoint.baseline = true;
-            lastPoint.date = now;
-        }
-        const endOfYear = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
-        if(endOfYear.getTime() > now.getTime()){
-            points.push({ date: endOfYear, value: totalValue, projected: true });
-        }
-    }else{
-        points.push({ date: now, value: totalValue, baseline: true });
-        const endOfYear = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
-        if(endOfYear.getTime() > now.getTime()){
-            points.push({ date: endOfYear, value: totalValue, projected: true });
-        }
-    }
+    actualRaw.push({ date: now, value: Number.isFinite(totalValue) ? Math.max(0, totalValue) : 0 });
+    actualRaw.sort((a,b)=> a.date - b.date);
 
-    points.sort((a,b)=> a.date - b.date);
-
-    return points.map(point => ({
-        date: point.date instanceof Date ? point.date : new Date(point.date),
-        value: Number.isFinite(point.value) ? point.value : 0,
-        projected: Boolean(point.projected),
-        baseline: Boolean(point.baseline)
+    const actual = actualRaw.map(entry => ({
+        x: entry.date instanceof Date ? entry.date : new Date(entry.date),
+        y: Number.isFinite(entry.value) ? Math.max(0, entry.value) : 0
     }));
+
+    if(actual.length < 2){
+        const anchorDate = new Date(actual[0].x.getTime() - 90 * MS_PER_DAY);
+        actual.unshift({ x: anchorDate, y: actual[0].y });
+    }
+
+    const firstDate = actual[0].x instanceof Date ? actual[0].x : new Date(actual[0].x);
+    const startOfFirstYear = new Date(firstDate.getFullYear(), 0, 1);
+    const lastActual = actual[actual.length - 1];
+    const maxActualValue = actual.reduce((max, point)=> Math.max(max, point.y), lastActual.y);
+    const projectedValue = Math.max(lastActual.y, maxActualValue) * 1.1;
+    const projectedDate = new Date(now.getFullYear() + 1, 0, 1);
+    const projected = [
+        { x: lastActual.x, y: lastActual.y },
+        { x: projectedDate, y: projectedValue }
+    ];
+
+    return {
+        actual,
+        projected,
+        domain: {
+            min: startOfFirstYear,
+            max: projectedDate
+        }
+    };
 }
 
-function renderNetWorthSparkline(points){
+function renderNetWorthSparkline(timeline){
     const canvas = document.getElementById('networth-sparkline');
     if(!canvas){
         if(netWorthSparklineChart){
@@ -2848,7 +2853,23 @@ function renderNetWorthSparkline(points){
         }
         return;
     }
-    if(!Array.isArray(points) || points.length < 2){
+    const actualPoints = Array.isArray(timeline?.actual) ? timeline.actual.slice().sort((a,b)=> a.x - b.x) : [];
+    const projectedPoints = Array.isArray(timeline?.projected) ? timeline.projected.slice().sort((a,b)=> a.x - b.x) : [];
+
+    if(actualPoints.length < 2){
+        if(actualPoints.length === 1){
+            const anchorDate = new Date(actualPoints[0].x.getTime() - 90 * 24 * 60 * 60 * 1000);
+            actualPoints.unshift({ x: anchorDate, y: actualPoints[0].y });
+        }else{
+            const now = new Date();
+            actualPoints.push(
+                { x: new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000), y: 0 },
+                { x: now, y: Number.isFinite(timeline?.actual?.[0]?.y) ? timeline.actual[0].y : 0 }
+            );
+        }
+    }
+
+    if(!actualPoints.length){
         if(netWorthSparklineChart){
             netWorthSparklineChart.destroy();
             netWorthSparklineChart = null;
@@ -2857,147 +2878,133 @@ function renderNetWorthSparkline(points){
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         return;
     }
-    const dataPoints = points.map(point => ({
-        x: point.date instanceof Date ? point.date : new Date(point.date),
-        y: Number.isFinite(point.value) ? Math.max(0, point.value) : 0,
-        projected: point.projected,
-        baseline: point.baseline
-    }));
-    if(netWorthSparklineChart){
-        netWorthSparklineChart.data.datasets = createNetWorthDatasets(dataPoints);
-        netWorthSparklineChart.options.plugins.tooltip.enabled = true;
-        netWorthSparklineChart.options.plugins.tooltip.displayColors = false;
-        netWorthSparklineChart.options.plugins.tooltip.callbacks = {
-            title(items){
-                const item = items && items[0];
-                if(!item) return '';
-                const date = item.raw?.x instanceof Date ? item.raw.x : new Date(item.raw?.x);
-                return date ? formatDateShort(date) : '';
-            },
-            label(item){
-                const value = item.raw?.y ?? item.parsed?.y ?? 0;
-                const label = item.dataset?.label || 'Net worth';
-                return `${label}: ${money(value)}`;
-            }
-        };
-        netWorthSparklineChart.options.scales.x.time = {
-            unit: 'year',
-            round: 'year',
-            displayFormats: { year: 'yy' },
-            stepSize: 1
-        };
-        netWorthSparklineChart.options.scales.x.ticks = Object.assign({}, netWorthSparklineChart.options.scales.x.ticks, {
-            display: true,
-            font: { size: 9, family: 'Inter, system-ui' },
-            source: 'auto',
-            maxRotation: 0,
-            autoSkip: false,
-            stepSize: 1,
-            align: 'inner',
-            callback: (value, index, ticks)=>{
-                const ts = ticks[index]?.value;
-                if(ts === undefined) return '';
-                const date = new Date(ts);
-                const year = date.getFullYear();
-                return String(year).slice(-2);
-            }
+    const projectedPointsClipped = projectedPoints.filter(point => point.x > actualPoints[actualPoints.length - 1].x);
+    if(projectedPointsClipped.length){
+        projectedPointsClipped.unshift(actualPoints[actualPoints.length - 1]);
+    }
+
+    const datasets = [{
+        type: 'line',
+        data: actualPoints,
+        borderColor: 'rgba(56, 189, 248, 0.92)',
+        backgroundColor: 'rgba(56, 189, 248, 0.12)',
+        borderWidth: 2,
+        tension: 0.58,
+        borderCapStyle: 'round',
+        borderJoinStyle: 'round',
+        pointRadius: 0,
+        pointHoverRadius: 0,
+        pointHitRadius: 16,
+        spanGaps: true,
+        fill: 'origin',
+        label: 'Net worth'
+    }];
+
+    if(projectedPointsClipped.length >= 2){
+        datasets.push({
+            type: 'line',
+            data: projectedPointsClipped,
+            borderColor: 'rgba(129, 140, 248, 0.9)',
+            borderDash: [6, 4],
+            borderWidth: 2,
+            tension: 0.5,
+            pointRadius: 0,
+            pointHoverRadius: 0,
+            pointHitRadius: 16,
+            fill: false,
+            label: 'Projected net worth'
         });
-        netWorthSparklineChart.options.scales.x.grid = { display: false };
-        netWorthSparklineChart.options.scales.y.display = false;
-        netWorthSparklineChart.options.scales.y.beginAtZero = true;
-        netWorthSparklineChart.options.interaction = Object.assign({}, netWorthSparklineChart.options.interaction, {
+    }
+
+    const firstDate = actualPoints[0].x;
+    const lastDate = (projectedPointsClipped.length ? projectedPointsClipped[projectedPointsClipped.length - 1].x : actualPoints[actualPoints.length - 1].x);
+    const axisMin = timeline?.domain?.min || new Date(firstDate.getFullYear(), 0, 1);
+    const axisMax = timeline?.domain?.max || new Date(lastDate.getFullYear(), 11, 31, 23, 59, 59, 999);
+
+    const options = {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 420, easing: 'easeInOutCubic' },
+        plugins: {
+            legend: { display: false },
+            tooltip: {
+                enabled: true,
+                displayColors: false,
+                callbacks: {
+                    title(items){
+                        const item = items && items[0];
+                        if(!item) return '';
+                        const date = item.raw?.x instanceof Date ? item.raw.x : new Date(item.raw?.x);
+                        return date ? formatDateShort(date) : '';
+                    },
+                    label(item){
+                        const value = item.raw?.y ?? item.parsed?.y ?? 0;
+                        const label = item.dataset?.label || 'Net worth';
+                        return `${label}: ${formatCompactMoney(value)}`;
+                    }
+                }
+            }
+        },
+        scales: {
+            x: {
+                type: 'time',
+                min: axisMin,
+                max: axisMax,
+                offset: false,
+                grid: {
+                    display: true,
+                    color: 'rgba(148, 163, 184, 0.16)',
+                    borderDash: [3, 6],
+                    drawTicks: false
+                },
+                ticks: {
+                    display: true,
+                    font: { size: 10, family: 'Inter, system-ui' },
+                    autoSkip: false,
+                    maxRotation: 0,
+                    align: 'start',
+                    callback: (value)=>{
+                        const date = new Date(value);
+                        return date.getFullYear().toString();
+                    }
+                },
+                time: {
+                    unit: 'year',
+                    round: 'year',
+                    displayFormats: { year: 'yyyy' }
+                }
+            },
+            y: {
+                display: false,
+                beginAtZero: true
+            }
+        },
+        interaction: {
             intersect: false,
             mode: 'index',
             axis: 'x'
-        });
-        netWorthSparklineChart.options.animation = Object.assign({}, netWorthSparklineChart.options.animation, {
-            duration: 420,
-            easing: 'easeInOutCubic'
-        });
-        netWorthSparklineChart.options.layout = Object.assign({}, netWorthSparklineChart.options.layout, {
-            padding: { top: 10, bottom: 4, left: 4, right: 4 }
-        });
+        },
+        layout: {
+            padding: { top: 14, bottom: 6, left: 6, right: 6 }
+        }
+    };
+
+    if(netWorthSparklineChart){
+        netWorthSparklineChart.data.datasets = datasets;
+        netWorthSparklineChart.options = options;
         netWorthSparklineChart.update('none');
         return;
     }
+
     if(typeof Chart === 'undefined'){
         return;
     }
+
     const ctx = canvas.getContext('2d');
     netWorthSparklineChart = new Chart(ctx, {
         type: 'line',
-        data: {
-            datasets: createNetWorthDatasets(dataPoints)
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            animation: {
-                duration: 420,
-                easing: 'easeInOutCubic'
-            },
-            plugins: {
-                legend: { display: false },
-                tooltip: {
-                    enabled: true,
-                    displayColors: false,
-                    callbacks: {
-                        title(items){
-                            const item = items && items[0];
-                            if(!item) return '';
-                            const date = item.raw?.x instanceof Date ? item.raw.x : new Date(item.raw?.x);
-                            return date ? formatDateShort(date) : '';
-                        },
-                        label(item){
-                            const value = item.raw?.y ?? item.parsed?.y ?? 0;
-                            const label = item.dataset?.label || 'Net worth';
-                            return `${label}: ${money(value)}`;
-                        }
-                    }
-                }
-            },
-            scales: {
-                x: {
-                    type: 'time',
-                    display: true,
-                    time: {
-                        unit: 'year',
-                        round: 'year',
-                        displayFormats: { year: 'yy' },
-                        stepSize: 1
-                    },
-                    offset: false,
-                    grid: { display: false },
-                    ticks: {
-                        display: true,
-                        font: { size: 9, family: 'Inter, system-ui' },
-                        autoSkip: false,
-                        stepSize: 1,
-                        maxRotation: 0,
-                        align: 'inner',
-                        callback: (value, index, ticks)=>{
-                            const ts = ticks[index]?.value;
-                            if(ts === undefined) return '';
-                            const date = new Date(ts);
-                            const year = date.getFullYear();
-                            return String(year).slice(-2);
-                        }
-                    }
-                },
-                y: {
-                    display: false,
-                    beginAtZero: true
-                }
-            },
-            interaction: {
-                intersect: false,
-                mode: 'index',
-                axis: 'x'
-            },
-            layout: {
-                padding: { top: 10, bottom: 4, left: 4, right: 4 }
-            }
-        }
+        data: { datasets },
+        options
     });
 }
 
@@ -3359,8 +3366,8 @@ function updateKpis(){
 
     const totalMarketValue = Object.values(netWorthTotals).reduce((sum, value)=> sum + Number(value || 0), 0);
 
-    const netWorthTrendPoints = buildNetWorthTrendPoints(totalMarketValue);
-    renderNetWorthSparkline(netWorthTrendPoints);
+    const netWorthTimeline = computeNetWorthTimeline(totalMarketValue);
+    renderNetWorthSparkline(netWorthTimeline);
 
     setMoneyWithFlash('total-pnl', totalPnl, 'totalPnl');
     setMoneyWithFlash('equity', totalMarketValue, 'netWorth');
