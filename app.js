@@ -2807,6 +2807,7 @@ function createOpenPositionRow(position, totalCategoryValue){
     const marketValue = Number(position.marketValue || 0);
     const pnlValue = Number((position.rangePnl ?? position.pnl) || 0);
     const share = totalCategoryValue ? (marketValue / totalCategoryValue) * 100 : null;
+    const reinvestedValue = Number(position.reinvested || 0);
     const shareText = Number.isFinite(share) ? `${share.toFixed(1)}%` : '—';
     const main = document.createElement('div');
     main.className = 'analytics-main';
@@ -2822,8 +2823,16 @@ function createOpenPositionRow(position, totalCategoryValue){
     const metaEl = document.createElement('div');
     metaEl.className = 'pos';
     const qtyText = `Qty ${formatQty(Number(position.qty || 0))}`;
-    const priceLabel = position.priceStatus ? `${money(price)} · ⚠ ${position.priceStatus}` : money(price);
-    metaEl.innerHTML = `${qtyText} · Price ${position.priceStatus ? `<span class="price-warning">${priceLabel}</span>` : priceLabel}`;
+    const metaParts = [
+        qtyText,
+        position.priceStatus
+            ? `Price <span class="price-warning">${money(price)} · ${position.priceStatus}</span>`
+            : `Price ${money(price)}`
+    ];
+    if(Math.abs(reinvestedValue) > 1e-6){
+        metaParts.push(`<span class="reinvested-inline">Reinvested ${money(reinvestedValue)}</span>`);
+    }
+    metaEl.innerHTML = metaParts.join(' · ');
     label.appendChild(nameEl);
     label.appendChild(metaEl);
     main.appendChild(label);
@@ -2844,7 +2853,6 @@ function createOpenPositionRow(position, totalCategoryValue){
     values.appendChild(marketEl);
     values.appendChild(pnlEl);
     values.appendChild(shareEl);
-    const reinvestedValue = Number(position.reinvested || 0);
     if(Math.abs(reinvestedValue) > 1e-6){
         const reinvestEl = document.createElement('div');
         reinvestEl.className = 'reinvested-chip';
@@ -2885,6 +2893,7 @@ function createClosedPositionRow(position){
     const row = document.createElement('div');
     row.className = 'analytics-row';
     const realized = Number(position.realized || 0);
+    const reinvestedValue = Number(position.reinvested || 0);
     const main = document.createElement('div');
     main.className = 'analytics-main';
     const iconEl = createAssetIconElement(position);
@@ -2899,7 +2908,13 @@ function createClosedPositionRow(position){
     const metaEl = document.createElement('div');
     metaEl.className = 'pos';
     const realizedPercent = Number(position.rangeChangePct);
-    metaEl.textContent = `Realized P&L ${formatMoneyWithPercent(realized, Number.isFinite(realizedPercent) ? realizedPercent : null, 1)}`;
+    const metaParts = [
+        `Realized P&L ${formatMoneyWithPercent(realized, Number.isFinite(realizedPercent) ? realizedPercent : null, 1)}`
+    ];
+    if(Math.abs(reinvestedValue) > 1e-6){
+        metaParts.push(`<span class="reinvested-inline">Reinvested ${money(reinvestedValue)}</span>`);
+    }
+    metaEl.innerHTML = metaParts.join(' · ');
     label.appendChild(nameEl);
     label.appendChild(metaEl);
     main.appendChild(label);
@@ -2915,6 +2930,12 @@ function createClosedPositionRow(position){
     statusEl.textContent = 'Position closed';
     values.appendChild(pnlEl);
     values.appendChild(statusEl);
+    if(Math.abs(reinvestedValue) > 1e-6){
+        const reinvestEl = document.createElement('div');
+        reinvestEl.className = 'reinvested-chip';
+        reinvestEl.textContent = `Reinvested ${money(reinvestedValue)}`;
+        values.appendChild(reinvestEl);
+    }
     row.appendChild(values);
 
     const plateImage = getAssetPlateImage(position);
