@@ -2971,12 +2971,15 @@ function computeNetWorthTimeline(totalValue){
     const firstDate = actual[0].x instanceof Date ? actual[0].x : new Date(actual[0].x);
     const startOfFirstYear = new Date(firstDate.getFullYear(), 0, 1);
     const lastActual = actual[actual.length - 1];
-    const maxActualValue = actual.reduce((max, point)=> Math.max(max, point.y), lastActual.y);
-    const projectedValue = Math.max(lastActual.y, maxActualValue) * 1.1;
-    const projectedDate = new Date(now.getFullYear() + 1, 0, 1);
+    const baseProjectedValue = actual.reduce((max, point)=> Math.max(max, point.y), lastActual.y);
+    const projectedYearOneValue = Math.max(lastActual.y, baseProjectedValue) * 1.1;
+    const projectedYearTwoValue = projectedYearOneValue * 1.1;
+    const projectedYearOneDate = new Date(now.getFullYear() + 1, 0, 1);
+    const projectedYearTwoDate = new Date(now.getFullYear() + 2, 0, 1);
     const projected = [
         { x: lastActual.x, y: lastActual.y },
-        { x: projectedDate, y: projectedValue }
+        { x: projectedYearOneDate, y: projectedYearOneValue },
+        { x: projectedYearTwoDate, y: projectedYearTwoValue }
     ];
 
     return {
@@ -2984,7 +2987,7 @@ function computeNetWorthTimeline(totalValue){
         projected,
         domain: {
             min: startOfFirstYear,
-            max: projectedDate
+            max: projectedYearTwoDate
         }
     };
 }
