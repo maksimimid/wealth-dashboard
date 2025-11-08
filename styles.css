@@ -978,15 +978,15 @@ h1 {
 .analytics-list.plates .analytics-row::after {
     content: '';
     position: absolute;
-    top: -6%;
-    left: -6%;
-    right: -6%;
-    bottom: -6%;
+    top: -4%;
+    left: -4%;
+    right: -4%;
+    bottom: -4%;
     border-radius: inherit;
     background-image: var(--plate-image, none);
     background-size: cover;
     background-position: center;
-    transform: scale(1.01);
+    transform: scale(1);
     filter: saturate(1.08);
     opacity: 0.32;
     z-index: 0;
@@ -1004,8 +1004,8 @@ h1 {
 }
 
 .analytics-list.plates .analytics-row:hover::after {
-    opacity: 0.44;
-    transform: scale(1.035);
+    opacity: 0.42;
+    transform: scale(1.02);
 }
 
 .analytics-list.plates .analytics-values {
