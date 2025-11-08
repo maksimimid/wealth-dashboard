@@ -593,6 +593,32 @@ h1 {
     margin-top: 4px;
 }
 
+#net-worth-card {
+    position: relative;
+    padding-right: 70px;
+}
+
+#net-worth-card .networth-controls {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    margin-top: 0;
+    gap: 0;
+    z-index: 5;
+}
+
+#net-worth-card.bubble-mode .label,
+#net-worth-card.bubble-mode .big,
+#net-worth-card.bubble-mode .networth-note,
+#net-worth-card.bubble-mode .networth-chart,
+#net-worth-card.bubble-mode .networth-breakdown {
+    display: none;
+}
+
+#net-worth-card.bubble-mode .networth-controls {
+    position: absolute;
+}
+
 .kpi small {
     color: var(--muted);
     font-size: 12px;
@@ -706,27 +732,25 @@ h1 {
     display: block;
 }
 
-.mindmap-modal-content {
-    width: min(760px, 95vw);
-    max-height: 90vh;
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-}
-
-.mindmap-modal-area {
+.networth-bubble-container {
     position: relative;
     width: 100%;
-    height: 360px;
-    margin-top: 6px;
+    height: 260px;
+    margin-top: 20px;
     border-radius: 18px;
-    background: radial-gradient(circle at center, rgba(56, 189, 248, 0.1), rgba(15, 23, 42, 0.35));
+    background: radial-gradient(circle at center, rgba(56, 189, 248, 0.12), rgba(15, 23, 42, 0.35));
     border: 1px solid rgba(56, 189, 248, 0.25);
     box-shadow: inset 0 0 28px rgba(14, 116, 144, 0.25);
     overflow: hidden;
 }
 
-.mindmap-modal-area .networth-mindmap {
+.networth-bubble-container.hidden {
+    display: none !important;
+}
+
+.networth-bubble-container .networth-mindmap {
+    position: absolute;
+    inset: 0;
     height: 100%;
 }
 
@@ -1706,6 +1730,10 @@ body.light-theme .networth-note.unavailable {
     opacity: 0.6;
 }
 
+body.light-theme #net-worth-card {
+    padding-right: 70px;
+}
+
 body.light-theme .networth-view-toggle {
     border-color: rgba(59, 130, 246, 0.45);
     background: rgba(255, 255, 255, 0.65);
@@ -1800,10 +1828,10 @@ body.light-theme .mindmap-node-detail {
     color: #475569;
 }
 
-body.light-theme .mindmap-modal-area {
-    background: radial-gradient(circle at center, rgba(96, 165, 250, 0.16), rgba(148, 163, 184, 0.2));
+body.light-theme .networth-bubble-container {
+    background: radial-gradient(circle at center, rgba(147, 197, 253, 0.22), rgba(165, 180, 252, 0.28));
     border-color: rgba(148, 163, 184, 0.35);
-    box-shadow: inset 0 0 28px rgba(148, 163, 184, 0.25);
+    box-shadow: inset 0 0 24px rgba(148, 163, 184, 0.25);
 }
 
 body.light-theme .subtitle { color: #475569; }
