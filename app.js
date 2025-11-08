@@ -3034,6 +3034,7 @@ function renderNetWorthSparkline(timeline){
         netWorthSparklineChart.options = options;
         netWorthSparklineChart.config.options = options;
         netWorthSparklineChart.update('none');
+        attachSparklineHover(netWorthSparklineChart, actualPoints, projectedPointsClipped);
         return;
     }
 
@@ -3047,6 +3048,112 @@ function renderNetWorthSparkline(timeline){
         data: { datasets },
         options
     });
+    attachSparklineHover(netWorthSparklineChart, actualPoints, projectedPointsClipped);
+}
+
+function attachSparklineHover(chart, actualPoints, projectedPoints){
+    if(!chart || !chart.canvas) return;
+    const canvas = chart.canvas;
+    const combined = [...actualPoints];
+    if(Array.isArray(projectedPoints) && projectedPoints.length){
+        projectedPoints.forEach(point=>{
+            if(!combined.some(existing => existing.x.getTime() === point.x.getTime())){
+                combined.push(point);
+            }
+        });
+    }
+    combined.sort((a,b)=> a.x - b.x);
+    canvas.__sparklineData = { chart, points: combined };
+    if(!canvas.__sparklineHandlers){
+        const moveHandler = event => handleSparklinePointer(canvas, event);
+        const leaveHandler = () => hideSparklineTooltip(canvas);
+        canvas.addEventListener('mousemove', moveHandler);
+        canvas.addEventListener('mouseleave', leaveHandler);
+        canvas.__sparklineHandlers = { moveHandler, leaveHandler };
+    }
+}
+
+function handleSparklinePointer(canvas, event){
+    const data = canvas.__sparklineData;
+    if(!data || !data.chart || !Array.isArray(data.points) || !data.points.length){
+        hideSparklineTooltip(canvas);
+        return;
+    }
+    const { chart, points } = data;
+    const rect = canvas.getBoundingClientRect();
+    const xPixel = event.clientX - rect.left;
+    const yPixel = event.clientY - rect.top;
+    const { chartArea } = chart;
+    if(
+        xPixel < chartArea.left ||
+        xPixel > chartArea.right ||
+        yPixel < chartArea.top ||
+        yPixel > chartArea.bottom
+    ){
+        hideSparklineTooltip(canvas);
+        return;
+    }
+    const xValue = chart.scales.x.getValueForPixel(xPixel);
+    if(xValue === undefined || xValue === null){
+        hideSparklineTooltip(canvas);
+        return;
+    }
+    const interpolated = interpolatePoints(points, xValue);
+    const tooltip = getSparklineTooltip(canvas);
+    if(!tooltip) return;
+    const valueEl = tooltip.querySelector('strong');
+    const dateEl = tooltip.querySelector('span');
+    if(valueEl) valueEl.textContent = formatCompactMoney(interpolated.y);
+    if(dateEl) dateEl.textContent = formatDateShort(new Date(interpolated.x));
+    tooltip.style.left = `${event.clientX + 14}px`;
+    tooltip.style.top = `${event.clientY - 24}px`;
+    tooltip.classList.remove('hidden');
+}
+
+function interpolatePoints(points, xValue){
+    const target = xValue instanceof Date ? xValue.getTime() : Number(xValue);
+    if(!Number.isFinite(target)){
+        return { x: new Date(), y: 0 };
+    }
+    let previous = points[0];
+    for(let i = 1; i < points.length; i += 1){
+        const current = points[i];
+        const currentTime = current.x instanceof Date ? current.x.getTime() : Number(current.x);
+        if(currentTime >= target){
+            const prevTime = previous.x instanceof Date ? previous.x.getTime() : Number(previous.x);
+            if(!Number.isFinite(prevTime) || !Number.isFinite(currentTime) || prevTime === currentTime){
+                return { x: new Date(currentTime), y: current.y };
+            }
+            const ratio = Math.max(0, Math.min(1, (target - prevTime) / (currentTime - prevTime)));
+            const value = previous.y + (current.y - previous.y) * ratio;
+            return { x: new Date(target), y: value };
+        }
+        previous = current;
+    }
+    const last = points[points.length - 1];
+    const lastTime = last.x instanceof Date ? last.x.getTime() : Number(last.x);
+    return { x: new Date(target > lastTime ? target : lastTime), y: last.y };
+}
+
+function getSparklineTooltip(canvas){
+    const parent = canvas.parentElement;
+    if(!parent) return null;
+    let tooltip = parent.querySelector('.networth-tooltip');
+    if(!tooltip){
+        tooltip = document.createElement('div');
+        tooltip.className = 'networth-tooltip hidden';
+        tooltip.innerHTML = '<strong>$0</strong><span></span>';
+        parent.appendChild(tooltip);
+    }
+    return tooltip;
+}
+
+function hideSparklineTooltip(canvas){
+    if(!canvas || !canvas.parentElement) return;
+    const tooltip = canvas.parentElement.querySelector('.networth-tooltip');
+    if(tooltip){
+        tooltip.classList.add('hidden');
+    }
 }
 
 function extractEtContext(date){
