@@ -103,6 +103,7 @@ let netWorthMindmapLastTrigger = null;
 let lastNetWorthTotals = {};
 let lastNetWorthTotalValue = 0;
 let lastMindmapRenderHash = null;
+let lastMindmapDimensions = { width: 0, height: 0 };
 let netWorthSparklineCanvas = null;
 let lastNetWorthTimeline = null;
 let netWorthDetailModal = null;
@@ -185,6 +186,64 @@ const TRANSACTION_HISTORY_LOOKBACK_DAYS = 180;
 const FLASH_DURATION = 1500;
 const RENT_TAGS = ['rent', 'rental', 'lease', 'tenant', 'tenancy', 'airbnb', 'booking'];
 const EXPENSE_TAGS = ['expense', 'expenses', 'maintenance', 'repair', 'repairs', 'tax', 'taxes', 'property tax', 'property-tax', 'insurance', 'mortgage', 'mortgagepayment', 'hoa', 'hoa fees', 'utility', 'utilities', 'water', 'electric', 'electricity', 'gas', 'cleaning', 'management', 'interest', 'service', 'fee', 'fees'];
+const MINDMAP_MAIN_STYLE = {
+    background: 'radial-gradient(circle at 35% 30%, rgba(34, 197, 94, 0.9), rgba(6, 95, 70, 0.65))',
+    borderColor: 'rgba(52, 211, 153, 0.9)',
+    boxShadow: '0 0 32px rgba(16, 185, 129, 0.45), inset 0 0 28px rgba(5, 150, 105, 0.55)',
+    textColor: '#ecfdf5',
+    detailColor: 'rgba(209, 250, 229, 0.85)',
+    lineColor: 'rgba(52, 211, 153, 0.5)'
+};
+const MINDMAP_COLOR_PALETTE = [
+    {
+        background: 'radial-gradient(circle at 32% 28%, rgba(59, 130, 246, 0.85), rgba(29, 78, 216, 0.55))',
+        borderColor: 'rgba(59, 130, 246, 0.95)',
+        boxShadow: '0 0 24px rgba(59, 130, 246, 0.35), inset 0 0 20px rgba(29, 78, 216, 0.45)',
+        textColor: '#f8fafc',
+        detailColor: 'rgba(191, 219, 254, 0.85)',
+        lineColor: 'rgba(59, 130, 246, 0.6)'
+    },
+    {
+        background: 'radial-gradient(circle at 30% 32%, rgba(129, 140, 248, 0.85), rgba(91, 33, 182, 0.55))',
+        borderColor: 'rgba(129, 140, 248, 0.9)',
+        boxShadow: '0 0 24px rgba(129, 140, 248, 0.35), inset 0 0 20px rgba(91, 33, 182, 0.45)',
+        textColor: '#eef2ff',
+        detailColor: 'rgba(199, 210, 254, 0.85)',
+        lineColor: 'rgba(99, 102, 241, 0.58)'
+    },
+    {
+        background: 'radial-gradient(circle at 30% 30%, rgba(251, 191, 36, 0.85), rgba(245, 158, 11, 0.6))',
+        borderColor: 'rgba(245, 158, 11, 0.85)',
+        boxShadow: '0 0 24px rgba(245, 158, 11, 0.4), inset 0 0 20px rgba(217, 119, 6, 0.45)',
+        textColor: '#0f172a',
+        detailColor: 'rgba(254, 243, 199, 0.9)',
+        lineColor: 'rgba(245, 158, 11, 0.58)'
+    },
+    {
+        background: 'radial-gradient(circle at 32% 32%, rgba(244, 114, 182, 0.85), rgba(190, 24, 93, 0.55))',
+        borderColor: 'rgba(244, 114, 182, 0.9)',
+        boxShadow: '0 0 24px rgba(244, 114, 182, 0.35), inset 0 0 20px rgba(190, 24, 93, 0.45)',
+        textColor: '#fdf2f8',
+        detailColor: 'rgba(251, 207, 232, 0.85)',
+        lineColor: 'rgba(236, 72, 153, 0.58)'
+    },
+    {
+        background: 'radial-gradient(circle at 30% 28%, rgba(45, 212, 191, 0.85), rgba(13, 148, 136, 0.55))',
+        borderColor: 'rgba(45, 212, 191, 0.9)',
+        boxShadow: '0 0 24px rgba(45, 212, 191, 0.35), inset 0 0 20px rgba(13, 148, 136, 0.45)',
+        textColor: '#ecfeff',
+        detailColor: 'rgba(165, 243, 252, 0.85)',
+        lineColor: 'rgba(20, 184, 166, 0.55)'
+    },
+    {
+        background: 'radial-gradient(circle at 30% 32%, rgba(165, 180, 252, 0.85), rgba(67, 56, 202, 0.55))',
+        borderColor: 'rgba(99, 102, 241, 0.9)',
+        boxShadow: '0 0 24px rgba(99, 102, 241, 0.35), inset 0 0 20px rgba(67, 56, 202, 0.45)',
+        textColor: '#eef2ff',
+        detailColor: 'rgba(199, 210, 254, 0.85)',
+        lineColor: 'rgba(99, 102, 241, 0.58)'
+    }
+];
 
 function applyRangeButtons(){ /* no-op */ }
 
@@ -3347,11 +3406,23 @@ function createMindmapNode(options = {}){
         valueEl.textContent = options.valueText;
         inner.appendChild(valueEl);
     }
+    let detailEl = null;
     if(options.detailText){
-        const detailEl = document.createElement('div');
+        detailEl = document.createElement('div');
         detailEl.className = 'mindmap-node-detail';
         detailEl.textContent = options.detailText;
         inner.appendChild(detailEl);
+    }
+    if(options.styles){
+        const { background, borderColor, boxShadow, textColor, titleColor, detailColor } = options.styles;
+        if(background) inner.style.background = background;
+        if(borderColor) inner.style.borderColor = borderColor;
+        if(boxShadow) inner.style.boxShadow = boxShadow;
+        if(textColor) inner.style.color = textColor;
+        if(titleColor) titleEl.style.color = titleColor;
+        if(detailColor && detailEl){
+            detailEl.style.color = detailColor;
+        }
     }
     const duration = options.animationDuration || 16 + Math.random() * 6;
     const delay = options.animationDelay || Math.random() * -10;
@@ -3368,8 +3439,6 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
     if(!container || !linksLayer || !nodesLayer){
         return false;
     }
-    nodesLayer.innerHTML = '';
-    linksLayer.innerHTML = '';
     const rect = container.getBoundingClientRect();
     const width = rect.width || container.clientWidth || container.offsetWidth || 0;
     const height = rect.height || container.clientHeight || container.offsetHeight || 0;
@@ -3380,6 +3449,27 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
     if(width <= 0 || height <= 0){
         return false;
     }
+
+    const filteredEntries = Object.entries(categoryMap || {})
+        .filter(([, value])=> Math.abs(Number(value)) > 1e-2)
+        .sort(([a],[b])=> a.localeCompare(b));
+
+    const hash = JSON.stringify({
+        total: Number(totalValue) || 0,
+        entries: filteredEntries.map(([key, value])=> [key, Number(value) || 0])
+    });
+    if(
+        attempt === 0 &&
+        hash === lastMindmapRenderHash &&
+        width === lastMindmapDimensions.width &&
+        height === lastMindmapDimensions.height
+    ){
+        return true;
+    }
+
+    nodesLayer.innerHTML = '';
+    linksLayer.innerHTML = '';
+
     linksLayer.setAttribute('viewBox', `0 0 ${width} ${height}`);
     linksLayer.setAttribute('width', width);
     linksLayer.setAttribute('height', height);
@@ -3388,19 +3478,15 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
     const centerX = width / 2;
     const centerY = height / 2;
     const total = Number(totalValue) || 0;
-    const entries = Object.entries(categoryMap || {}).filter(([, value])=> Math.abs(Number(value)) > 1e-2);
-    entries.sort((a,b)=> Number(b[1] || 0) - Number(a[1] || 0));
-    const magnitudeSum = entries.reduce((sum, [, rawValue])=> sum + Math.abs(Number(rawValue) || 0), 0);
-    const normalizationBase = total > 0 ? total : (magnitudeSum || 1);
+    const magnitudeSum = filteredEntries.reduce((sum, [, rawValue])=> sum + Math.abs(Number(rawValue) || 0), 0);
 
-    const nodesData = entries.map(([key, rawValue])=>{
+    const nodesData = filteredEntries.map(([key, rawValue])=>{
         const numericValue = Number(rawValue) || 0;
         const magnitude = Math.abs(numericValue);
-        const normalized = normalizationBase > 0 ? Math.sqrt(Math.min(magnitude, normalizationBase) / normalizationBase) : 0;
-        const size = Math.max(62, Math.min(150, 62 + normalized * 160));
+        const percent = magnitudeSum > 0 ? (magnitude / magnitudeSum) * 100 : 0;
+        const size = Math.max(60, Math.min(180, 60 + percent * 1.2));
         const labelKey = key || 'other';
         const label = NET_WORTH_LABEL_MAP[labelKey] || labelKey.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, letter => letter.toUpperCase());
-        const percent = magnitudeSum > 0 ? (magnitude / magnitudeSum) * 100 : 0;
         return {
             key: labelKey,
             label,
@@ -3411,7 +3497,8 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
     });
 
     const maxDiameter = nodesData.reduce((max, node)=> Math.max(max, node.size), 0);
-    const radius = Math.max(70, Math.min(width, height) / 2 - (maxDiameter / 2) - 12);
+    const availableRadius = Math.max(90, Math.min(width, height) / 2 - 20);
+    const radius = Math.max(availableRadius * 0.75, availableRadius - (maxDiameter * 0.18));
 
     const mainDetail = total > 0 ? 'Total value' : 'Awaiting data';
     const mainTitle = total > 0 ? `Total value: ${money(total)}` : 'Awaiting data';
@@ -3426,7 +3513,8 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
         size: mainSize,
         className: 'mindmap-node-main',
         animationDuration: 20,
-        animationDelay: -6
+        animationDelay: -6,
+        styles: MINDMAP_MAIN_STYLE
     });
     mainNode.node.style.left = `${centerX}px`;
     mainNode.node.style.top = `${centerY}px`;
@@ -3435,6 +3523,8 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
     nodesLayer.appendChild(mainNode.node);
 
     if(!nodesData.length){
+        lastMindmapRenderHash = hash;
+        lastMindmapDimensions = { width, height };
         return true;
     }
 
@@ -3447,11 +3537,13 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
         const clampedX = Math.min(width - half - 8, Math.max(half + 8, rawX));
         const clampedY = Math.min(height - half - 8, Math.max(half + 8, rawY));
         const nodeDetail = node.percent > 0 ? `${node.percent.toFixed(1)}% share` : '';
+        const colorTheme = MINDMAP_COLOR_PALETTE[index % MINDMAP_COLOR_PALETTE.length];
         const bubble = createMindmapNode({
             label: node.label,
             valueText: formatCompactMoney(node.value),
             detailText: nodeDetail,
-            size: node.size
+            size: node.size,
+            styles: colorTheme
         });
         bubble.node.style.left = `${clampedX}px`;
         bubble.node.style.top = `${clampedY}px`;
@@ -3466,8 +3558,19 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
         line.setAttribute('y1', centerY);
         line.setAttribute('x2', clampedX);
         line.setAttribute('y2', clampedY);
+        line.setAttribute('stroke-width', '2');
+        line.setAttribute('stroke-dasharray', '6 6');
+        line.setAttribute('stroke-linecap', 'round');
+        if(colorTheme && colorTheme.lineColor){
+            line.setAttribute('stroke', colorTheme.lineColor);
+        }else{
+            line.setAttribute('stroke', 'rgba(56, 189, 248, 0.55)');
+        }
         linksLayer.appendChild(line);
     });
+
+    lastMindmapRenderHash = hash;
+    lastMindmapDimensions = { width, height };
     return true;
 }
 
