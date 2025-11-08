@@ -2780,6 +2780,23 @@ function createClosedPositionRow(position){
         row.style.removeProperty('--plate-image');
         delete row.dataset.plateImage;
     }
+
+    row.classList.add('interactive-asset-row');
+    row.setAttribute('role', 'button');
+    row.setAttribute('tabindex', '0');
+    row.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        lastTransactionTrigger = row;
+        openTransactionModal(position);
+    });
+    row.addEventListener('keydown', event => {
+        if(event.key === 'Enter' || event.key === ' '){
+            event.preventDefault();
+            lastTransactionTrigger = row;
+            openTransactionModal(position);
+        }
+    });
     return row;
 }
 
