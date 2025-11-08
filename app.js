@@ -88,6 +88,38 @@ const categorySectionState = {
 let marketStatusTimer = null;
 let marketStatusVisibilityBound = false;
 let netWorthSparklineChart = null;
+const SPARKLINE_ACTUAL_STEP_DAYS = 7;
+const SPARKLINE_PROJECTED_STEP_DAYS = 14;
+const SPARKLINE_ACTUAL_SMOOTHING = 0.24;
+const SPARKLINE_PROJECTED_SMOOTHING = 0.32;
+const sparklineCrosshairPlugin = {
+    id: 'sparklineCrosshair',
+    afterDraw(chart){
+        const tooltip = chart?.tooltip;
+        if(!tooltip || tooltip.opacity === 0){
+            return;
+        }
+        const dataPoint = tooltip.dataPoints && tooltip.dataPoints[0];
+        if(!dataPoint || !dataPoint.element){
+            return;
+        }
+        const x = dataPoint.element.x;
+        if(typeof x !== 'number'){
+            return;
+        }
+        const { top, bottom } = chart.chartArea;
+        const ctx = chart.ctx;
+        ctx.save();
+        ctx.strokeStyle = 'rgba(148, 163, 184, 0.22)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 6]);
+        ctx.beginPath();
+        ctx.moveTo(x, top);
+        ctx.lineTo(x, bottom);
+        ctx.stroke();
+        ctx.restore();
+    }
+};
 let lastCryptoUiSync = 0;
 let pendingCryptoUiSync = null;
 const CATEGORY_CONFIG = {
@@ -2936,6 +2968,46 @@ function computeNetWorthTimeline(totalValue){
     };
 }
 
+function generateSmoothSeries(points, options = {}){
+    const stepDays = Math.max(1, Number.isFinite(options.stepDays) ? options.stepDays : 7);
+    const smoothing = Math.max(0, Math.min(0.9, Number.isFinite(options.smoothing) ? options.smoothing : 0.25));
+    const stepMs = stepDays * 24 * 60 * 60 * 1000;
+    const sorted = Array.isArray(points) ? points.map(point => {
+        const sourceDate = point?.x ?? point?.date;
+        const date = sourceDate instanceof Date ? new Date(sourceDate) : new Date(sourceDate || Date.now());
+        const value = Number(point?.y ?? point?.value ?? 0) || 0;
+        return { x: date, y: value < 0 ? 0 : value };
+    }).filter(entry => entry.x instanceof Date && !Number.isNaN(entry.x.getTime())) : [];
+    sorted.sort((a, b) => a.x - b.x);
+    if(!sorted.length){
+        return [];
+    }
+    const result = [];
+    let previous = sorted[0].y;
+    result.push({ x: sorted[0].x, y: previous });
+    for(let i = 0; i < sorted.length - 1; i += 1){
+        const start = sorted[i];
+        const end = sorted[i + 1];
+        const span = end.x.getTime() - start.x.getTime();
+        if(span <= 0){
+            previous = end.y;
+            result.push({ x: end.x, y: previous });
+            continue;
+        }
+        const steps = Math.max(1, Math.round(span / stepMs));
+        for(let step = 1; step <= steps; step += 1){
+            const ratio = step / steps;
+            const moment = new Date(start.x.getTime() + ratio * span);
+            const linearValue = start.y + (end.y - start.y) * ratio;
+            previous = previous + smoothing * (linearValue - previous);
+            result.push({ x: moment, y: previous });
+        }
+    }
+    const last = sorted[sorted.length - 1];
+    result[result.length - 1] = { x: last.x, y: last.y };
+    return result;
+}
+
 function renderNetWorthSparkline(timeline){
     const canvas = document.getElementById('networth-sparkline');
     if(!canvas){
@@ -2945,98 +3017,97 @@ function renderNetWorthSparkline(timeline){
         }
         return;
     }
-    const actualPoints = Array.isArray(timeline?.actual) ? timeline.actual.slice().sort((a,b)=> a.x - b.x) : [];
-    const projectedPoints = Array.isArray(timeline?.projected) ? timeline.projected.slice().sort((a,b)=> a.x - b.x) : [];
+    const actualRaw = Array.isArray(timeline?.actual) ? timeline.actual : [];
+    const projectedRaw = Array.isArray(timeline?.projected) ? timeline.projected : [];
 
-    if(actualPoints.length < 2){
-        if(actualPoints.length === 1){
-            const anchorDate = new Date(actualPoints[0].x.getTime() - 90 * 24 * 60 * 60 * 1000);
-            actualPoints.unshift({ x: anchorDate, y: actualPoints[0].y });
-        }else{
-            const now = new Date();
-            actualPoints.push(
-                { x: new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000), y: 0 },
-                { x: now, y: Number.isFinite(timeline?.actual?.[0]?.y) ? timeline.actual[0].y : 0 }
-            );
-        }
-    }
-
-    if(!actualPoints.length){
+    if(!actualRaw.length){
         if(netWorthSparklineChart){
             netWorthSparklineChart.destroy();
             netWorthSparklineChart = null;
         }
         const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if(ctx){
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
         return;
     }
-    const projectedPointsClipped = projectedPoints.filter(point => point.x > actualPoints[actualPoints.length - 1].x);
-    if(projectedPointsClipped.length){
-        projectedPointsClipped.unshift(actualPoints[actualPoints.length - 1]);
+
+    const actualSeries = generateSmoothSeries(actualRaw, {
+        stepDays: SPARKLINE_ACTUAL_STEP_DAYS,
+        smoothing: SPARKLINE_ACTUAL_SMOOTHING
+    });
+
+    const projectedSeries = projectedRaw.length ? generateSmoothSeries(
+        [actualRaw[actualRaw.length - 1], ...projectedRaw],
+        {
+            stepDays: SPARKLINE_PROJECTED_STEP_DAYS,
+            smoothing: SPARKLINE_PROJECTED_SMOOTHING
+        }
+    ) : [];
+
+    if(projectedSeries.length){
+        const lastActual = actualSeries[actualSeries.length - 1];
+        projectedSeries[0] = { x: lastActual.x, y: lastActual.y };
     }
 
-    const datasets = [{
+    const combinedData = [
+        ...actualSeries.map(point => ({ ...point, projected: false })),
+        ...projectedSeries.slice(1).map(point => ({ ...point, projected: true }))
+    ];
+
+    const axisMin = timeline?.domain?.min || new Date(actualSeries[0].x.getFullYear(), 0, 1);
+    const axisMax = timeline?.domain?.max || (projectedSeries.length ? projectedSeries[projectedSeries.length - 1].x : actualSeries[actualSeries.length - 1].x);
+
+    const dataset = {
         type: 'line',
-        data: actualPoints,
-        borderColor: 'rgba(56, 189, 248, 0.92)',
-        backgroundColor: 'rgba(56, 189, 248, 0.12)',
+        data: combinedData,
+        parsing: false,
+        spanGaps: true,
         borderWidth: 2,
-        tension: 0.58,
+        tension: 0.62,
         borderCapStyle: 'round',
         borderJoinStyle: 'round',
         pointRadius: 0,
         pointHoverRadius: 0,
-        pointHitRadius: 16,
-        spanGaps: true,
+        pointHitRadius: 18,
         fill: 'origin',
-        label: 'Net worth'
-    }];
-
-    if(projectedPointsClipped.length >= 2){
-        datasets.push({
-            type: 'line',
-            data: projectedPointsClipped,
-            borderColor: 'rgba(129, 140, 248, 0.9)',
-            borderDash: [6, 4],
-            borderWidth: 2,
-            tension: 0.5,
-            pointRadius: 0,
-            pointHoverRadius: 0,
-            pointHitRadius: 16,
-            fill: false,
-            label: 'Projected net worth'
-        });
-    }
-
-    const firstDate = actualPoints[0].x;
-    const lastDate = (projectedPointsClipped.length ? projectedPointsClipped[projectedPointsClipped.length - 1].x : actualPoints[actualPoints.length - 1].x);
-    const axisMin = timeline?.domain?.min || new Date(firstDate.getFullYear(), 0, 1);
-    const axisMax = timeline?.domain?.max || new Date(lastDate.getFullYear(), 11, 31, 23, 59, 59, 999);
-
-    if(actualPoints.length && actualPoints[0].x > axisMin){
-        actualPoints.unshift({ x: axisMin, y: actualPoints[0].y });
-        datasets[0].data = actualPoints;
-    }
+        segment: {
+            borderColor(context){
+                return context.p1?.raw?.projected ? 'rgba(129, 140, 248, 0.9)' : 'rgba(56, 189, 248, 0.92)';
+            },
+            backgroundColor(context){
+                return context.p1?.raw?.projected ? 'rgba(129, 140, 248, 0.06)' : 'rgba(56, 189, 248, 0.12)';
+            },
+            borderDash(context){
+                return context.p1?.raw?.projected ? [6, 4] : undefined;
+            }
+        }
+    };
 
     const options = {
         responsive: true,
         maintainAspectRatio: false,
-        animation: { duration: 420, easing: 'easeInOutCubic' },
+        animation: { duration: 420, easing: 'easeOutCubic' },
         plugins: {
             legend: { display: false },
             tooltip: {
                 enabled: true,
+                intersect: false,
+                mode: 'nearest',
                 displayColors: false,
+                position: 'nearest',
                 callbacks: {
                     title(items){
                         const item = items && items[0];
                         if(!item) return '';
-                        const date = item.raw?.x instanceof Date ? item.raw.x : new Date(item.raw?.x);
+                        const rawDate = item.raw?.x;
+                        const date = rawDate instanceof Date ? rawDate : new Date(rawDate);
                         return date ? formatDateShort(date) : '';
                     },
                     label(item){
-                        const value = item.raw?.y ?? item.parsed?.y ?? 0;
-                        const label = item.dataset?.label || 'Net worth';
+                        const raw = item.raw || {};
+                        const value = Number(raw.y ?? item.parsed?.y ?? 0);
+                        const label = raw.projected ? 'Projected net worth' : 'Net worth';
                         return `${label}: ${formatCompactMoney(value)}`;
                     }
                 }
@@ -3056,13 +3127,13 @@ function renderNetWorthSparkline(timeline){
                 },
                 ticks: {
                     display: true,
-                    font: { size: 10, family: 'Inter, system-ui' },
                     autoSkip: false,
                     maxRotation: 0,
                     align: 'start',
-                    callback: (value)=>{
+                    font: { size: 10, family: 'Inter, system-ui' },
+                    callback(value){
                         const date = new Date(value);
-                        return date.getFullYear().toString();
+                        return Number.isFinite(date.getFullYear()) ? date.getFullYear().toString() : '';
                     }
                 },
                 time: {
@@ -3073,27 +3144,22 @@ function renderNetWorthSparkline(timeline){
             },
             y: {
                 display: false,
-                beginAtZero: true
+                beginAtZero: false
             }
         },
         interaction: {
             intersect: false,
-            mode: 'index',
+            mode: 'nearest',
             axis: 'x'
         },
         layout: {
-            padding: { top: 14, bottom: 6, left: 6, right: 6 }
+            padding: { top: 16, bottom: 6, left: 6, right: 6 }
         }
     };
 
     if(netWorthSparklineChart){
-        netWorthSparklineChart.data.datasets = datasets;
-        netWorthSparklineChart.config.data.datasets = datasets;
-        netWorthSparklineChart.options = options;
-        netWorthSparklineChart.config.options = options;
-        netWorthSparklineChart.update('none');
-        attachSparklineHover(netWorthSparklineChart, actualPoints, projectedPointsClipped);
-        return;
+        netWorthSparklineChart.destroy();
+        netWorthSparklineChart = null;
     }
 
     if(typeof Chart === 'undefined'){
@@ -3103,115 +3169,10 @@ function renderNetWorthSparkline(timeline){
     const ctx = canvas.getContext('2d');
     netWorthSparklineChart = new Chart(ctx, {
         type: 'line',
-        data: { datasets },
-        options
+        data: { datasets: [dataset] },
+        options,
+        plugins: [sparklineCrosshairPlugin]
     });
-    attachSparklineHover(netWorthSparklineChart, actualPoints, projectedPointsClipped);
-}
-
-function attachSparklineHover(chart, actualPoints, projectedPoints){
-    if(!chart || !chart.canvas) return;
-    const canvas = chart.canvas;
-    const combined = [...actualPoints];
-    if(Array.isArray(projectedPoints) && projectedPoints.length){
-        projectedPoints.forEach(point=>{
-            if(!combined.some(existing => existing.x.getTime() === point.x.getTime())){
-                combined.push(point);
-            }
-        });
-    }
-    combined.sort((a,b)=> a.x - b.x);
-    canvas.__sparklineData = { chart, points: combined };
-    if(!canvas.__sparklineHandlers){
-        const moveHandler = event => handleSparklinePointer(canvas, event);
-        const leaveHandler = () => hideSparklineTooltip(canvas);
-        canvas.addEventListener('mousemove', moveHandler);
-        canvas.addEventListener('mouseleave', leaveHandler);
-        canvas.__sparklineHandlers = { moveHandler, leaveHandler };
-    }
-}
-
-function handleSparklinePointer(canvas, event){
-    const data = canvas.__sparklineData;
-    if(!data || !data.chart || !Array.isArray(data.points) || !data.points.length){
-        hideSparklineTooltip(canvas);
-        return;
-    }
-    const { chart, points } = data;
-    const rect = canvas.getBoundingClientRect();
-    const xPixel = event.clientX - rect.left;
-    const yPixel = event.clientY - rect.top;
-    const { chartArea } = chart;
-    if(
-        xPixel < chartArea.left ||
-        xPixel > chartArea.right ||
-        yPixel < chartArea.top ||
-        yPixel > chartArea.bottom
-    ){
-        hideSparklineTooltip(canvas);
-        return;
-    }
-    const xValue = chart.scales.x.getValueForPixel(xPixel);
-    if(xValue === undefined || xValue === null){
-        hideSparklineTooltip(canvas);
-        return;
-    }
-    const interpolated = interpolatePoints(points, xValue);
-    const tooltip = getSparklineTooltip(canvas);
-    if(!tooltip) return;
-    const valueEl = tooltip.querySelector('strong');
-    const dateEl = tooltip.querySelector('span');
-    if(valueEl) valueEl.textContent = formatCompactMoney(interpolated.y);
-    if(dateEl) dateEl.textContent = formatDateShort(new Date(interpolated.x));
-    tooltip.style.left = `${event.clientX + 14}px`;
-    tooltip.style.top = `${event.clientY - 24}px`;
-    tooltip.classList.remove('hidden');
-}
-
-function interpolatePoints(points, xValue){
-    const target = xValue instanceof Date ? xValue.getTime() : Number(xValue);
-    if(!Number.isFinite(target)){
-        return { x: new Date(), y: 0 };
-    }
-    let previous = points[0];
-    for(let i = 1; i < points.length; i += 1){
-        const current = points[i];
-        const currentTime = current.x instanceof Date ? current.x.getTime() : Number(current.x);
-        if(currentTime >= target){
-            const prevTime = previous.x instanceof Date ? previous.x.getTime() : Number(previous.x);
-            if(!Number.isFinite(prevTime) || !Number.isFinite(currentTime) || prevTime === currentTime){
-                return { x: new Date(currentTime), y: current.y };
-            }
-            const ratio = Math.max(0, Math.min(1, (target - prevTime) / (currentTime - prevTime)));
-            const value = previous.y + (current.y - previous.y) * ratio;
-            return { x: new Date(target), y: value };
-        }
-        previous = current;
-    }
-    const last = points[points.length - 1];
-    const lastTime = last.x instanceof Date ? last.x.getTime() : Number(last.x);
-    return { x: new Date(target > lastTime ? target : lastTime), y: last.y };
-}
-
-function getSparklineTooltip(canvas){
-    const parent = canvas.parentElement;
-    if(!parent) return null;
-    let tooltip = parent.querySelector('.networth-tooltip');
-    if(!tooltip){
-        tooltip = document.createElement('div');
-        tooltip.className = 'networth-tooltip hidden';
-        tooltip.innerHTML = '<strong>$0</strong><span></span>';
-        parent.appendChild(tooltip);
-    }
-    return tooltip;
-}
-
-function hideSparklineTooltip(canvas){
-    if(!canvas || !canvas.parentElement) return;
-    const tooltip = canvas.parentElement.querySelector('.networth-tooltip');
-    if(tooltip){
-        tooltip.classList.add('hidden');
-    }
 }
 
 function extractEtContext(date){
