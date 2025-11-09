@@ -2852,9 +2852,6 @@ function createOpenPositionRow(position, totalCategoryValue){
             ? `Price <span class="price-warning">${money(price)} · ${position.priceStatus}</span>`
             : `Price ${money(price)}`
     ];
-    if(reinvestedDisplay){
-        metaParts.push(`Reinvested ${reinvestedDisplay}`);
-    }
     metaEl.innerHTML = metaParts.join(' · ');
     label.appendChild(nameEl);
     label.appendChild(metaEl);
@@ -2948,9 +2945,6 @@ function createClosedPositionRow(position){
     const metaParts = [
         `Realized P&L ${formatMoneyWithPercent(realized, Number.isFinite(realizedPercent) ? realizedPercent : null, 1)}`
     ];
-    if(reinvestedDisplay){
-        metaParts.push(`Reinvested ${reinvestedDisplay}`);
-    }
     metaEl.innerHTML = metaParts.join(' · ');
     label.appendChild(nameEl);
     label.appendChild(metaEl);
