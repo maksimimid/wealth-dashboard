@@ -375,11 +375,65 @@ body::before {
 .modal-lots {
     display: flex;
     flex-direction: column;
+    gap: 12px;
+    margin-top: 8px;
+}
+
+.lots-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+
+.lots-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.35);
+    border: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+.lots-control span {
+    text-transform: uppercase;
+    letter-spacing: 0.35px;
+    font-size: 0.7rem;
+}
+
+.lots-controls select {
+    background: transparent;
+    border: none;
+    color: inherit;
+    font-size: 0.85rem;
+    appearance: none;
+    padding: 2px 4px;
+    cursor: pointer;
+}
+
+.lots-controls select:focus-visible {
+    outline: 2px solid rgba(56, 189, 248, 0.6);
+    outline-offset: 2px;
+}
+
+.lots-list {
+    display: flex;
+    flex-direction: column;
     gap: 10px;
     max-height: 260px;
     overflow-y: auto;
-    margin-top: 8px;
     padding-right: 4px;
+}
+
+.lot-group-heading {
+    font-size: 0.75rem;
+    letter-spacing: 0.35px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 6px 2px 2px;
 }
 
 .lot-row {
@@ -1985,6 +2039,20 @@ body.light-theme .market-status { background: rgba(255, 255, 255, 0.85); border-
 body.light-theme .market-hours { color: #475569; }
 body.light-theme .muted { color: #64748b; }
 body.light-theme .reinvested-chip { background: rgba(56, 189, 248, 0.18); color: #0c4a6e; }
+body.light-theme .lots-control {
+    background: rgba(226, 232, 240, 0.75);
+    border-color: rgba(148, 163, 184, 0.4);
+    color: #475569;
+}
+body.light-theme .lots-control span {
+    color: #475569;
+}
+body.light-theme .lots-controls select {
+    color: #1e293b;
+}
+body.light-theme .lot-group-heading {
+    color: #64748b;
+}
 body.light-theme .analytics-section { background: rgba(255, 255, 255, 0.9); border-color: rgba(148, 163, 184, 0.4); }
 body.light-theme .analytics-section[open] summary { background: rgba(148, 163, 184, 0.15); border-color: rgba(148, 163, 184, 0.35); }
 body.light-theme .analytics-section summary { color: #0f172a; }

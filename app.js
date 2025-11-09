@@ -58,6 +58,14 @@ let lastTransactionData = null;
 let lastTransactionPosition = null;
 let modalChartContainer = null;
 let transactionLotsContainer = null;
+let transactionLotsControls = null;
+let transactionLotsList = null;
+let transactionLotsSortSelect = null;
+let transactionLotsDirectionSelect = null;
+let transactionLotsGroupSelect = null;
+let transactionLotsSortField = 'date';
+let transactionLotsSortDirection = 'desc';
+let transactionLotsGroupKey = 'none';
 let viewLotsButton = null;
 let assetViewToggleButton = null;
 let assetViewMode = 'rows';
@@ -2159,6 +2167,9 @@ function ensureTransactionModalElements(){
     transactionModalCanvas = document.getElementById('transaction-chart');
     modalChartContainer = transactionModal.querySelector('.modal-chart');
     transactionLotsContainer = document.getElementById('transaction-lots');
+    if(transactionLotsContainer){
+        ensureTransactionLotsControls();
+    }
     viewLotsButton = document.getElementById('view-lots-btn');
     const closeButton = transactionModal.querySelector('.modal-close');
     if(closeButton){
@@ -2612,34 +2623,182 @@ function setModalView(view){
     }
 }
 
+const LOT_SORT_FIELDS = [
+    { value: 'date', label: 'Date' },
+    { value: 'qty', label: 'Quantity' },
+    { value: 'price', label: 'Price' },
+    { value: 'amount', label: 'Amount' },
+    { value: 'pnl', label: 'PnL' }
+];
+
+const LOT_DIRECTION_OPTIONS = [
+    { value: 'desc', label: 'Descending' },
+    { value: 'asc', label: 'Ascending' }
+];
+
+const LOT_GROUP_OPTIONS = [
+    { value: 'none', label: 'No grouping' },
+    { value: 'type', label: 'Buy / Sell' },
+    { value: 'year', label: 'Year' },
+    { value: 'gain', label: 'Gains / Losses' }
+];
+
+function ensureTransactionLotsControls(){
+    if(!transactionLotsContainer) return;
+    if(!transactionLotsContainer.dataset.controls){
+        transactionLotsContainer.innerHTML = '';
+        transactionLotsControls = document.createElement('div');
+        transactionLotsControls.className = 'lots-controls';
+        transactionLotsControls.setAttribute('role','group');
+
+        transactionLotsList = document.createElement('div');
+        transactionLotsList.className = 'lots-list';
+
+        transactionLotsContainer.appendChild(transactionLotsControls);
+        transactionLotsContainer.appendChild(transactionLotsList);
+
+        buildTransactionLotsControls();
+        transactionLotsContainer.dataset.controls = 'true';
+    }else{
+        transactionLotsControls = transactionLotsContainer.querySelector('.lots-controls');
+        transactionLotsList = transactionLotsContainer.querySelector('.lots-list');
+    }
+    if(transactionLotsSortSelect){
+        transactionLotsSortSelect.value = transactionLotsSortField;
+    }
+    if(transactionLotsDirectionSelect){
+        transactionLotsDirectionSelect.value = transactionLotsSortDirection;
+    }
+    if(transactionLotsGroupSelect){
+        transactionLotsGroupSelect.value = transactionLotsGroupKey;
+    }
+}
+
+function buildTransactionLotsControls(){
+    if(!transactionLotsControls) return;
+    transactionLotsControls.innerHTML = '';
+
+    const sortLabel = document.createElement('label');
+    sortLabel.className = 'lots-control';
+    sortLabel.innerHTML = '<span>Sort by</span>';
+    transactionLotsSortSelect = document.createElement('select');
+    transactionLotsSortSelect.id = 'lots-sort-field';
+    transactionLotsSortSelect.setAttribute('aria-label', 'Sort lots by');
+    LOT_SORT_FIELDS.forEach(option=>{
+        const opt = document.createElement('option');
+        opt.value = option.value;
+        opt.textContent = option.label;
+        transactionLotsSortSelect.appendChild(opt);
+    });
+    sortLabel.appendChild(transactionLotsSortSelect);
+    transactionLotsControls.appendChild(sortLabel);
+
+    const orderLabel = document.createElement('label');
+    orderLabel.className = 'lots-control';
+    orderLabel.innerHTML = '<span>Order</span>';
+    transactionLotsDirectionSelect = document.createElement('select');
+    transactionLotsDirectionSelect.id = 'lots-sort-direction';
+    transactionLotsDirectionSelect.setAttribute('aria-label', 'Sort direction');
+    LOT_DIRECTION_OPTIONS.forEach(option=>{
+        const opt = document.createElement('option');
+        opt.value = option.value;
+        opt.textContent = option.label;
+        transactionLotsDirectionSelect.appendChild(opt);
+    });
+    orderLabel.appendChild(transactionLotsDirectionSelect);
+    transactionLotsControls.appendChild(orderLabel);
+
+    const groupLabel = document.createElement('label');
+    groupLabel.className = 'lots-control';
+    groupLabel.innerHTML = '<span>Group by</span>';
+    transactionLotsGroupSelect = document.createElement('select');
+    transactionLotsGroupSelect.id = 'lots-group-by';
+    transactionLotsGroupSelect.setAttribute('aria-label', 'Group lots by');
+    LOT_GROUP_OPTIONS.forEach(option=>{
+        const opt = document.createElement('option');
+        opt.value = option.value;
+        opt.textContent = option.label;
+        transactionLotsGroupSelect.appendChild(opt);
+    });
+    groupLabel.appendChild(transactionLotsGroupSelect);
+    transactionLotsControls.appendChild(groupLabel);
+
+    transactionLotsSortSelect.addEventListener('change', ()=>{
+        transactionLotsSortField = transactionLotsSortSelect.value;
+        if(lastTransactionPosition && lastTransactionData){
+            renderTransactionLots(lastTransactionPosition, lastTransactionData);
+        }
+    });
+
+    transactionLotsDirectionSelect.addEventListener('change', ()=>{
+        transactionLotsSortDirection = transactionLotsDirectionSelect.value;
+        if(lastTransactionPosition && lastTransactionData){
+            renderTransactionLots(lastTransactionPosition, lastTransactionData);
+        }
+    });
+
+    transactionLotsGroupSelect.addEventListener('change', ()=>{
+        transactionLotsGroupKey = transactionLotsGroupSelect.value;
+        if(lastTransactionPosition && lastTransactionData){
+            renderTransactionLots(lastTransactionPosition, lastTransactionData);
+        }
+    });
+}
+
+function getLotGroupKey(item){
+    switch(transactionLotsGroupKey){
+        case 'type':
+            return item.typeLabel || 'Other';
+        case 'year':
+            return item.date instanceof Date && !Number.isNaN(item.date.getTime())
+                ? String(item.date.getFullYear())
+                : '__no-date__';
+        case 'gain':
+            return item.pnlValue >= 0 ? 'gain' : 'loss';
+        default:
+            return '__all__';
+    }
+}
+
+function getLotGroupLabel(key){
+    switch(transactionLotsGroupKey){
+        case 'type':
+            return key;
+        case 'year':
+            return key === '__no-date__' ? 'No date' : `Year ${key}`;
+        case 'gain':
+            if(key === 'gain') return 'Gains';
+            if(key === 'loss') return 'Losses';
+            return key;
+        default:
+            return '';
+    }
+}
+
 function renderTransactionLots(position, data){
     if(!transactionLotsContainer) return;
-    const operations = Array.isArray(position.operations) ? position.operations.slice().sort((a,b)=>{
-        const da = a.date instanceof Date ? a.date.getTime() : (a.rawDate ? new Date(a.rawDate).getTime() : 0);
-        const db = b.date instanceof Date ? b.date.getTime() : (b.rawDate ? new Date(b.rawDate).getTime() : 0);
-        return da - db;
-    }) : [];
+    ensureTransactionLotsControls();
+    const listElement = transactionLotsList || transactionLotsContainer;
+    const operations = Array.isArray(position.operations) ? position.operations.slice() : [];
     if(!operations.length){
-        transactionLotsContainer.innerHTML = '<div class="pos">No transactions recorded yet.</div>';
+        listElement.innerHTML = '<div class="pos">No transactions recorded yet.</div>';
         return;
     }
     const currentPrice = Number(position.displayPrice || position.currentPrice || position.lastKnownPrice || position.avgPrice || 0);
-    const fragment = document.createDocumentFragment();
-    let rows = 0;
+    const processed = [];
     operations.forEach((op, index)=>{
         if(op.skipInCharts) return;
-        const qty = Number(op.amount || 0);
-        if(!qty) return;
-        const absQty = Math.abs(qty);
+        const qtySigned = Number(op.amount || 0);
+        if(!qtySigned) return;
+        const absQty = Math.abs(qtySigned);
         const date = op.date instanceof Date ? op.date : (op.rawDate ? new Date(op.rawDate) : null);
-        const price = Number(op.price || currentPrice || 0);
+        const price = Number(op.price || currentPrice || 0) || 0;
         const rawSpent = Number(op.spent);
-        const spentAbs = Number.isFinite(rawSpent) ? Math.abs(rawSpent) : Math.abs(price * qty);
-        const typeLabel = qty > 0 ? 'Buy' : 'Sell';
-        const amountLabel = qty > 0 ? 'Invested' : 'Proceeds';
+        let baseAmount = Number.isFinite(rawSpent) ? Math.abs(rawSpent) : Math.abs(price * absQty);
+        const typeLabel = qtySigned > 0 ? 'Buy' : 'Sell';
+        const amountLabel = qtySigned > 0 ? 'Invested' : 'Proceeds';
         let pnlValue = 0;
-        let baseAmount = spentAbs;
-        if(qty > 0){
+        if(qtySigned > 0){
             if(!baseAmount) baseAmount = Math.abs(price * absQty);
             const currentValue = currentPrice * absQty;
             pnlValue = currentValue - baseAmount;
@@ -2650,24 +2809,82 @@ function renderTransactionLots(position, data){
         }
         const pnlPct = baseAmount ? (pnlValue / baseAmount) * 100 : 0;
         const pnlClass = pnlValue >= 0 ? 'lot-positive' : 'lot-negative';
-        const row = document.createElement('div');
-        row.className = 'lot-row';
-        row.innerHTML = `
-            <div><strong>${date ? formatDateShort(date) : '—'}</strong></div>
-            <div>${typeLabel} · ${formatQty(absQty)}</div>
-            <div>Price ${money(price)}</div>
-            <div>${amountLabel} ${money(baseAmount)}</div>
-            <div class="lot-value ${pnlClass}">${money(pnlValue)} (${formatPercent(pnlPct)})</div>
-        `;
-        fragment.appendChild(row);
-        rows += 1;
+        processed.push({
+            id: op.id || `lot-${index}`,
+            date,
+            dateValue: date instanceof Date && !Number.isNaN(date.getTime()) ? date.getTime() : -Infinity,
+            dateLabel: date instanceof Date && !Number.isNaN(date.getTime()) ? formatDateShort(date) : '—',
+            typeLabel,
+            absQty,
+            price,
+            baseAmount,
+            amountLabel,
+            pnlValue,
+            pnlPct,
+            pnlClass
+        });
     });
-    if(!rows){
-        transactionLotsContainer.innerHTML = '<div class="pos">No transactions recorded yet.</div>';
+
+    if(!processed.length){
+        listElement.innerHTML = '<div class="pos">No transactions recorded yet.</div>';
         return;
     }
-    transactionLotsContainer.innerHTML = '';
-    transactionLotsContainer.appendChild(fragment);
+
+    const sortComparators = {
+        date: (a, b)=> a.dateValue - b.dateValue,
+        qty: (a, b)=> a.absQty - b.absQty,
+        price: (a, b)=> a.price - b.price,
+        amount: (a, b)=> a.baseAmount - b.baseAmount,
+        pnl: (a, b)=> a.pnlValue - b.pnlValue
+    };
+
+    const comparator = sortComparators[transactionLotsSortField] || sortComparators.date;
+    const sorted = processed.slice().sort((a, b)=>{
+        const result = comparator(a, b);
+        return transactionLotsSortDirection === 'desc' ? -result : result;
+    });
+
+    const groups = [];
+    if(transactionLotsGroupKey === 'none'){
+        groups.push({ label: null, items: sorted });
+    }else{
+        const map = new Map();
+        sorted.forEach(item=>{
+            const key = getLotGroupKey(item);
+            if(!map.has(key)){
+                map.set(key, []);
+            }
+            map.get(key).push(item);
+        });
+        map.forEach((items, key)=>{
+            groups.push({ label: getLotGroupLabel(key), items });
+        });
+    }
+
+    listElement.innerHTML = '';
+    groups.forEach(group=>{
+        if(transactionLotsGroupKey !== 'none'){
+            const heading = document.createElement('div');
+            heading.className = 'lot-group-heading';
+            heading.textContent = group.label;
+            listElement.appendChild(heading);
+        }
+        group.items.forEach(item=>{
+            const pnlPercentDisplay = Number.isFinite(item.pnlPct) ? formatPercent(item.pnlPct) : '—';
+            const row = document.createElement('div');
+            row.className = 'lot-row';
+            row.innerHTML = `
+                <div><strong>${item.dateLabel}</strong></div>
+                <div>${item.typeLabel} · ${formatQty(item.absQty)}</div>
+                <div>Price ${money(item.price)}</div>
+                <div>${item.amountLabel} ${money(item.baseAmount)}</div>
+                <div class="lot-value ${item.pnlClass}">${money(item.pnlValue)} (${pnlPercentDisplay})</div>
+            `;
+            listElement.appendChild(row);
+        });
+    });
+
+    listElement.scrollTop = 0;
 }
 
 function renderTransactionMeta(position, summary){
