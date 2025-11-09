@@ -2011,6 +2011,27 @@ function createRealEstateRow(stat){
     metrics.innerHTML = rows.join('');
     row.appendChild(metrics);
 
+    const canOpenModal = stat.positionRef && Array.isArray(stat.positionRef.operations) && stat.positionRef.operations.some(op => Number(op.amount || 0));
+    if(canOpenModal){
+        row.classList.add('interactive-asset-row','realestate-row-interactive');
+        row.setAttribute('role','button');
+        row.setAttribute('tabindex','0');
+        row.addEventListener('click', event=>{
+            event.preventDefault();
+            event.stopPropagation();
+            lastTransactionTrigger = row;
+            openTransactionModal(stat.positionRef);
+        });
+        row.addEventListener('keydown', event=>{
+            if(event.key === 'Enter' || event.key === ' '){
+                event.preventDefault();
+                event.stopPropagation();
+                lastTransactionTrigger = row;
+                openTransactionModal(stat.positionRef);
+            }
+        });
+    }
+
     return row;
 }
 
