@@ -655,11 +655,11 @@ h1 {
 
 #net-worth-card {
     position: relative;
-    padding-right: 70px;
+    padding: 72px 22px 22px;
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 12px;
+    gap: 16px;
 }
 
 #net-worth-card .networth-controls {
@@ -680,7 +680,7 @@ h1 {
 }
 
 #net-worth-card.bubble-mode {
-    padding: 28px 28px 32px;
+    padding: 80px 28px 32px;
     gap: 0;
     justify-content: center;
     align-items: stretch;
@@ -1892,11 +1892,11 @@ body.light-theme .networth-note.unavailable {
 }
 
 body.light-theme #net-worth-card {
-    padding-right: 70px;
+    padding: 72px 22px 22px;
 }
 
 body.light-theme #net-worth-card.bubble-mode {
-    padding: 28px 28px 32px;
+    padding: 80px 28px 32px;
 }
 
 body.light-theme .networth-view-toggle {
