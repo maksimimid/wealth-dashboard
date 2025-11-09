@@ -405,13 +405,19 @@ body::before {
 }
 
 .lots-controls select {
-    background: transparent;
-    border: none;
-    color: inherit;
-    font-size: 0.85rem;
     appearance: none;
-    padding: 2px 4px;
     cursor: pointer;
+    font-size: 0.85rem;
+    color: #e2e8f0;
+    background-color: rgba(30, 41, 59, 0.55);
+    border: 1px solid rgba(148, 163, 184, 0.4);
+    border-radius: 999px;
+    padding: 4px 26px 4px 12px;
+    line-height: 1.2;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%23e2e8f0' d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    background-size: 10px 6px;
 }
 
 .lots-controls select:focus-visible {
@@ -2058,7 +2064,10 @@ body.light-theme .lots-control span {
     color: #475569;
 }
 body.light-theme .lots-controls select {
-    color: #1e293b;
+    color: #1f2937;
+    background-color: rgba(226, 232, 240, 0.9);
+    border-color: rgba(148, 163, 184, 0.45);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%231f2937' d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
 }
 body.light-theme .lot-group-heading {
     color: #64748b;
