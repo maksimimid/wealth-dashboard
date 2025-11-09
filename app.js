@@ -2828,14 +2828,9 @@ function createOpenPositionRow(position, totalCategoryValue){
     const share = totalCategoryValue ? (marketValue / totalCategoryValue) * 100 : null;
     const reinvestedQty = Math.max(0, Number(position.reinvested || 0));
     const reinvestPrice = Math.abs(price) > 1e-9 ? price : fallbackPrice;
-    const reinvestedValue = reinvestedQty > 1e-6 && Math.abs(reinvestPrice) > 1e-9
-        ? reinvestPrice * reinvestedQty
-        : 0;
-    const reinvestedDisplay = reinvestedQty > 1e-6
-        ? (Math.abs(reinvestPrice) > 1e-9
-            ? `${money(reinvestedValue)} (${formatQty(reinvestedQty)} units)`
-            : `${formatQty(reinvestedQty)} units`)
-        : null;
+    const hasReinvestValue = reinvestedQty > 1e-6 && Math.abs(reinvestPrice) > 1e-9;
+    const reinvestedValue = hasReinvestValue ? reinvestPrice * reinvestedQty : 0;
+    const reinvestedDisplay = hasReinvestValue ? money(reinvestedValue) : null;
     const shareText = Number.isFinite(share) ? `${share.toFixed(1)}%` : '—';
     const main = document.createElement('div');
     main.className = 'analytics-main';
@@ -2933,14 +2928,9 @@ function createClosedPositionRow(position){
     const price = Number.isFinite(prioritizedPrice) ? prioritizedPrice : fallbackPrice;
     const reinvestedQty = Math.max(0, Number(position.reinvested || 0));
     const reinvestPrice = Math.abs(price) > 1e-9 ? price : fallbackPrice;
-    const reinvestedValue = reinvestedQty > 1e-6 && Math.abs(reinvestPrice) > 1e-9
-        ? reinvestPrice * reinvestedQty
-        : 0;
-    const reinvestedDisplay = reinvestedQty > 1e-6
-        ? (Math.abs(reinvestPrice) > 1e-9
-            ? `${money(reinvestedValue)} (${formatQty(reinvestedQty)} units)`
-            : `${formatQty(reinvestedQty)} units`)
-        : null;
+    const hasReinvestValue = reinvestedQty > 1e-6 && Math.abs(reinvestPrice) > 1e-9;
+    const reinvestedValue = hasReinvestValue ? reinvestPrice * reinvestedQty : 0;
+    const reinvestedDisplay = hasReinvestValue ? money(reinvestedValue) : null;
     const main = document.createElement('div');
     main.className = 'analytics-main';
     const iconEl = createAssetIconElement(position);
