@@ -3280,31 +3280,6 @@ function getNetWorthKey(position){
     return 'other';
 }
 
-function updateNetWorthBreakdown(categoryMap){
-    const container = document.getElementById('networth-breakdown');
-    if(!container) return;
-    container.innerHTML = '';
-    const entries = Object.entries(categoryMap || {}).filter(([, value])=> Math.abs(value) > 1e-2).sort((a,b)=> b[1] - a[1]);
-    if(!entries.length){
-        const empty = document.createElement('div');
-        empty.className = 'pos';
-        empty.textContent = 'Awaiting holdings data…';
-        container.appendChild(empty);
-        return;
-    }
-    entries.forEach(([key, value])=>{
-        const item = document.createElement('div');
-        item.className = 'networth-sub';
-        const labelKey = key || 'other';
-        const label = NET_WORTH_LABEL_MAP[labelKey] || labelKey.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, letter=>letter.toUpperCase());
-        item.innerHTML = `
-            <span class="networth-sub-label">${label}</span>
-            <span class="networth-sub-value">${money(value)}</span>
-        `;
-        container.appendChild(item);
-    });
-}
-
 function computeNetWorthTimeline(totalValue){
     const MS_PER_DAY = 24 * 60 * 60 * 1000;
     const operations = positions.flatMap(position => Array.isArray(position.operations) ? position.operations : []);
@@ -4540,7 +4515,6 @@ function updateKpis(){
     setCategoryPnl('pnl-category-crypto', currentCategoryRangeTotals.crypto || 0, 'pnlCrypto');
     setCategoryPnl('pnl-category-stock', currentCategoryRangeTotals.stock || 0, 'pnlStock');
     setCategoryPnl('pnl-category-realestate', currentCategoryRangeTotals.realEstate || 0, 'pnlRealEstate');
-    updateNetWorthBreakdown(netWorthTotals);
     if(netWorthInlineViewMode === 'bubble'){
         const snapshotHasData = netWorthBubbleSnapshot && Object.keys(netWorthBubbleSnapshot).length > 0;
         const currentHasData = lastNetWorthTotals && Object.keys(lastNetWorthTotals).length > 0;

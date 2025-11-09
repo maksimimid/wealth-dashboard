@@ -669,8 +669,7 @@ h1 {
 #net-worth-card.bubble-mode .label,
 #net-worth-card.bubble-mode .big,
 #net-worth-card.bubble-mode .networth-note,
-#net-worth-card.bubble-mode .networth-chart,
-#net-worth-card.bubble-mode .networth-breakdown {
+#net-worth-card.bubble-mode .networth-chart {
     display: none;
 }
 
@@ -856,14 +855,6 @@ h1 {
 .pnl-sub-value {
     font-weight: 600;
     font-size: 1rem;
-}
-
-.networth-breakdown {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    gap: 12px;
-    width: 100%;
-    margin-top: 12px;
 }
 
 .networth-chart {
