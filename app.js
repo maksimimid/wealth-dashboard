@@ -55,6 +55,8 @@ const RANGE_LABELS = PNL_RANGE_CONFIG.reduce((acc, item)=>{
 let pnlRange = 'ALL';
 let pnlRangeTabsContainer = null;
 const pnlRangeButtons = new Map();
+let pnlCardLabelElement = null;
+let pnlCardLabelBase = 'Total P&L';
 const previousKpiValues = { totalPnl: null, netWorth: null, netContribution: null, cashAvailable: null, pnlCrypto: null, pnlStock: null, pnlRealEstate: null };
 const previousBestPerformer = { id: null, pnl: null, change: null };
 let assetYearSeries = { labels: [], datasets: [] };
@@ -300,6 +302,13 @@ function applyRangeButtons(activeRange){
     if(pnlRangeTabsContainer){
         pnlRangeTabsContainer.setAttribute('data-active-range', activeRange);
     }
+    if(pnlCardLabelElement){
+        const config = PNL_RANGE_CONFIG.find(item => item.key === activeRange);
+        const nextLabel = activeRange === 'ALL'
+            ? pnlCardLabelBase
+            : (config?.label || pnlCardLabelBase);
+        pnlCardLabelElement.textContent = nextLabel;
+    }
 }
 
 function initializePnlRangeTabs(){
@@ -307,6 +316,12 @@ function initializePnlRangeTabs(){
     pnlRangeTabsContainer = document.getElementById('pnl-range-tabs');
     pnlRangeButtons.clear();
     if(!pnlRangeTabsContainer) return;
+    if(!pnlCardLabelElement){
+        pnlCardLabelElement = document.querySelector('#pnl-card .label');
+        if(pnlCardLabelElement){
+            pnlCardLabelBase = pnlCardLabelElement.textContent || pnlCardLabelBase;
+        }
+    }
     const buttons = pnlRangeTabsContainer.querySelectorAll('[data-pnl-range]');
     buttons.forEach(button=>{
         const range = button.dataset.pnlRange;
@@ -829,7 +844,7 @@ async function ensureRangeReference(position, range){
     const now = Math.floor(Date.now()/1000);
     const lookback = RANGE_LOOKBACK[range] ?? 0;
     const from = now - lookback - 3600; // pad an hour to ensure candle availability
-    const endpoint = position.finnhubSymbol.includes(':') ? 'crypto/candle' : 'stock/candle';
+    const endpoint = isCryptoFinnhubSymbol(position.finnhubSymbol, position.type) ? 'crypto/candle' : 'stock/candle';
     const url = `${FINNHUB_REST}/${endpoint}?symbol=${encodeURIComponent(position.finnhubSymbol)}&resolution=D&from=${from}&to=${now}&token=${FINNHUB_KEY}`;
     try{
         const res = await fetch(url);
@@ -957,7 +972,7 @@ function mapFinnhubSymbol(asset, category, isOverride = false){
     const cat = (category||'').toLowerCase();
     const cleaned = String(asset).trim().toUpperCase();
     const overrides = {
-        ISAC: 'NASDAQ:ISAC'
+        ISAC: 'ISAC'
     };
     if(overrides[cleaned]) return overrides[cleaned];
     if(cat==='cash') return null;
@@ -2393,7 +2408,7 @@ async function fetchFinnhubSeries(position, rawSymbol, firstPurchaseTime){
             fromMs = Math.max(fromMs, firstPurchaseTime - marginMs);
         }
         const fromSec = Math.floor(fromMs / 1000);
-        const endpoint = (/crypto/i.test(position.type || '') || rawSymbol.includes(':')) ? 'crypto/candle' : 'stock/candle';
+        const endpoint = isCryptoFinnhubSymbol(rawSymbol, position.type) ? 'crypto/candle' : 'stock/candle';
         const url = `${FINNHUB_REST}/${endpoint}?symbol=${encodeURIComponent(rawSymbol)}&resolution=D&from=${fromSec}&to=${nowSec}&token=${FINNHUB_KEY}`;
         const response = await fetch(url);
         if(!response.ok) return [];
