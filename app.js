@@ -35,9 +35,26 @@ let currentRangeTotalPnl = 0;
 let currentCategoryRangeTotals = { crypto: 0, stock: 0, realEstate: 0, other: 0 };
 let rangeDirty = true;
 const referencePriceCache = new Map();
-const RANGE_LOOKBACK = {};
-const RANGE_LABELS = { 'ALL': 'All Time' };
+const PNL_RANGE_CONFIG = [
+    { key: '1D', label: 'Daily PNL' },
+    { key: '1W', label: 'Weekly PNL' },
+    { key: '1M', label: 'Monthly PNL' },
+    { key: '1Y', label: 'Yearly PNL' },
+    { key: 'ALL', label: 'All' }
+];
+const RANGE_LOOKBACK = {
+    '1D': 24 * 60 * 60,
+    '1W': 7 * 24 * 60 * 60,
+    '1M': 30 * 24 * 60 * 60,
+    '1Y': 365 * 24 * 60 * 60
+};
+const RANGE_LABELS = PNL_RANGE_CONFIG.reduce((acc, item)=>{
+    acc[item.key] = item.label;
+    return acc;
+}, {});
 let pnlRange = 'ALL';
+let pnlRangeTabsContainer = null;
+const pnlRangeButtons = new Map();
 const previousKpiValues = { totalPnl: null, netWorth: null, netContribution: null, cashAvailable: null, pnlCrypto: null, pnlStock: null, pnlRealEstate: null };
 const previousBestPerformer = { id: null, pnl: null, change: null };
 let assetYearSeries = { labels: [], datasets: [] };
@@ -259,7 +276,41 @@ const MINDMAP_LABEL_OVERRIDES = {
     unclassified: 'Other'
 };
 
-function applyRangeButtons(){ /* no-op */ }
+function applyRangeButtons(activeRange){
+    if(!pnlRangeButtons.size) return;
+    pnlRangeButtons.forEach((button, range)=>{
+        const isActive = range === activeRange;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        button.setAttribute('tabindex', isActive ? '0' : '-1');
+    });
+    if(pnlRangeTabsContainer){
+        pnlRangeTabsContainer.setAttribute('data-active-range', activeRange);
+    }
+}
+
+function initializePnlRangeTabs(){
+    if(typeof document === 'undefined') return;
+    pnlRangeTabsContainer = document.getElementById('pnl-range-tabs');
+    pnlRangeButtons.clear();
+    if(!pnlRangeTabsContainer) return;
+    const buttons = pnlRangeTabsContainer.querySelectorAll('[data-pnl-range]');
+    buttons.forEach(button=>{
+        const range = button.dataset.pnlRange;
+        if(!range) return;
+        pnlRangeButtons.set(range, button);
+        button.addEventListener('click', ()=>{
+            setPnlRange(range);
+        });
+    });
+    if(!pnlRangeButtons.has(pnlRange) && pnlRangeButtons.size){
+        const first = pnlRangeButtons.keys().next().value;
+        if(first){
+            pnlRange = first;
+        }
+    }
+    applyRangeButtons(pnlRange);
+}
 
 function setLoadingState(state, message){
     if(!loadingOverlay) return;
@@ -807,18 +858,25 @@ function recomputeRangeMetrics(range){
         const prevRange = position.rangePnl ?? null;
         const unrealized = (price - base) * qty;
         const realized = Number(position.realized || 0);
-        let pnl = unrealized + realized;
+        const reinvestedQty = Math.max(0, Number(position.reinvested || 0));
+        const reinvestBasePrice = Math.abs(price) > 1e-9 ? price : base;
+        const reinvestedValue = (reinvestedQty > 1e-6 && Math.abs(reinvestBasePrice) > 1e-9) ? reinvestBasePrice * reinvestedQty : 0;
+        let pnl = unrealized + realized + reinvestedValue;
         const typeKey = (position.type || '').toLowerCase();
         if(typeKey === 'real estate'){
             const rentPnl = position.rentRealized || 0;
             pnl = rentPnl;
             categoryTotals.realEstate += rentPnl;
+            position.rangeReinvestedValue = 0;
         }else if(typeKey === 'crypto'){
             categoryTotals.crypto += pnl;
+            position.rangeReinvestedValue = reinvestedValue;
         }else if(typeKey === 'stock'){
             categoryTotals.stock += pnl;
+            position.rangeReinvestedValue = reinvestedValue;
         }else{
             categoryTotals.other += pnl;
+            position.rangeReinvestedValue = reinvestedValue;
         }
         position.rangePnl = pnl;
         const baseValue = base * qty;
@@ -826,6 +884,7 @@ function recomputeRangeMetrics(range){
         if(typeKey === 'real estate'){
             denominator = Math.abs(position.invested) || Math.abs(pnl) || 1;
         }
+        position.rangeBaseDenominator = denominator;
         position.rangeChangePct = denominator ? (pnl / denominator) * 100 : 0;
         if(prevRange !== null){
             position.rangeDirection = pnl > prevRange ? 'up' : pnl < prevRange ? 'down' : null;
@@ -840,13 +899,14 @@ function recomputeRangeMetrics(range){
 }
 
 async function setPnlRange(range){
-    if(isRangeUpdateInFlight || range === pnlRange) return;
+    const normalized = PNL_RANGE_CONFIG.some(item=> item.key === range) ? range : 'ALL';
+    if(isRangeUpdateInFlight || normalized === pnlRange) return;
     isRangeUpdateInFlight = true;
     try{
-        pnlRange = range;
-        applyRangeButtons(range);
-        if(range !== 'ALL'){
-            const tasks = positions.map(position => ensureRangeReference(position, range));
+        pnlRange = normalized;
+        applyRangeButtons(pnlRange);
+        if(pnlRange !== 'ALL'){
+            const tasks = positions.map(position => ensureRangeReference(position, pnlRange));
             await Promise.all(tasks);
         }
         rangeDirty = true;
@@ -1083,7 +1143,20 @@ function recomputePositionMetrics(position){
     position.avgPrice = qty !== 0 ? costBasis / qty : fallbackPrice;
     position.marketValue = marketValue;
     position.unrealized = marketValue - costBasis;
-    position.pnl = position.unrealized + realized;
+    const priceCandidates = [
+        position.displayPrice,
+        position.currentPrice,
+        position.lastKnownPrice,
+        position.lastPurchasePrice,
+        position.avgPrice,
+        fallbackPrice
+    ].map(value=> Number(value)).filter(value=> Number.isFinite(value));
+    const prioritizedPrice = priceCandidates.find(value => Math.abs(value) > 1e-9);
+    const effectivePrice = Number.isFinite(prioritizedPrice) ? prioritizedPrice : 0;
+    const reinvestedQty = Math.max(0, Number(position.reinvested || 0));
+    const reinvestedValue = (reinvestedQty > 1e-6 && Math.abs(effectivePrice) > 1e-9) ? reinvestedQty * effectivePrice : 0;
+    position.reinvestedValue = reinvestedValue;
+    position.pnl = position.unrealized + realized + reinvestedValue;
     position.totalReturn = position.pnl;
     if(prevMarketValue !== null){
         position.marketDirection = marketValue > prevMarketValue ? 'up' : marketValue < prevMarketValue ? 'down' : null;
@@ -1102,6 +1175,7 @@ function recomputePositionMetrics(position){
         position.totalReturn = rentPnl;
         position.prevMarketValue = propertyValue;
         position.displayPrice = propertyValue;
+        position.reinvestedValue = 0;
     }
     return position;
 }
@@ -2808,7 +2882,7 @@ function renderTransactionLots(position, data){
     const currentPrice = Number(position.displayPrice || position.currentPrice || position.lastKnownPrice || position.avgPrice || 0);
     const processed = [];
     operations.forEach((op, index)=>{
-        if(op.skipInCharts) return;
+        if(op.skipInCharts || op.isReinvesting) return;
         const qtySigned = Number(op.amount || 0);
         if(!qtySigned) return;
         const absQty = Math.abs(qtySigned);
@@ -3068,7 +3142,7 @@ function createOpenPositionRow(position, totalCategoryValue){
     const reinvestPrice = Math.abs(price) > 1e-9 ? price : fallbackPrice;
     const hasReinvestValue = reinvestedQty > 1e-6 && Math.abs(reinvestPrice) > 1e-9;
     const reinvestedValue = hasReinvestValue ? reinvestPrice * reinvestedQty : 0;
-    const reinvestedDisplay = hasReinvestValue ? money(reinvestedValue) : null;
+    const displayPnlValue = pnlValue + reinvestedValue;
     const shareText = Number.isFinite(share) ? `${share.toFixed(1)}%` : '—';
     const main = document.createElement('div');
     main.className = 'analytics-main';
@@ -3102,21 +3176,25 @@ function createOpenPositionRow(position, totalCategoryValue){
     marketEl.className = 'value-strong';
     marketEl.textContent = money(marketValue);
     const pnlEl = document.createElement('div');
-    pnlEl.className = pnlValue >= 0 ? 'delta-positive' : 'delta-negative';
-    const pnlPercent = Number(position.rangeChangePct);
-    pnlEl.textContent = formatMoneyWithPercent(pnlValue, Number.isFinite(pnlPercent) ? pnlPercent : null, 1);
+    pnlEl.className = displayPnlValue >= 0 ? 'delta-positive' : 'delta-negative';
+    const denominator = Number(position.rangeBaseDenominator);
+    const basePercent = Number(position.rangeChangePct);
+    const effectivePercent = Number.isFinite(denominator) && Math.abs(denominator) > 1e-6
+        ? (displayPnlValue / denominator) * 100
+        : (Number.isFinite(basePercent) ? basePercent : null);
+    pnlEl.textContent = formatMoneyWithPercent(displayPnlValue, Number.isFinite(effectivePercent) ? effectivePercent : null, 1);
+    if(showPnlPercentages && hasReinvestValue){
+        const reinvestSpan = document.createElement('span');
+        reinvestSpan.className = 'reinvested-note';
+        reinvestSpan.textContent = ` · Reinvested ${money(reinvestedValue)}`;
+        pnlEl.appendChild(reinvestSpan);
+    }
     const shareEl = document.createElement('div');
     shareEl.className = 'muted';
     shareEl.textContent = `Category ${shareText}`;
     values.appendChild(marketEl);
     values.appendChild(pnlEl);
     values.appendChild(shareEl);
-    if(reinvestedDisplay){
-        const reinvestEl = document.createElement('div');
-        reinvestEl.className = 'reinvested-chip';
-        reinvestEl.textContent = `Reinvested ${reinvestedDisplay}`;
-        values.appendChild(reinvestEl);
-    }
     row.appendChild(values);
 
     const plateImage = getAssetPlateImage(position);
@@ -3165,7 +3243,7 @@ function createClosedPositionRow(position){
     const reinvestPrice = Math.abs(price) > 1e-9 ? price : fallbackPrice;
     const hasReinvestValue = reinvestedQty > 1e-6 && Math.abs(reinvestPrice) > 1e-9;
     const reinvestedValue = hasReinvestValue ? reinvestPrice * reinvestedQty : 0;
-    const reinvestedDisplay = hasReinvestValue ? money(reinvestedValue) : null;
+    const displayRealized = realized + reinvestedValue;
     const main = document.createElement('div');
     main.className = 'analytics-main';
     const iconEl = createAssetIconElement(position);
@@ -3192,19 +3270,24 @@ function createClosedPositionRow(position){
     const values = document.createElement('div');
     values.className = 'analytics-values';
     const pnlEl = document.createElement('div');
-    pnlEl.className = realized >= 0 ? 'delta-positive' : 'delta-negative';
-    pnlEl.textContent = formatMoneyWithPercent(realized, Number.isFinite(realizedPercent) ? realizedPercent : null, 1);
+    pnlEl.className = displayRealized >= 0 ? 'delta-positive' : 'delta-negative';
+    const denominator = Number(position.rangeBaseDenominator);
+    const basePercent = Number(position.rangeChangePct);
+    const effectivePercent = Number.isFinite(denominator) && Math.abs(denominator) > 1e-6
+        ? (displayRealized / denominator) * 100
+        : (Number.isFinite(realizedPercent) ? realizedPercent : null);
+    pnlEl.textContent = formatMoneyWithPercent(displayRealized, Number.isFinite(effectivePercent) ? effectivePercent : null, 1);
+    if(showPnlPercentages && hasReinvestValue){
+        const reinvestSpan = document.createElement('span');
+        reinvestSpan.className = 'reinvested-note';
+        reinvestSpan.textContent = ` · Reinvested ${money(reinvestedValue)}`;
+        pnlEl.appendChild(reinvestSpan);
+    }
     const statusEl = document.createElement('div');
     statusEl.className = 'muted';
     statusEl.textContent = 'Position closed';
     values.appendChild(pnlEl);
     values.appendChild(statusEl);
-    if(reinvestedDisplay){
-        const reinvestEl = document.createElement('div');
-        reinvestEl.className = 'reinvested-chip';
-        reinvestEl.textContent = `Reinvested ${reinvestedDisplay}`;
-        values.appendChild(reinvestEl);
-    }
     row.appendChild(values);
 
     const plateImage = getAssetPlateImage(position);
@@ -4756,6 +4839,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
     }
     ensureTransactionModalElements();
     ensureNetWorthDetailModalElements();
+    initializePnlRangeTabs();
     document.addEventListener('keydown', event => {
         if(event.key === 'Escape'){
             let handled = false;
