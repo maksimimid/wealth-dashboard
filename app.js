@@ -276,6 +276,19 @@ const MINDMAP_LABEL_OVERRIDES = {
     unclassified: 'Other'
 };
 
+const CRYPTO_FH_PREFIXES = [
+    'BINANCE:',
+    'COINBASE:',
+    'KRAKEN:',
+    'GEMINI:',
+    'BITFINEX:',
+    'BITSTAMP:',
+    'HUOBI:',
+    'OKX:',
+    'POLONIEX:',
+    'BYBIT:'
+];
+
 function applyRangeButtons(activeRange){
     if(!pnlRangeButtons.size) return;
     pnlRangeButtons.forEach((button, range)=>{
@@ -956,6 +969,18 @@ function mapFinnhubSymbol(asset, category, isOverride = false){
     if(cleaned.includes(':')) return cleaned;
     if(/[A-Z0-9]{1,5}/.test(cleaned) && !cleaned.includes(' ')) return cleaned;
     return null;
+}
+
+function isCryptoFinnhubSymbol(symbol, type){
+    if(!symbol){
+        return String(type || '').toLowerCase() === 'crypto';
+    }
+    const typeKey = String(type || '').toLowerCase();
+    if(typeKey === 'crypto'){
+        return true;
+    }
+    const upper = String(symbol).toUpperCase();
+    return CRYPTO_FH_PREFIXES.some(prefix => upper.startsWith(prefix));
 }
 
 function mapYahooSymbol(position){
