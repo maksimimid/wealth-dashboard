@@ -972,7 +972,7 @@ function mapFinnhubSymbol(asset, category, isOverride = false){
     const cat = (category||'').toLowerCase();
     const cleaned = String(asset).trim().toUpperCase();
     const overrides = {
-        ISAC: 'ISAC'
+        ISAC: 'NASDAQ:ISAC'
     };
     if(overrides[cleaned]) return overrides[cleaned];
     if(cat==='cash') return null;
