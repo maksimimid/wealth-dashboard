@@ -365,6 +365,47 @@ function reportLoading(message){
     setStatus(message);
 }
 
+const CORS_PROXY_PREFIXES = ['https://r.jina.ai/'];
+
+async function fetchJsonWithCorsFallback(url, options){
+    const attempts = [url];
+    if(typeof window !== 'undefined'){
+        CORS_PROXY_PREFIXES.forEach(prefix=>{
+            const proxied = `${prefix}${url}`;
+            if(!attempts.includes(proxied)){
+                attempts.push(proxied);
+            }
+        });
+    }
+    for(const target of attempts){
+        try{
+            const response = await fetch(target, options);
+            if(!response.ok){
+                continue;
+            }
+            const contentType = response.headers?.get?.('content-type') || '';
+            const text = await response.text();
+            if(!text){
+                continue;
+            }
+            const trimmed = text.trim();
+            if(!trimmed){
+                continue;
+            }
+            if(contentType.includes('application/json') || trimmed.startsWith('{') || trimmed.startsWith('[')){
+                try{
+                    return JSON.parse(trimmed);
+                }catch(parseError){
+                    console.warn('Failed to parse JSON for', target, parseError);
+                }
+            }
+        }catch(error){
+            console.warn('fetchJsonWithCorsFallback error', target, error);
+        }
+    }
+    return null;
+}
+
 // ----------------- UTIL ---------------------
 function money(v){
     if(v===null || v===undefined || Number.isNaN(Number(v))) return '—';
@@ -2522,9 +2563,7 @@ async function fetchYahooQuote(symbol){
     }
     const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbol)}`;
     try{
-        const response = await fetch(url);
-        if(!response.ok) return null;
-        const json = await response.json();
+        const json = await fetchJsonWithCorsFallback(url);
         const quote = json?.quoteResponse?.result?.[0];
         if(!quote) return null;
         const price = Number(quote.regularMarketPrice ?? quote.postMarketPrice ?? quote.preMarketPrice);
