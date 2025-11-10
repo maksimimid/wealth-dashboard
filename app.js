@@ -27,7 +27,7 @@ let charts = {};
 let ws;
 let lastUpdated = null;
 let operationsMeta = {count: 0, fetchedAt: null};
-const UI_REFRESH_INTERVAL = 5000;
+const UI_REFRESH_INTERVAL = 10000;
 const CRYPTO_UI_INTERVAL = 10000;
 let lastRenderAt = 0;
 let scheduledRender = null;
@@ -38,7 +38,7 @@ const referencePriceCache = new Map();
 const RANGE_LOOKBACK = {};
 const RANGE_LABELS = { 'ALL': 'All Time' };
 let pnlRange = 'ALL';
-const previousKpiValues = { totalPnl: null, netWorth: null, cashAvailable: null, pnlCrypto: null, pnlStock: null, pnlRealEstate: null };
+const previousKpiValues = { totalPnl: null, netWorth: null, netContribution: null, cashAvailable: null, pnlCrypto: null, pnlStock: null, pnlRealEstate: null };
 const previousBestPerformer = { id: null, pnl: null, change: null };
 let assetYearSeries = { labels: [], datasets: [] };
 let assetYearSeriesDirty = true;
@@ -46,6 +46,45 @@ const assetColorCache = new Map();
 let realEstateRentSeries = { labels: [], datasets: [] };
 let realEstateRentSeriesDirty = true;
 const realEstateRentFilters = new Map();
+const realEstateGroupState = { active: true, passive: false };
+let transactionModal = null;
+let transactionModalTitle = null;
+let transactionModalSubtitle = null;
+let transactionModalMeta = null;
+let transactionModalCanvas = null;
+let transactionChart = null;
+let lastTransactionTrigger = null;
+let lastTransactionData = null;
+let lastTransactionPosition = null;
+let modalChartContainer = null;
+let transactionLotsContainer = null;
+let transactionLotsControls = null;
+let transactionLotsList = null;
+let transactionLotsSortSelect = null;
+let transactionLotsDirectionSelect = null;
+let transactionLotsGroupSelect = null;
+let transactionLotsSortField = 'date';
+let transactionLotsSortDirection = 'desc';
+let transactionLotsGroupKey = 'none';
+let viewLotsButton = null;
+let assetViewToggleButton = null;
+let assetViewMode = 'rows';
+let currentModalView = 'chart';
+const VIEW_MODE_STORAGE_KEY = 'assetViewMode';
+const MARKET_TIME_ZONE = 'America/New_York';
+const MARKET_OPEN_MINUTES = 9 * 60 + 30;
+const MARKET_CLOSE_MINUTES = 16 * 60;
+const MARKET_STATUS_INTERVAL = 60 * 1000;
+const NET_WORTH_LABEL_MAP = {
+    crypto: 'Crypto',
+    stock: 'Stocks',
+    realestate: 'Real Estate',
+    automobile: 'Automobile',
+    cash: 'Cash',
+    other: 'Other',
+    unclassified: 'Unclassified'
+};
+const WEEKDAY_NAME_TO_INDEX = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
 const previousCategorySummaries = {
     crypto: { market: null, pnl: null, allocation: null },
     stock: { market: null, pnl: null, allocation: null }
@@ -53,6 +92,62 @@ const previousCategorySummaries = {
 const categorySectionState = {
     crypto: { open: true, closed: false },
     stock: { open: true, closed: false }
+};
+let marketStatusTimer = null;
+let marketStatusVisibilityBound = false;
+let netWorthSparklineChart = null;
+const SPARKLINE_ACTUAL_STEP_DAYS = 7;
+const SPARKLINE_PROJECTED_STEP_DAYS = 14;
+const SPARKLINE_ACTUAL_SMOOTHING = 0.24;
+const SPARKLINE_PROJECTED_SMOOTHING = 0.32;
+let pnlPercentageToggleButton = null;
+let showPnlPercentages = false;
+const PNL_PERCENTAGE_STORAGE_KEY = 'showPnlPercentages';
+const MILLION_TARGET = 1_000_000;
+let netWorthBubbleToggleButton = null;
+let netWorthInlineViewMode = 'chart';
+const NET_WORTH_INLINE_VIEW_STORAGE_KEY = 'netWorthInlineViewMode';
+let lastNetWorthTotals = {};
+let lastNetWorthTotalValue = 0;
+let lastMindmapRenderHash = null;
+let lastMindmapDimensions = { width: 0, height: 0 };
+let netWorthSparklineCanvas = null;
+let lastNetWorthTimeline = null;
+let netWorthDetailModal = null;
+let netWorthDetailCanvas = null;
+let netWorthDetailChart = null;
+let netWorthBubbleNeedsRender = false;
+let netWorthBubbleSnapshot = null;
+let netWorthBubbleSnapshotTotal = 0;
+let netWorthDetailSubtitle = null;
+let netWorthDetailMeta = null;
+const sparklineCrosshairPlugin = {
+    id: 'sparklineCrosshair',
+    afterDraw(chart){
+        const tooltip = chart?.tooltip;
+        if(!tooltip || tooltip.opacity === 0){
+            return;
+        }
+        const dataPoint = tooltip.dataPoints && tooltip.dataPoints[0];
+        if(!dataPoint || !dataPoint.element){
+            return;
+        }
+        const x = dataPoint.element.x;
+        if(typeof x !== 'number'){
+            return;
+        }
+        const { top, bottom } = chart.chartArea;
+        const ctx = chart.ctx;
+        ctx.save();
+        ctx.strokeStyle = 'rgba(148, 163, 184, 0.22)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 6]);
+        ctx.beginPath();
+        ctx.moveTo(x, top);
+        ctx.lineTo(x, bottom);
+        ctx.stroke();
+        ctx.restore();
+    }
 };
 let lastCryptoUiSync = 0;
 let pendingCryptoUiSync = null;
@@ -80,11 +175,89 @@ const CATEGORY_CONFIG = {
         emptyLabel: 'stock'
     }
 };
+const CRYPTO_ICON_PROVIDERS = [
+    symbol => `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/svg/color/${symbol}.svg`,
+    symbol => `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/svg/black/${symbol}.svg`,
+    symbol => `https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/svg/color/${symbol}.svg`
+];
+const assetIconSourceCache = new Map();
+const transactionPriceCache = new Map();
 let netContributionTotal = 0;
 let isRangeUpdateInFlight = false;
+const TRANSACTION_CHART_COLORS = {
+    buys: 'rgba(34, 197, 94, 0.85)',
+    buysBorder: 'rgba(16, 185, 129, 0.95)',
+    sells: 'rgba(248, 113, 113, 0.85)',
+    sellsBorder: 'rgba(248, 113, 113, 0.95)',
+    baseline: 'rgba(148, 163, 184, 0.55)',
+    priceLine: 'rgba(59, 130, 246, 0.8)'
+};
+const TRANSACTION_HISTORY_LOOKBACK_DAYS = 180;
 const FLASH_DURATION = 1500;
 const RENT_TAGS = ['rent', 'rental', 'lease', 'tenant', 'tenancy', 'airbnb', 'booking'];
 const EXPENSE_TAGS = ['expense', 'expenses', 'maintenance', 'repair', 'repairs', 'tax', 'taxes', 'property tax', 'property-tax', 'insurance', 'mortgage', 'mortgagepayment', 'hoa', 'hoa fees', 'utility', 'utilities', 'water', 'electric', 'electricity', 'gas', 'cleaning', 'management', 'interest', 'service', 'fee', 'fees'];
+const MINDMAP_MAIN_STYLE = {
+    background: 'radial-gradient(circle at 35% 30%, rgba(34, 197, 94, 0.9), rgba(6, 95, 70, 0.65))',
+    borderColor: 'rgba(52, 211, 153, 0.9)',
+    boxShadow: '0 0 32px rgba(16, 185, 129, 0.45), inset 0 0 28px rgba(5, 150, 105, 0.55)',
+    textColor: '#ecfdf5',
+    titleColor: '#bbf7d0',
+    lineColor: 'rgba(52, 211, 153, 0.5)'
+};
+const MINDMAP_COLOR_PALETTE = [
+    {
+        background: 'radial-gradient(circle at 32% 28%, rgba(59, 130, 246, 0.85), rgba(29, 78, 216, 0.55))',
+        borderColor: 'rgba(59, 130, 246, 0.95)',
+        boxShadow: '0 0 24px rgba(59, 130, 246, 0.35), inset 0 0 20px rgba(29, 78, 216, 0.45)',
+        textColor: '#f8fafc',
+        lineColor: 'rgba(59, 130, 246, 0.6)'
+    },
+    {
+        background: 'radial-gradient(circle at 30% 32%, rgba(129, 140, 248, 0.85), rgba(91, 33, 182, 0.55))',
+        borderColor: 'rgba(129, 140, 248, 0.9)',
+        boxShadow: '0 0 24px rgba(129, 140, 248, 0.35), inset 0 0 20px rgba(91, 33, 182, 0.45)',
+        textColor: '#eef2ff',
+        lineColor: 'rgba(99, 102, 241, 0.58)'
+    },
+    {
+        background: 'radial-gradient(circle at 30% 30%, rgba(251, 191, 36, 0.85), rgba(245, 158, 11, 0.6))',
+        borderColor: 'rgba(245, 158, 11, 0.85)',
+        boxShadow: '0 0 24px rgba(245, 158, 11, 0.4), inset 0 0 20px rgba(217, 119, 6, 0.45)',
+        textColor: '#0f172a',
+        lineColor: 'rgba(245, 158, 11, 0.58)'
+    },
+    {
+        background: 'radial-gradient(circle at 32% 32%, rgba(244, 114, 182, 0.85), rgba(190, 24, 93, 0.55))',
+        borderColor: 'rgba(244, 114, 182, 0.9)',
+        boxShadow: '0 0 24px rgba(244, 114, 182, 0.35), inset 0 0 20px rgba(190, 24, 93, 0.45)',
+        textColor: '#fdf2f8',
+        lineColor: 'rgba(236, 72, 153, 0.58)'
+    },
+    {
+        background: 'radial-gradient(circle at 30% 28%, rgba(45, 212, 191, 0.85), rgba(13, 148, 136, 0.55))',
+        borderColor: 'rgba(45, 212, 191, 0.9)',
+        boxShadow: '0 0 24px rgba(45, 212, 191, 0.35), inset 0 0 20px rgba(13, 148, 136, 0.45)',
+        textColor: '#ecfeff',
+        lineColor: 'rgba(20, 184, 166, 0.55)'
+    },
+    {
+        background: 'radial-gradient(circle at 30% 32%, rgba(165, 180, 252, 0.85), rgba(67, 56, 202, 0.55))',
+        borderColor: 'rgba(99, 102, 241, 0.9)',
+        boxShadow: '0 0 24px rgba(99, 102, 241, 0.35), inset 0 0 20px rgba(67, 56, 202, 0.45)',
+        textColor: '#eef2ff',
+        lineColor: 'rgba(99, 102, 241, 0.58)'
+    }
+];
+const MINDMAP_LABEL_OVERRIDES = {
+    automobile: 'Auto',
+    'real estate': 'Real Est',
+    realestate: 'Real Est',
+    stock: 'Stocks',
+    crypto: 'Crypto',
+    cash: 'Cash',
+    other: 'Other',
+    unclassified: 'Other'
+};
 
 function applyRangeButtons(){ /* no-op */ }
 
@@ -124,9 +297,22 @@ function pct(v){
     return `${num >= 0 ? '+' : ''}${num.toFixed(2)}%`;
 }
 
-function formatPercent(value){
+function formatPercent(value, digits = 1){
     if(value === null || value === undefined || !Number.isFinite(Number(value))) return '—';
-    return `${Number(value).toFixed(1)}%`;
+    const num = Number(value);
+    const sign = num > 0 ? '+' : '';
+    return `${sign}${num.toFixed(digits)}%`;
+}
+
+function formatMoneyWithPercent(amount, percent, digits = 1){
+    if(amount === null || amount === undefined || !Number.isFinite(Number(amount))){
+        return '—';
+    }
+    const numericAmount = Number(amount);
+    const base = money(numericAmount);
+    if(!showPnlPercentages) return base;
+    if(percent === null || percent === undefined || !Number.isFinite(Number(percent))) return base;
+    return `${base} (${formatPercent(percent, digits)})`;
 }
 
 function monthsBetween(start, end){
@@ -149,6 +335,11 @@ function formatDurationFromMonths(months){
     return parts.join(' ');
 }
 
+function formatDateShort(date){
+    if(!(date instanceof Date) || Number.isNaN(date.getTime())) return '—';
+    return date.toLocaleDateString(undefined,{year:'numeric', month:'short', day:'numeric'});
+}
+
 function formatQty(qty){
     if(qty===null || qty===undefined) return '—';
     const abs = Math.abs(qty);
@@ -156,6 +347,283 @@ function formatQty(qty){
     if(abs >= 100) return qty.toFixed(1);
     if(abs >= 10) return qty.toFixed(2);
     return qty.toFixed(4).replace(/0+$/,'').replace(/\.$/,'');
+}
+
+function formatCompactMoney(value){
+    if(value === null || value === undefined || !Number.isFinite(value)){
+        return '$0';
+    }
+    const sign = value < 0 ? '-' : '';
+    const abs = Math.abs(value);
+    const format = (num, suffix)=>{
+        const trimmed = Number.isInteger(num) ? num.toString() : num.toFixed(1).replace(/\.0$/, '');
+        return `${sign}$${trimmed}${suffix}`;
+    };
+    if(abs >= 1e12) return format(abs / 1e12, 't');
+    if(abs >= 1e9) return format(abs / 1e9, 'b');
+    if(abs >= 1e6) return format(abs / 1e6, 'm');
+    if(abs >= 1e3) return format(abs / 1e3, 'k');
+    return `${sign}$${Math.round(abs).toString()}`;
+}
+
+function deriveCryptoIconKey(position){
+    const candidates = [position.Symbol, position.finnhubSymbol, position.displayName, position.Name, position.id];
+    for(const value of candidates){
+        if(!value) continue;
+        let token = String(value).toUpperCase().trim();
+        if(!token) continue;
+        if(token.includes(':')){
+            const parts = token.split(':');
+            token = parts[parts.length - 1];
+        }
+        if(token.includes('/')){
+            token = token.split('/')[0];
+        }
+        const quoteSymbols = ['USDT','USD','USDC','BUSD','EUR','GBP','BTC','ETH','DAI','AUD','CAD','JPY','KRW','TRY','CHF','SGD','MXN'];
+        for(const quote of quoteSymbols){
+            if(token.endsWith(quote)){ token = token.slice(0, -quote.length); break; }
+        }
+        token = token.replace(/[^A-Z0-9]/g,'');
+        if(token.length >= 2 && token.length <= 10){
+            return token.toLowerCase();
+        }
+    }
+    return null;
+}
+
+function deriveStockIconKey(position){
+    const candidates = [position.Symbol, position.finnhubSymbol, position.displayName, position.Name, position.id];
+    for(const value of candidates){
+        if(!value) continue;
+        let token = String(value).trim().toUpperCase();
+        if(!token) continue;
+        if(token.includes(':')){
+            const parts = token.split(':');
+            token = parts[parts.length - 1];
+        }
+        token = token.replace(/[^A-Z0-9.-]/g, '');
+        if(token.length >= 1 && token.length <= 8){
+            return token;
+        }
+    }
+    return null;
+}
+
+function deriveAssetInitial(position){
+    if(!position) return '??';
+    const candidates = [position.displayName, position.Symbol, position.Name, position.id];
+    for(const value of candidates){
+        if(value === undefined || value === null) continue;
+        const raw = String(value).trim();
+        if(!raw) continue;
+        const wordParts = raw.split(/[^A-Za-z0-9]+/).filter(Boolean);
+        if(wordParts.length >= 2){
+            const first = wordParts[0].replace(/[^A-Za-z0-9]/g,'');
+            const second = wordParts[1].replace(/[^A-Za-z0-9]/g,'');
+            const combo = (first[0] || '') + (second[0] || '');
+            if(combo){
+                return combo.toUpperCase();
+            }
+        }
+        const cleaned = raw.replace(/[^A-Za-z0-9]/g,'');
+        if(cleaned.length){
+            const length = cleaned.length >= 2 ? 2 : 1;
+            return cleaned.slice(0, length).toUpperCase();
+        }
+    }
+    return '??';
+}
+
+function resolveAssetIcon(position){
+    if(!position) return null;
+    const typeKey = String(position.type || '').toLowerCase();
+    const overrides = {
+        GOOG: 'assets/tickers/goog.svg',
+        GOOGLE: 'assets/tickers/goog.svg',
+        ISAC: 'assets/tickers/isac.svg',
+        IBIT: 'assets/tickers/ibit.svg'
+    };
+    const rawSymbol = position.Symbol || position.id || position.displayName || '';
+    const symbolUpper = rawSymbol.toUpperCase();
+    if(symbolUpper){
+        const symbolCandidates = [
+            symbolUpper,
+            symbolUpper.includes('.') ? symbolUpper.split('.')[0] : null,
+            symbolUpper.includes(' ') ? symbolUpper.split(' ')[0] : null,
+            symbolUpper.replace(/[^A-Z0-9]/g, '')
+        ].filter(candidate => candidate && candidate.length);
+        const matchedKey = symbolCandidates.find(candidate => overrides[candidate]);
+        if(matchedKey){
+            const overridePath = overrides[matchedKey];
+            return { sources: [overridePath], alt: `${matchedKey} logo`, override: overridePath };
+        }
+    }
+    if(typeKey === 'real estate'){
+        return { sources: ['assets/real-estate.svg'], alt: 'Real estate asset' };
+    }
+    if(['car','vehicle','auto','automobile','transport','automotive'].includes(typeKey)){
+        return { sources: ['assets/car.svg'], alt: 'Vehicle asset' };
+    }
+    if(typeKey === 'crypto'){
+        const symbolKey = deriveCryptoIconKey(position);
+        if(symbolKey){
+            return {
+                sources: CRYPTO_ICON_PROVIDERS.map(provider => provider(symbolKey)),
+                alt: `${symbolKey.toUpperCase()} icon`
+            };
+        }
+    }
+    if(typeKey === 'stock'){
+        const stockKey = deriveStockIconKey(position);
+        if(stockKey){
+            const cleanSecondary = stockKey.toLowerCase().replace(/[^a-z0-9]/g,'');
+            const sources = [
+                `https://storage.googleapis.com/iex/api/logos/${encodeURIComponent(stockKey)}.svg`,
+                cleanSecondary ? `https://raw.githubusercontent.com/andreasbm/web-logos/master/logos/${cleanSecondary}.svg` : null
+            ].filter(Boolean);
+            if(sources.length){
+                return {
+                    sources,
+                    alt: `${stockKey} logo`
+                };
+            }
+        }
+    }
+    return null;
+}
+
+function getIconCacheKey(position){
+    if(!position) return null;
+    if(position.iconCacheKey) return position.iconCacheKey;
+    const candidates = [position.id, position.Symbol, position.displayName, position.Name];
+    const key = candidates.find(value => value !== undefined && value !== null && String(value).trim().length);
+    if(key !== undefined && key !== null){
+        const resolved = String(key).trim();
+        position.iconCacheKey = resolved;
+        return resolved;
+    }
+    return null;
+}
+
+function createAssetIconElement(position){
+    const wrapper = document.createElement('span');
+    wrapper.className = 'asset-icon-wrapper';
+    wrapper.setAttribute('aria-hidden','true');
+
+    const labelCandidates = [position?.displayName, position?.Symbol, position?.Name];
+    const tooltipLabel = labelCandidates.find(text => text !== undefined && text !== null && String(text).trim().length) || 'Asset';
+    wrapper.title = String(tooltipLabel).trim();
+
+    const fallbackInitial = deriveAssetInitial(position);
+    let img = null;
+
+    const applyFallback = ()=>{
+        if(img){
+            img.removeAttribute('src');
+            img.remove();
+            img = null;
+        }
+        if(wrapper.dataset.iconState === 'fallback'){
+            return wrapper;
+        }
+        wrapper.dataset.iconState = 'fallback';
+        wrapper.classList.add('asset-icon-fallback');
+        wrapper.innerHTML = '';
+        const textEl = document.createElement('span');
+        textEl.className = 'asset-icon-fallback-text';
+        textEl.textContent = fallbackInitial;
+        wrapper.appendChild(textEl);
+        return wrapper;
+    };
+
+    const icon = resolveAssetIcon(position);
+    if(icon && icon.override){
+        wrapper.dataset.plateOverride = icon.override;
+    }
+    if(!icon || !Array.isArray(icon.sources) || !icon.sources.length){
+        const cacheKeyFallback = getIconCacheKey(position);
+        if(cacheKeyFallback && !assetIconSourceCache.has(cacheKeyFallback)){
+            assetIconSourceCache.set(cacheKeyFallback, null);
+        }
+        return applyFallback();
+    }
+
+    img = document.createElement('img');
+    img.className = 'asset-icon';
+    img.alt = icon.alt || '';
+    img.loading = 'eager';
+    img.decoding = 'sync';
+    img.referrerPolicy = 'no-referrer';
+    img.width = 36;
+    img.height = 36;
+    const cacheKey = getIconCacheKey(position);
+    if(cacheKey && position.iconCacheKey !== cacheKey){
+        position.iconCacheKey = cacheKey;
+    }
+    if(icon.override && cacheKey && assetIconSourceCache.get(cacheKey) === null){
+        assetIconSourceCache.delete(cacheKey);
+    }
+    if(cacheKey && assetIconSourceCache.has(cacheKey)){
+        const cachedSource = assetIconSourceCache.get(cacheKey);
+        if(cachedSource){
+            img.src = cachedSource;
+            wrapper.appendChild(img);
+            wrapper.dataset.iconState = 'image';
+            wrapper.classList.remove('asset-icon-fallback');
+            return wrapper;
+        }
+        return applyFallback();
+    }
+
+    const sources = icon.sources.slice();
+    let index = 0;
+    const loadNextSource = ()=>{
+        if(index >= sources.length){
+            if(cacheKey){
+                assetIconSourceCache.set(cacheKey, null);
+            }
+            applyFallback();
+            return;
+        }
+        img.src = sources[index];
+        index += 1;
+    };
+
+    img.addEventListener('error', ()=>{
+        loadNextSource();
+    });
+
+    img.addEventListener('load', ()=>{
+        if(cacheKey && !assetIconSourceCache.has(cacheKey)){
+            const resolvedSrc = img.currentSrc || img.src;
+            if(resolvedSrc){
+                assetIconSourceCache.set(cacheKey, resolvedSrc);
+            }
+        }
+        wrapper.dataset.iconState = 'image';
+        wrapper.classList.remove('asset-icon-fallback');
+        wrapper.innerHTML = '';
+        wrapper.appendChild(img);
+    }, { once: true });
+
+    wrapper.appendChild(img);
+    loadNextSource();
+    return wrapper;
+}
+
+function getAssetPlateImage(position){
+    const cacheKey = getIconCacheKey(position);
+    if(cacheKey && assetIconSourceCache.has(cacheKey)){
+        const cached = assetIconSourceCache.get(cacheKey);
+        if(cached){
+            return cached;
+        }
+    }
+    const icon = resolveAssetIcon(position);
+    if(icon && Array.isArray(icon.sources) && icon.sources.length){
+        return icon.sources[0];
+    }
+    return null;
 }
 
 function ensurePositionDefaults(position){
@@ -169,10 +637,18 @@ function ensurePositionDefaults(position){
     if(position.rentRealized === undefined){
         position.rentRealized = 0;
     }
+    if(position.reinvested === undefined){
+        position.reinvested = 0;
+    }
 }
 
 function applyLivePrice(position, price){
-    if(price === undefined || price === null) return;
+    if(price === undefined || price === null || Number(price) === 0){
+        if(!position.priceStatus){
+            position.priceStatus = 'Price failed to update';
+        }
+        return;
+    }
     ensurePositionDefaults(position);
     const previous = position.displayPrice;
     if(previous !== undefined && previous !== null && price !== previous){
@@ -183,6 +659,7 @@ function applyLivePrice(position, price){
     position.displayPrice = price;
     position.currentPrice = price;
     position.lastPriceUpdate = Date.now();
+    position.priceStatus = null;
 }
 
 function flashElement(element, direction){
@@ -209,16 +686,31 @@ function setMoneyWithFlash(elementId, value, key){
 }
 
 function setCategoryPnl(elementId, value, key){
-    setMoneyWithFlash(elementId, value, key);
     const el = document.getElementById(elementId);
     if(!el) return;
     el.classList.remove('delta-positive','delta-negative');
-    const numeric = Number(value);
+    const numeric = Number(value || 0);
+    const totals = currentCategoryRangeTotals || {};
+    const grandTotal = Number(totals.crypto || 0) + Number(totals.stock || 0) + Number(totals.realEstate || 0);
+    const pct = grandTotal ? (numeric / grandTotal) * 100 : null;
+    el.textContent = formatMoneyWithPercent(numeric, pct, 1);
     if(numeric > 0){
         el.classList.add('delta-positive');
     }else if(numeric < 0){
         el.classList.add('delta-negative');
     }
+}
+
+function formatCategorySummaryPnl(amount, categoryMarketValue){
+    if(amount === null || amount === undefined || !Number.isFinite(Number(amount))){
+        return '—';
+    }
+    const numericAmount = Number(amount);
+    const denominator = Number(categoryMarketValue);
+    const percent = Number.isFinite(denominator) && Math.abs(denominator) > 1e-6
+        ? (numericAmount / denominator) * 100
+        : null;
+    return formatMoneyWithPercent(numericAmount, percent, 1);
 }
 
 function updateThemeToggleIcon(button, isLight){
@@ -369,7 +861,19 @@ function normalizeCategory(category, asset){
         if(asset.toLowerCase()==='cash') return 'Cash';
     }
     if(!category) return 'Unclassified';
-    const map = { 'crypto':'Crypto', 'stock':'Stock', 'real estate':'Real Estate', 'cash':'Cash', 'deposit':'Cash' };
+    const map = {
+        'crypto':'Crypto',
+        'stock':'Stock',
+        'real estate':'Real Estate',
+        'cash':'Cash',
+        'deposit':'Cash',
+        'automobile':'Automobile',
+        'automotive':'Automobile',
+        'vehicle':'Automobile',
+        'auto':'Automobile',
+        'car':'Automobile',
+        'transport':'Automobile'
+    };
     const key = String(category).toLowerCase();
     return map[key] || category;
 }
@@ -379,6 +883,10 @@ function mapFinnhubSymbol(asset, category, isOverride = false){
     if(isOverride) return asset;
     const cat = (category||'').toLowerCase();
     const cleaned = String(asset).trim().toUpperCase();
+    const overrides = {
+        ISAC: 'NASDAQ:ISAC'
+    };
+    if(overrides[cleaned]) return overrides[cleaned];
     if(cat==='cash') return null;
     if(cat==='crypto'){
         const base = cleaned.replace(/[^A-Z0-9]/g,'');
@@ -387,6 +895,88 @@ function mapFinnhubSymbol(asset, category, isOverride = false){
     }
     if(cleaned.includes(':')) return cleaned;
     if(/[A-Z0-9]{1,5}/.test(cleaned) && !cleaned.includes(' ')) return cleaned;
+    return null;
+}
+
+function mapYahooSymbol(position){
+    const typeKey = String(position.type || '').toLowerCase();
+    const rawSymbol = position.finnhubSymbol || position.Symbol || position.displayName || position.Name;
+    if(!rawSymbol) return null;
+    if(typeKey === 'crypto'){
+        let token = rawSymbol;
+        if(token.includes(':')) token = token.split(':').pop();
+        token = token.replace(/[^a-z0-9]/gi,'').toUpperCase();
+        const stableSuffixes = ['USDT','USDC','BUSD','USD'];
+        let base = token;
+        const suffix = stableSuffixes.find(s=> token.endsWith(s));
+        if(suffix){
+            base = token.slice(0, token.length - suffix.length);
+        }
+        if(!base) base = token;
+        return `${base}-USD`;
+    }
+    let symbol = rawSymbol.replace(/\s+/g,'').toUpperCase();
+    const overrides = {
+        'NASDAQ:ISAC': 'ISAC',
+        'ISAC': 'ISAC'
+    };
+    if(overrides[symbol]) return overrides[symbol];
+    if(symbol.includes(':')){
+        symbol = symbol.replace(':','-');
+    }
+    return symbol;
+}
+
+function mapCoinGeckoId(position){
+    const explicit = position.coinGeckoId || position.coinGecko || position.coingecko;
+    if(explicit) return String(explicit).toLowerCase();
+    const candidates = [position.Symbol, position.displayName, position.Name, position.id].filter(Boolean);
+    if(!candidates.length) return null;
+    const known = new Map([
+        ['btc','bitcoin'], ['bitcoin','bitcoin'],
+        ['xbt','bitcoin'],
+        ['eth','ethereum'], ['ethereum','ethereum'],
+        ['sol','solana'], ['solana','solana'],
+        ['ada','cardano'], ['cardano','cardano'],
+        ['dot','polkadot'], ['polkadot','polkadot'],
+        ['doge','dogecoin'], ['dogecoin','dogecoin'],
+        ['matic','matic-network'], ['polygon','matic-network'],
+        ['xrp','ripple'],
+        ['ltc','litecoin'], ['litecoin','litecoin'],
+        ['bnb','binancecoin'], ['bch','bitcoin-cash'],
+        ['avax','avalanche-2'], ['atom','cosmos'],
+        ['link','chainlink'], ['uni','uniswap']
+    ]);
+
+    const normalize = value => {
+        if(!value) return '';
+        let raw = String(value).trim().toLowerCase();
+        if(raw.includes(':')) raw = raw.split(':').pop();
+        raw = raw.replace(/[^a-z0-9-]+/g,'-');
+        raw = raw.replace(/--+/g,'-').replace(/^-|-$/g,'');
+        if(raw.endsWith('-usdt') || raw.endsWith('-usd')){
+            raw = raw.replace(/-(usdt|usd)$/,'');
+        }
+        if(raw.endsWith('usdt') || raw.endsWith('usd')){
+            raw = raw.replace(/(usdt|usd)$/,'');
+        }
+        return raw;
+    };
+
+    for(const candidate of candidates){
+        const normalized = normalize(candidate);
+        if(!normalized) continue;
+        if(known.has(normalized)) return known.get(normalized);
+        const hyphenLess = normalized.replace(/-/g,'');
+        if(known.has(hyphenLess)) return known.get(hyphenLess);
+        if(known.has(normalized.toUpperCase())) return known.get(normalized.toUpperCase());
+        if(known.has(normalized.toLowerCase())) return known.get(normalized.toLowerCase());
+        if(normalized.includes('-')){
+            const base = normalized.split('-')[0];
+            if(known.has(base)) return known.get(base);
+        }
+        return normalized;
+    }
     return null;
 }
 
@@ -409,22 +999,38 @@ async function refineFinnhubSymbols(progressCb){
     if(typeof progressCb === 'function' && total){
         progressCb(0, total);
     }
-    for(let idx = 0; idx < unresolved.length; idx += 1){
-        const position = unresolved[idx];
-        try{
-            const resolved = await fetchFinnhubSymbol(position);
-            if(resolved){
-                position.finnhubSymbol = resolved;
-                position.Symbol = resolved;
+    if(!total) return;
+
+    const queue = unresolved.slice();
+    let processed = 0;
+    const MAX_SYMBOL_CONCURRENCY = 6;
+
+    async function worker(){
+        while(queue.length){
+            const position = queue.shift();
+            if(!position) break;
+            try{
+                const resolved = await fetchFinnhubSymbol(position);
+                if(resolved){
+                    position.finnhubSymbol = resolved;
+                    position.Symbol = resolved;
+                }
+            }catch(error){
+                console.warn('Finnhub search failed', position.Name, error);
+            }finally{
+                processed += 1;
+                if(typeof progressCb === 'function' && total){
+                    progressCb(processed, total, position);
+                }
+                if(queue.length){
+                    await new Promise(resolve=>setTimeout(resolve, 80));
+                }
             }
-        }catch(error){
-            console.warn('Finnhub search failed', position.Name, error);
         }
-        if(typeof progressCb === 'function' && total){
-            progressCb(idx + 1, total, position);
-        }
-        await new Promise(resolve=>setTimeout(resolve, 150));
     }
+
+    const workerCount = Math.min(MAX_SYMBOL_CONCURRENCY, queue.length);
+    await Promise.all(Array.from({length: workerCount}, worker));
 }
 
 async function fetchFinnhubSymbol(position){
@@ -568,6 +1174,7 @@ function transformOperations(records, progressCb){
         const tagsNormalized = Array.isArray(fields.Tags) ? fields.Tags.map(t=>String(t).toLowerCase()) : [];
         const opTypeLower = String(opType).toLowerCase();
         const isRentOp = (opTypeLower === 'profitloss' || opTypeLower.includes('rent')) && tagsNormalized.some(tag=>RENT_TAGS.includes(tag));
+        const isReinvesting = tagsNormalized.includes('reinvesting');
 
         if(!map.has(asset)){
             const finnhubOverride = fields['Finnhub Symbol'] || fields['Finnhub symbol'] || fields['finnhubSymbol'] || fields['FINNHUB_SYMBOL'];
@@ -585,6 +1192,7 @@ function transformOperations(records, progressCb){
                 costBasis: 0,
                 invested: 0,
                 realized: 0,
+                reinvested: 0,
                 rentRealized: 0,
                 cashflow: 0,
                 lastKnownPrice: 0,
@@ -602,7 +1210,9 @@ function transformOperations(records, progressCb){
             amount,
             price,
             spent,
-            tags: tagsNormalized
+            tags: tagsNormalized,
+            isReinvesting,
+            skipInCharts: Boolean(isReinvesting)
         });
 
         if(opType === 'PurchaseSell'){
@@ -628,23 +1238,44 @@ function transformOperations(records, progressCb){
                 entry.realized += proceeds - costOut;
             }
             entry.cashflow += spent;
-        }else if(opType === 'ProfitLoss'){
+    }else if(opType === 'ProfitLoss'){
+        if(isReinvesting){
+            let reinvestAmount = spent < 0 ? -spent : spent;
+            if(!reinvestAmount){
+                const fallbackAmount = Math.abs(Number(price || 0) * Number(amount || 0));
+                if(fallbackAmount) reinvestAmount = fallbackAmount;
+            }
+            let reinvestQty = Math.abs(Number(amount || 0));
+            if((!reinvestQty || !Number.isFinite(reinvestQty)) && Number.isFinite(reinvestAmount)){
+                const effectivePrice = Number(price || entry.lastKnownPrice || entry.lastPurchasePrice || 0);
+                if(Number.isFinite(effectivePrice) && Math.abs(effectivePrice) > 1e-9){
+                    const derivedQty = Math.abs(reinvestAmount) / Math.abs(effectivePrice);
+                    if(Number.isFinite(derivedQty) && derivedQty > 0){
+                        reinvestQty = derivedQty;
+                    }
+                }
+            }
+            if(Number.isFinite(reinvestQty) && reinvestQty > 0){
+                entry.reinvested = (entry.reinvested || 0) + reinvestQty;
+            }
+        }else{
             entry.realized += spent;
             if(isRentOp){
                 entry.rentRealized = (entry.rentRealized || 0) + (spent < 0 ? -spent : spent);
             }else{
                 entry.cashflow += spent;
             }
-        }else if(opType === 'DepositWithdrawal'){
-            entry.qty += amount;
-            entry.costBasis += spent;
-            entry.cashflow += spent;
-            if(!entry.lastKnownPrice && price){
-                entry.lastKnownPrice = price;
-            }
-        }else{
-            entry.cashflow += spent;
         }
+    }else if(opType === 'DepositWithdrawal'){
+        entry.qty += amount;
+        entry.costBasis += spent;
+        entry.cashflow += spent;
+        if(!entry.lastKnownPrice && price){
+            entry.lastKnownPrice = price;
+        }
+    }else{
+        entry.cashflow += spent;
+    }
 
         if(entry.qty <= 0){
             entry.qty = 0;
@@ -708,6 +1339,8 @@ function useFallbackPositions(){
 async function loadPositions(){
     symbolSet = new Set();
     finnhubIndex = new Map();
+    assetIconSourceCache.clear();
+    transactionPriceCache.clear();
     try{
         reportLoading('Connecting to Airtable API…');
         const records = await fetchAllAirtableOperations(reportLoading);
@@ -1118,7 +1751,8 @@ function computeRealEstateAnalytics(){
     const rentYearSet = new Set();
     let realEstateTotalValue = 0;
 
-    positions.filter(p=> (p.type || '').toLowerCase() === 'real estate').forEach((position, idx)=>{
+    const portfolioCategories = new Set(['real estate','automobile','automotive']);
+    positions.filter(p=> portfolioCategories.has((p.type || '').toLowerCase())).forEach((position, idx)=>{
         const ops = Array.isArray(position.operations) ? position.operations : [];
         if(!ops.length) return;
         let totalPurchase = 0;
@@ -1130,6 +1764,7 @@ function computeRealEstateAnalytics(){
         let earliestEvent = null;
         const rentMonths = new Set();
         const rentMonthsLast12 = new Set();
+        const typeKey = String(position.type || '').toLowerCase();
 
         ops.forEach(op=>{
             const spentRaw = Number(op.spent || 0);
@@ -1139,9 +1774,14 @@ function computeRealEstateAnalytics(){
             const type = (op.type || '').toLowerCase();
             const tags = Array.isArray(op.tags) ? op.tags.map(t=>String(t).toLowerCase()) : [];
             const date = op.date instanceof Date ? op.date : (op.rawDate ? new Date(op.rawDate) : null);
+            const isReinvestingOp = Boolean(op.isReinvesting || tags.includes('reinvesting'));
 
             if(date && (!earliestEvent || date < earliestEvent)){
                 earliestEvent = date;
+            }
+
+            if(isReinvestingOp){
+                return;
             }
 
             const hasRentTag = tags.some(tag=>RENT_TAGS.includes(tag));
@@ -1149,7 +1789,12 @@ function computeRealEstateAnalytics(){
             const cashImpact = spent !== 0 ? spent : (amount !== 0 && price !== 0 ? amount * price : 0);
             const isRent = (type === 'profitloss') && hasRentTag;
             const isPurchase = type === 'purchasesell' && cashImpact > 0;
-            const isExpense = (!isPurchase && !isRent) && (hasExpenseTag || type.includes('expense') || type.includes('maintenance') || type.includes('hoa') || type.includes('tax') || type.includes('mortgage') || type.includes('interest') || cashImpact > 0);
+            const expenseKeywords = ['expense','maintenance','hoa','tax','mortgage','interest','service','fee','fees','insurance','repair','repairs','utility','utilities','management'];
+            const matchesExpenseKeyword = expenseKeywords.some(keyword=> type.includes(keyword));
+            const isExpenseCandidate = !isPurchase && !isRent;
+            const isProfitLoss = type === 'profitloss';
+            const isExpense = isExpenseCandidate && (hasExpenseTag || matchesExpenseKeyword || (isProfitLoss && cashImpact > 0));
+            const isCashOutExpense = isExpenseCandidate && cashImpact < 0 && !type.includes('deposit') && !type.includes('withdraw');
 
             if(isPurchase){
                 if(date && (!earliestPurchase || date < earliestPurchase)){
@@ -1162,10 +1807,9 @@ function computeRealEstateAnalytics(){
 
             if(isRent){
                 let rentAmount = spent < 0 ? -spent : spent;
-                
+
                 if(rentAmount > 0){
                     rentCollected += rentAmount;
-                    console.log(op, rentCollected, rentAmount)
                     if(date){
                         const key = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;
                         rentMonths.add(key);
@@ -1188,7 +1832,7 @@ function computeRealEstateAnalytics(){
                 return;
             }
 
-            if(isExpense || (cashImpact > 0 && !isRent && !isPurchase)){
+            if((isExpense || isCashOutExpense) && cashImpact !== 0){
                 const expenseAmount = Math.abs(cashImpact);
                 totalExpenses += expenseAmount;
             }
@@ -1210,13 +1854,22 @@ function computeRealEstateAnalytics(){
 
         const marketValue = Number(position.marketValue || 0);
         realEstateTotalValue += finalAssetPrice;
+        const baseForHoldingPeriod = earliestPurchase instanceof Date ? earliestPurchase : (earliestEvent instanceof Date ? earliestEvent : null);
+        const yearsHeld = baseForHoldingPeriod ? Math.max(0, (now - baseForHoldingPeriod) / (365 * 24 * 3600 * 1000)) : 0;
         let projectedValue = finalAssetPrice;
-        if(earliestPurchase instanceof Date){
-            const yearsHeld = Math.max(0, (now - earliestPurchase) / (365 * 24 * 3600 * 1000));
-            projectedValue = finalAssetPrice * Math.pow(1.05, Math.max(0, yearsHeld));
+        if(typeKey === 'automobile' || typeKey === 'automotive'){
+            const depreciationRate = 0.004; // 0.4% per year
+            const yearsForDepreciation = baseForHoldingPeriod ? yearsHeld : 0;
+            const depreciationAmount = finalAssetPrice * depreciationRate * yearsForDepreciation;
+            projectedValue = Math.max(0, finalAssetPrice - depreciationAmount);
         }else{
-            projectedValue = finalAssetPrice * 1.05;
+            if(baseForHoldingPeriod){
+                projectedValue = finalAssetPrice * Math.pow(1.05, Math.max(yearsHeld, 1));
+            }else{
+                projectedValue = finalAssetPrice * 1.05;
+            }
         }
+        projectedValue = Number(projectedValue.toFixed(2));
 
         results.push({
             name: position.displayName || position.Symbol || position.Name || `Asset ${idx+1}`,
@@ -1229,7 +1882,9 @@ function computeRealEstateAnalytics(){
             utilization,
             netOutstanding: outstanding,
             payoffMonths,
-            projectedValue
+            projectedValue,
+            category: position.type || '—',
+            positionRef: position
         });
     });
 
@@ -1290,11 +1945,94 @@ function computeRealEstateAnalytics(){
 
     const rows = results.sort((a,b)=> b.netOutstanding - a.netOutstanding || b.finalAssetPrice - a.finalAssetPrice);
     const otherAssetsValue = positions
-        .filter(p=> (p.type || '').toLowerCase() !== 'real estate')
+        .filter(p=> !portfolioCategories.has((p.type || '').toLowerCase()))
         .reduce((sum,p)=> sum + Number(p.marketValue || 0), 0);
     const denominator = realEstateTotalValue + otherAssetsValue;
     const allocation = denominator ? (realEstateTotalValue / denominator) * 100 : null;
     return { rows, totalValue: realEstateTotalValue, allocation };
+}
+
+function createRealEstateRow(stat){
+    const row = document.createElement('div');
+    row.className = 'realestate-row';
+
+    const main = document.createElement('div');
+    main.className = 'realestate-main';
+    const heading = document.createElement('div');
+    heading.className = 'asset-heading';
+    const iconEl = stat.positionRef ? createAssetIconElement(stat.positionRef) : null;
+    if(iconEl){
+        heading.appendChild(iconEl);
+    }
+    const label = document.createElement('div');
+    label.className = 'asset-label';
+    const nameEl = document.createElement('div');
+    nameEl.className = 'symbol';
+    nameEl.textContent = stat.name;
+    const metaEl = document.createElement('div');
+    metaEl.className = 'pos';
+    const categoryText = stat.category || '—';
+    metaEl.textContent = `Category ${categoryText} · Purchase ${money(stat.totalPurchase)} · Expenses ${money(stat.totalExpenses)}`;
+    label.appendChild(nameEl);
+    label.appendChild(metaEl);
+    heading.appendChild(label);
+    main.appendChild(heading);
+    row.appendChild(main);
+
+    const metrics = document.createElement('div');
+    metrics.className = 'realestate-metrics';
+    const utilizationValueRaw = Number(stat.utilization);
+    const hasUtilization = Number.isFinite(utilizationValueRaw);
+    const utilizationValue = hasUtilization ? Math.max(0, Math.min(utilizationValueRaw, 100)) : null;
+    const utilizationDisplay = hasUtilization ? `${utilizationValue.toFixed(1)}%` : '—';
+    const utilizationProgress = hasUtilization ? (utilizationValue / 100) : 0;
+    const isPassive = !stat.rentCollected && !stat.rentYtd && !stat.avgMonthlyRent;
+    const rows = [
+        `<div><span class="label">Final Asset Price</span><span class="value">${money(stat.finalAssetPrice)}</span></div>`,
+        `<div><span class="label">Projected Value</span><span class="value">${money(stat.projectedValue)}</span></div>`
+    ];
+    if(!isPassive){
+        rows.splice(1, 0, `<div><span class="label">Outstanding</span><span class="value">${money(stat.netOutstanding)}</span></div>`);
+    }
+    if(!isPassive){
+        rows.push(
+            `<div><span class="label">Rent Collected</span><span class="value">${money(stat.rentCollected)}</span></div>`,
+            `<div><span class="label">Rent YTD</span><span class="value">${money(stat.rentYtd)}</span></div>`,
+            `<div><span class="label">Rent / Mo</span><span class="value">${money(stat.avgMonthlyRent)}</span></div>`,
+            `<div class="utilization-block">`
+            + `<span class="label">Utilization</span>`
+            + `<div class="circle-progress" style="--progress:${utilizationProgress};">`
+            + `<div class="circle-progress-inner"><span>${utilizationDisplay}</span></div>`
+            + `</div>`
+            + `</div>`,
+            `<div><span class="label">Payoff ETA</span><span class="value">${formatDurationFromMonths(stat.payoffMonths)}</span></div>`
+        );
+    }
+    metrics.innerHTML = rows.join('');
+    row.appendChild(metrics);
+
+    const canOpenModal = stat.positionRef && Array.isArray(stat.positionRef.operations) && stat.positionRef.operations.some(op => Number(op.amount || 0));
+    if(canOpenModal){
+        row.classList.add('interactive-asset-row','realestate-row-interactive');
+        row.setAttribute('role','button');
+        row.setAttribute('tabindex','0');
+        row.addEventListener('click', event=>{
+            event.preventDefault();
+            event.stopPropagation();
+            lastTransactionTrigger = row;
+            openTransactionModal(stat.positionRef);
+        });
+        row.addEventListener('keydown', event=>{
+            if(event.key === 'Enter' || event.key === ' '){
+                event.preventDefault();
+                event.stopPropagation();
+                lastTransactionTrigger = row;
+                openTransactionModal(stat.positionRef);
+            }
+        });
+    }
+
+    return row;
 }
 
 function updateRealEstateRentals(){
@@ -1308,7 +2046,9 @@ function updateRealEstateRentals(){
     const headerAllocationEl = document.getElementById('realestate-allocation');
     if(headerValueEl){
         const totalValue = analytics && typeof analytics.totalValue === 'number' ? analytics.totalValue : 0;
-        headerValueEl.textContent = money(totalValue);
+        const projectedSum = stats.reduce((sum, stat)=> sum + Number(stat.projectedValue || 0), 0);
+        const displayValue = Number.isFinite(projectedSum) && projectedSum > 0 ? projectedSum : totalValue;
+        headerValueEl.textContent = money(displayValue);
     }
     if(headerAllocationEl){
         const allocationValue = analytics && typeof analytics.allocation === 'number' ? analytics.allocation : null;
@@ -1318,35 +2058,50 @@ function updateRealEstateRentals(){
         container.innerHTML = '<div class="pos">No rental activity recorded yet.</div>';
         return;
     }
+    const isActiveStat = stat => {
+        return ['rentCollected','rentYtd','avgMonthlyRent'].some(key=> Math.abs(Number(stat[key] || 0)) > 1e-6);
+    };
+    const activeStats = stats.filter(isActiveStat);
+    const passiveStats = stats.filter(stat=> !isActiveStat(stat));
+
     container.innerHTML = '';
-    stats.forEach(stat=>{
-        const row = document.createElement('div');
-        row.className = 'realestate-row';
-        const utilizationPct = Number.isFinite(Number(stat.utilization)) ? Math.max(0, Math.min(100, Number(stat.utilization))) : 0;
-        const utilizationStyle = `width:${utilizationPct.toFixed(2)}%`;
-        row.innerHTML = `
-            <div class="realestate-main">
-                <div class="symbol">${stat.name}</div>
-                <div class="pos">Purchase ${money(stat.totalPurchase)} · Expenses ${money(stat.totalExpenses)}</div>
-            </div>
-            <div class="realestate-metrics">
-                <div><span class="label">Final Asset Price</span><span class="value">${money(stat.finalAssetPrice)}</span></div>
-                <div><span class="label">Outstanding</span><span class="value">${money(stat.netOutstanding)}</span></div>
-                <div><span class="label">Projected Value</span><span class="value">${money(stat.projectedValue)}</span></div>
-                <div><span class="label">Rent Collected</span><span class="value">${money(stat.rentCollected)}</span></div>
-                <div><span class="label">Rent YTD</span><span class="value">${money(stat.rentYtd)}</span></div>
-                <div><span class="label">Rent / Mo</span><span class="value">${money(stat.avgMonthlyRent)}</span></div>
-                <div>
-                    <span class="label">Utilization</span>
-                    <span class="value">${Number.isFinite(Number(stat.utilization)) ? `${Number(stat.utilization).toFixed(1)}%` : '—'}</span>
-                    <div class="realestate-progress" role="presentation">
-                        <div class="realestate-progress-bar" style="${utilizationStyle}"></div>
-                    </div>
-                </div>
-                <div><span class="label">Payoff ETA</span><span class="value">${formatDurationFromMonths(stat.payoffMonths)}</span></div>
+
+    const groups = [
+        { id: 'active', title: 'Active assets', stats: activeStats, open: true, empty: 'No active rental or automobile assets yet.' },
+        { id: 'passive', title: 'Passive assets', stats: passiveStats, open: false, empty: 'No passive rental or automobile assets right now.' }
+    ];
+
+    groups.forEach(group=>{
+        const section = document.createElement('details');
+        section.className = 'analytics-section realestate-group';
+        const desiredOpen = realEstateGroupState[group.id];
+        const shouldOpen = desiredOpen === undefined ? group.open : desiredOpen;
+        section.open = Boolean(shouldOpen);
+        const summary = document.createElement('summary');
+        summary.innerHTML = `
+            <div class="summary-left">
+                <span class="summary-title">${group.title}</span>
+                <span class="summary-count">${group.stats.length}</span>
             </div>
         `;
-        container.appendChild(row);
+        section.appendChild(summary);
+        const content = document.createElement('div');
+        content.className = 'analytics-section-content';
+        if(!group.stats.length){
+            const empty = document.createElement('div');
+            empty.className = 'pos';
+            empty.textContent = group.empty;
+            content.appendChild(empty);
+        }else{
+            group.stats.forEach(stat=>{
+                content.appendChild(createRealEstateRow(stat));
+            });
+        }
+        section.appendChild(content);
+        section.addEventListener('toggle', ()=>{
+            realEstateGroupState[group.id] = section.open;
+        });
+        container.appendChild(section);
     });
 }
 
@@ -1423,6 +2178,835 @@ function renderRealEstateRentChart(){
     }
 }
 
+function ensureTransactionModalElements(){
+    if(transactionModal) return;
+    transactionModal = document.getElementById('transaction-modal');
+    if(!transactionModal) return;
+    transactionModalTitle = document.getElementById('transaction-modal-title');
+    transactionModalSubtitle = document.getElementById('transaction-modal-subtitle');
+    transactionModalMeta = document.getElementById('transaction-modal-meta');
+    transactionModalCanvas = document.getElementById('transaction-chart');
+    modalChartContainer = transactionModal.querySelector('.modal-chart');
+    transactionLotsContainer = document.getElementById('transaction-lots');
+    if(transactionLotsContainer){
+        ensureTransactionLotsControls();
+    }
+    viewLotsButton = document.getElementById('view-lots-btn');
+    const closeButton = transactionModal.querySelector('.modal-close');
+    if(closeButton){
+        closeButton.addEventListener('click', closeTransactionModal);
+    }
+    transactionModal.addEventListener('click', event => {
+        if(event.target === transactionModal){
+            closeTransactionModal();
+        }
+    });
+    if(viewLotsButton && !viewLotsButton.dataset.bound){
+        viewLotsButton.addEventListener('click', ()=>{
+            if(currentModalView === 'lots'){
+                setModalView('chart');
+            }else{
+                if(lastTransactionPosition && lastTransactionData){
+                    renderTransactionLots(lastTransactionPosition, lastTransactionData);
+                }
+                setModalView('lots');
+            }
+        });
+        viewLotsButton.dataset.bound = 'true';
+    }
+}
+
+function closeTransactionModal(){
+    if(!transactionModal) return;
+    transactionModal.classList.add('hidden');
+    transactionModal.setAttribute('aria-hidden','true');
+    if(!netWorthDetailModal || netWorthDetailModal.classList.contains('hidden')){
+        document.body.classList.remove('modal-open');
+    }
+    if(lastTransactionTrigger && typeof lastTransactionTrigger.focus === 'function'){
+        lastTransactionTrigger.focus({ preventScroll: false });
+    }
+    lastTransactionTrigger = null;
+    lastTransactionData = null;
+    lastTransactionPosition = null;
+    setModalView('chart');
+}
+
+async function fetchHistoricalPriceSeries(position){
+    const typeKey = String(position.type || '').toLowerCase();
+    const finnhubSymbol = position.finnhubSymbol || mapFinnhubSymbol(position.Symbol || position.displayName || position.Name, position.type, false);
+    const coinGeckoId = typeKey === 'crypto' ? mapCoinGeckoId(position) : null;
+    const yahooSymbol = mapYahooSymbol(position);
+    const cacheKey = `${finnhubSymbol || ''}|${coinGeckoId || yahooSymbol || ''}|${typeKey}`;
+    if(transactionPriceCache.has(cacheKey)){
+        return transactionPriceCache.get(cacheKey);
+    }
+
+    const operations = Array.isArray(position.operations) ? position.operations : [];
+    const firstPurchase = operations
+        .filter(op => String(op.type || '').toLowerCase() === 'purchasesell' && Number(op.amount || 0) > 0 && op.date instanceof Date)
+        .sort((a,b)=> a.date - b.date)[0];
+    const firstPurchaseTime = firstPurchase ? firstPurchase.date.getTime() : null;
+    let series = [];
+    if(finnhubSymbol && FINNHUB_KEY){
+        series = await fetchFinnhubSeries(position, finnhubSymbol, firstPurchaseTime);
+        if(series.length){
+            transactionPriceCache.set(cacheKey, series);
+            return series;
+        }
+    }
+
+    if(coinGeckoId){
+        series = await fetchCoinGeckoSeries(coinGeckoId, firstPurchaseTime);
+        if(series.length){
+            transactionPriceCache.set(cacheKey, series);
+            return series;
+        }
+    }
+
+    if(yahooSymbol){
+        series = await fetchAlphaVantageSeries(yahooSymbol, typeKey, firstPurchaseTime);
+        if(series.length){
+            transactionPriceCache.set(cacheKey, series);
+            return series;
+        }
+    }
+
+    transactionPriceCache.set(cacheKey, []);
+    return [];
+}
+
+async function fetchFinnhubSeries(position, rawSymbol, firstPurchaseTime){
+    try{
+        if(!position.finnhubSymbol){
+            position.finnhubSymbol = rawSymbol;
+            finnhubIndex.set(rawSymbol, position);
+            symbolSet.add(rawSymbol);
+            if(ws && ws.readyState === WebSocket.OPEN){
+                try{ ws.send(JSON.stringify({type:'subscribe', symbol: rawSymbol})); }
+                catch(error){ console.warn('Failed to subscribe for history symbol', rawSymbol, error); }
+            }
+        }
+        const nowSec = Math.floor(Date.now()/1000);
+        let fromMs = Date.now() - TRANSACTION_HISTORY_LOOKBACK_DAYS * 24 * 3600 * 1000;
+        if(firstPurchaseTime){
+            const marginMs = 30 * 24 * 3600 * 1000;
+            fromMs = Math.max(fromMs, firstPurchaseTime - marginMs);
+        }
+        const fromSec = Math.floor(fromMs / 1000);
+        const endpoint = (/crypto/i.test(position.type || '') || rawSymbol.includes(':')) ? 'crypto/candle' : 'stock/candle';
+        const url = `${FINNHUB_REST}/${endpoint}?symbol=${encodeURIComponent(rawSymbol)}&resolution=D&from=${fromSec}&to=${nowSec}&token=${FINNHUB_KEY}`;
+        const response = await fetch(url);
+        if(!response.ok) return [];
+        const json = await response.json();
+        if(json && json.s === 'ok' && Array.isArray(json.t) && Array.isArray(json.c)){
+            return json.t.map((ts, idx)=>{
+                const close = Number(json.c?.[idx]);
+                if(!Number.isFinite(close) || close <= 0) return null;
+                return { x: ts * 1000, y: close };
+            }).filter(Boolean);
+        }
+    }catch(error){
+        console.warn('Historical price fetch failed', rawSymbol, error);
+    }
+    return [];
+}
+
+function getAlphaVantageKey(){
+    if(typeof window !== 'undefined' && window.DASHBOARD_CONFIG && window.DASHBOARD_CONFIG.ALPHA_VANTAGE_KEY){
+        return window.DASHBOARD_CONFIG.ALPHA_VANTAGE_KEY;
+    }
+    if(typeof ALPHA_VANTAGE_KEY !== 'undefined') return ALPHA_VANTAGE_KEY;
+    return null;
+}
+
+async function fetchAlphaVantageSeries(symbol, typeKey, firstPurchaseTime){
+    const apiKey = getAlphaVantageKey();
+    if(!apiKey) return [];
+    const params = new URLSearchParams();
+    if(typeKey === 'crypto'){
+        params.set('function', 'DIGITAL_CURRENCY_DAILY');
+        params.set('symbol', symbol.replace(/-USD$/i, '')); // expect BTC-USD style
+        params.set('market', 'USD');
+    }else{
+        params.set('function', 'TIME_SERIES_DAILY');
+        params.set('symbol', symbol);
+        params.set('outputsize', 'full');
+    }
+    params.set('apikey', apiKey);
+    const url = `https://www.alphavantage.co/query?${params.toString()}`;
+    try{
+        const response = await fetch(url);
+        if(!response.ok) return [];
+        const json = await response.json();
+        const series = [];
+        let timeSeries;
+        if(typeKey === 'crypto'){
+            timeSeries = json['Time Series (Digital Currency Daily)'];
+        }else{
+            timeSeries = json['Time Series (Daily)'];
+        }
+        if(!timeSeries || typeof timeSeries !== 'object') return [];
+        Object.entries(timeSeries).forEach(([dateStr, row])=>{
+            const closeKey = typeKey === 'crypto' ? '4a. close (USD)' : '4. close';
+            const close = Number(row?.[closeKey]);
+            if(!Number.isFinite(close) || close <= 0) return;
+            const date = new Date(dateStr + 'T00:00:00Z');
+            if(firstPurchaseTime){
+                const marginMs = 30 * 24 * 3600 * 1000;
+                if(date.getTime() < firstPurchaseTime - marginMs) return;
+            }
+            series.push({ x: date.getTime(), y: close });
+        });
+        return series.sort((a,b)=> a.x - b.x);
+    }catch(error){
+        console.warn('Alpha Vantage history fetch failed', symbol, error);
+    }
+    return [];
+}
+
+async function fetchCoinGeckoSeries(coinId, firstPurchaseTime){
+    try{
+        let fromMs = Date.now() - TRANSACTION_HISTORY_LOOKBACK_DAYS * 24 * 3600 * 1000;
+        if(firstPurchaseTime){
+            const marginMs = 30 * 24 * 3600 * 1000;
+            fromMs = Math.max(fromMs, firstPurchaseTime - marginMs);
+        }
+        const days = Math.max(30, Math.ceil((Date.now() - fromMs) / (24 * 3600 * 1000)));
+        const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}/market_chart?vs_currency=usd&days=${days}`;
+        const response = await fetch(url, { headers: { 'accept': 'application/json' } });
+        if(!response.ok) return [];
+        const json = await response.json();
+        if(!json || !Array.isArray(json.prices)) return [];
+        const series = json.prices.map(([timestamp, price])=>{
+            const close = Number(price);
+            if(!Number.isFinite(close) || close <= 0) return null;
+            if(firstPurchaseTime){
+                const marginMs = 30 * 24 * 3600 * 1000;
+                if(timestamp < firstPurchaseTime - marginMs) return null;
+            }
+            return { x: timestamp, y: close };
+        }).filter(Boolean);
+        return series.sort((a,b)=> a.x - b.x);
+    }catch(error){
+        console.warn('CoinGecko history fetch failed', coinId, error);
+    }
+    return [];
+}
+
+function registerFinancialControllers(){ /* no-op placeholder */ }
+
+function buildTransactionChartData(position){
+    const operations = Array.isArray(position.operations) ? position.operations.filter(op => String(op.type || '').toLowerCase() === 'purchasesell' && !op.skipInCharts) : [];
+    if(!operations.length){
+        return {
+            purchases: [],
+            sales: [],
+            baseline: [],
+            fallbackPriceSeries: [],
+            summary: {
+                totalBuys: 0,
+                totalSells: 0,
+                netQty: 0,
+                totalSpent: 0,
+                totalProceeds: 0
+            }
+        };
+    }
+
+    const fallbackPrice = Number(position.displayPrice || position.currentPrice || position.lastKnownPrice || position.avgPrice || 0);
+    const sorted = operations.map((op, index)=>{
+        const date = op.date instanceof Date ? op.date : (op.rawDate ? new Date(op.rawDate) : new Date(Date.now() - (operations.length - index) * 24 * 3600 * 1000));
+        return Object.assign({}, op, { date });
+    }).sort((a,b)=>{
+        if(a.date instanceof Date && b.date instanceof Date){
+            return a.date - b.date;
+        }
+        return 0;
+    });
+
+    const purchases = [];
+    const sales = [];
+    const xValues = new Set();
+    const fallbackPriceSeries = [];
+    let totalBuys = 0;
+    let totalSells = 0;
+    let totalSpent = 0;
+    let totalProceeds = 0;
+    let maxAbsQty = 0;
+
+    sorted.forEach((op, index)=>{
+        const qty = Number(op.amount || 0);
+        if(!qty) return;
+        const rawSpent = Number(op.spent);
+        let price = Number(op.price);
+        const absQty = Math.abs(qty);
+        if(absQty > maxAbsQty) maxAbsQty = absQty;
+        if(!Number.isFinite(price) || price <= 0){
+            if(Number.isFinite(rawSpent) && rawSpent !== 0 && qty){
+                price = Math.abs(rawSpent / qty);
+            }else{
+                price = fallbackPrice;
+            }
+        }
+        const date = op.date instanceof Date ? op.date : new Date(Date.now() - (sorted.length - index) * 24 * 3600 * 1000);
+        const x = date.getTime();
+        const spent = Number.isFinite(rawSpent) ? rawSpent : price * qty;
+        const point = {
+            x,
+            y: price,
+            r: 8,
+            quantity: qty,
+            price,
+            date,
+            spent,
+            spentAbs: Math.abs(spent),
+            rawQty: absQty
+        };
+        if(qty > 0){
+            purchases.push(point);
+            totalBuys += qty;
+            totalSpent += Math.abs(spent);
+        }else{
+            sales.push(point);
+            totalSells += Math.abs(qty);
+            totalProceeds += Math.abs(spent);
+        }
+        xValues.add(x);
+        fallbackPriceSeries.push({ x, y: price });
+    });
+
+    const meaningfulQty = purchases.concat(sales).map(point => point.rawQty || 0).filter(value => value > 0);
+    const minAbsQty = meaningfulQty.length ? Math.min(...meaningfulQty) : 0;
+    const maxQty = Math.max(maxAbsQty, minAbsQty || 1);
+    const logDenominator = Math.log10((maxQty / Math.max(minAbsQty || maxQty, 1e-12)) + 1);
+    const computeRadius = qty => {
+        if(!qty || !Number.isFinite(qty)) return 8;
+        if(!minAbsQty || logDenominator === 0){
+            return 6 + (Math.sqrt(qty / maxQty) || 0) * 18;
+        }
+        const ratio = Math.log10((qty / Math.max(minAbsQty, 1e-12)) + 1) / logDenominator;
+        return 6 + Math.min(1, Math.max(0, ratio)) * 26;
+    };
+    purchases.forEach(point => { point.r = computeRadius(point.rawQty || 0); });
+    sales.forEach(point => { point.r = computeRadius(point.rawQty || 0); });
+
+    const baseline = Array.from(xValues).sort((a,b)=>a-b).map(x=>({ x, y: fallbackPrice }));
+
+    return {
+        purchases,
+        sales,
+        baseline,
+        fallbackPriceSeries: fallbackPriceSeries.sort((a,b)=> a.x - b.x),
+        summary: {
+            totalBuys,
+            totalSells,
+            netQty: totalBuys - totalSells,
+            totalSpent,
+            totalProceeds
+        }
+    };
+}
+
+function buildTransactionChartConfig(data, position, priceSeries = []){
+    const datasets = [];
+    const effectivePriceSeries = (priceSeries.length ? priceSeries : (data.fallbackPriceSeries || [])).map(point=> ({ x: point.x, y: point.y ?? point.c ?? point.price ?? point.value }));
+    const fallbackPrice = Number(position.displayPrice || position.currentPrice || position.lastKnownPrice || position.avgPrice || 0) || 0;
+    const chartHasTransactions = data.purchases.length || data.sales.length;
+
+    if(effectivePriceSeries.length){
+        datasets.push({
+            type: 'line',
+            label: 'Price history',
+            data: effectivePriceSeries,
+            borderColor: TRANSACTION_CHART_COLORS.priceLine,
+            backgroundColor: 'rgba(59, 130, 246, 0.12)',
+            borderWidth: 2,
+            fill: 'origin',
+            tension: 0.25,
+            pointRadius: 0,
+            order: 0
+        });
+        const avgClose = effectivePriceSeries.reduce((sum, point)=> sum + Number(point.y || 0), 0) / effectivePriceSeries.length || fallbackPrice;
+        datasets.push({
+            type: 'line',
+            label: 'Avg trade price',
+            data: effectivePriceSeries.map(point=> ({ x: point.x, y: avgClose })),
+            borderColor: 'rgba(56, 189, 248, 0.55)',
+            borderDash: [4, 4],
+            borderWidth: 1.5,
+            pointRadius: 0,
+            tension: 0,
+            order: 1
+        });
+    }
+
+    if(chartHasTransactions){
+        if(data.purchases.length){
+            datasets.push({
+                type: 'scatter',
+                label: 'Purchases',
+                data: data.purchases,
+                backgroundColor: TRANSACTION_CHART_COLORS.buys,
+                borderColor: TRANSACTION_CHART_COLORS.buysBorder,
+                pointBorderWidth: 1.5,
+                pointRadius: ctx => ctx.raw ? ctx.raw.r : 6,
+                pointHoverRadius: ctx => ctx.raw ? ctx.raw.r + 2 : 8,
+                pointHoverBorderWidth: 2,
+                order: 2
+            });
+        }
+        if(data.sales.length){
+            datasets.push({
+                type: 'scatter',
+                label: 'Sales',
+                data: data.sales,
+                backgroundColor: TRANSACTION_CHART_COLORS.sells,
+                borderColor: TRANSACTION_CHART_COLORS.sellsBorder,
+                pointBorderWidth: 1.5,
+                pointRadius: ctx => ctx.raw ? ctx.raw.r : 6,
+                pointHoverRadius: ctx => ctx.raw ? ctx.raw.r + 2 : 8,
+                pointHoverBorderWidth: 2,
+                order: 2
+            });
+        }
+    }
+
+    const yValues = [...data.purchases, ...data.sales].map(point=> point.y);
+    const priceYValues = effectivePriceSeries.map(point=> point.y);
+    const combinedValues = [...yValues, ...priceYValues].filter(value => Number.isFinite(value));
+    const minY = combinedValues.length ? Math.min(...combinedValues) : fallbackPrice;
+    const maxY = combinedValues.length ? Math.max(...combinedValues) : fallbackPrice;
+
+    return {
+        type: 'scatter',
+        data: { datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            parsing: false,
+            animation: false,
+            plugins: {
+                legend: { labels: { usePointStyle: true } },
+                tooltip: {
+                    callbacks: {
+                        label(ctx){
+                            const raw = ctx.raw || {};
+                            if(ctx.dataset.type === 'line'){
+                                if(ctx.dataset.label === 'Avg trade price'){
+                                    return `Avg trade price ${money(raw.y)}`;
+                                }
+                            }
+                            const type = raw.quantity > 0 ? 'Buy' : 'Sell';
+                            const qtyText = `Qty ${formatQty(Math.abs(raw.quantity || 0))}`;
+                            const priceText = `@ ${money(raw.price || raw.y || 0)}`;
+                            const usdText = raw.spentAbs ? ` · ${money(raw.spentAbs)}` : '';
+                            const dateLabel = raw.date instanceof Date ? formatDateShort(raw.date) : formatDateShort(new Date(Number(raw.x || ctx.parsed.x)));
+                            return `${type} ${qtyText} ${priceText}${usdText}${dateLabel ? ' · ' + dateLabel : ''}`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    type: 'time',
+                    time: { tooltipFormat: 'PP' },
+                    title: { display: true, text: 'Date' },
+                    grid: { color: 'rgba(148, 163, 184, 0.25)' }
+                },
+                y: {
+                    beginAtZero: false,
+                    suggestedMin: Number.isFinite(minY) ? minY * 0.92 : undefined,
+                    suggestedMax: Number.isFinite(maxY) ? maxY * 1.08 : undefined,
+                    title: { display: true, text: 'Price' },
+                    grid: { color: 'rgba(148, 163, 184, 0.25)' },
+                    ticks: { callback: value => money(value) }
+                }
+            }
+        }
+    };
+}
+
+function setModalView(view){
+    currentModalView = view;
+    if(viewLotsButton){
+        viewLotsButton.textContent = view === 'lots' ? 'View chart' : 'View lots';
+        viewLotsButton.classList.toggle('active', view === 'lots');
+    }
+    if(modalChartContainer){
+        modalChartContainer.classList.toggle('hidden', view === 'lots');
+    }
+    if(transactionLotsContainer){
+        transactionLotsContainer.classList.toggle('hidden', view !== 'lots');
+    }
+    if(view === 'chart' && !transactionChart && lastTransactionPosition){
+        loadHistoricalPriceSeries(lastTransactionPosition);
+    }
+}
+
+const LOT_SORT_FIELDS = [
+    { value: 'date', label: 'Date' },
+    { value: 'qty', label: 'Quantity' },
+    { value: 'price', label: 'Price' },
+    { value: 'amount', label: 'Amount' },
+    { value: 'pnl', label: 'PnL' }
+];
+
+const LOT_DIRECTION_OPTIONS = [
+    { value: 'desc', label: 'Descending' },
+    { value: 'asc', label: 'Ascending' }
+];
+
+const LOT_GROUP_OPTIONS = [
+    { value: 'none', label: 'No grouping' },
+    { value: 'type', label: 'Buy / Sell' },
+    { value: 'year', label: 'Year' },
+    { value: 'gain', label: 'Gains / Losses' }
+];
+
+function ensureTransactionLotsControls(){
+    if(!transactionLotsContainer) return;
+    if(!transactionLotsContainer.dataset.controls){
+        transactionLotsContainer.innerHTML = '';
+        transactionLotsControls = document.createElement('div');
+        transactionLotsControls.className = 'lots-controls';
+        transactionLotsControls.setAttribute('role','group');
+
+        transactionLotsList = document.createElement('div');
+        transactionLotsList.className = 'lots-list';
+
+        transactionLotsContainer.appendChild(transactionLotsControls);
+        transactionLotsContainer.appendChild(transactionLotsList);
+
+        buildTransactionLotsControls();
+        transactionLotsContainer.dataset.controls = 'true';
+    }else{
+        transactionLotsControls = transactionLotsContainer.querySelector('.lots-controls');
+        transactionLotsList = transactionLotsContainer.querySelector('.lots-list');
+    }
+    if(transactionLotsSortSelect){
+        transactionLotsSortSelect.value = transactionLotsSortField;
+    }
+    if(transactionLotsDirectionSelect){
+        transactionLotsDirectionSelect.value = transactionLotsSortDirection;
+    }
+    if(transactionLotsGroupSelect){
+        transactionLotsGroupSelect.value = transactionLotsGroupKey;
+    }
+}
+
+function buildTransactionLotsControls(){
+    if(!transactionLotsControls) return;
+    transactionLotsControls.innerHTML = '';
+
+    const sortLabel = document.createElement('label');
+    sortLabel.className = 'lots-control';
+    sortLabel.innerHTML = '<span>Sort by</span>';
+    transactionLotsSortSelect = document.createElement('select');
+    transactionLotsSortSelect.id = 'lots-sort-field';
+    transactionLotsSortSelect.setAttribute('aria-label', 'Sort lots by');
+    LOT_SORT_FIELDS.forEach(option=>{
+        const opt = document.createElement('option');
+        opt.value = option.value;
+        opt.textContent = option.label;
+        transactionLotsSortSelect.appendChild(opt);
+    });
+    sortLabel.appendChild(transactionLotsSortSelect);
+    transactionLotsControls.appendChild(sortLabel);
+
+    const orderLabel = document.createElement('label');
+    orderLabel.className = 'lots-control';
+    orderLabel.innerHTML = '<span>Order</span>';
+    transactionLotsDirectionSelect = document.createElement('select');
+    transactionLotsDirectionSelect.id = 'lots-sort-direction';
+    transactionLotsDirectionSelect.setAttribute('aria-label', 'Sort direction');
+    LOT_DIRECTION_OPTIONS.forEach(option=>{
+        const opt = document.createElement('option');
+        opt.value = option.value;
+        opt.textContent = option.label;
+        transactionLotsDirectionSelect.appendChild(opt);
+    });
+    orderLabel.appendChild(transactionLotsDirectionSelect);
+    transactionLotsControls.appendChild(orderLabel);
+
+    const groupLabel = document.createElement('label');
+    groupLabel.className = 'lots-control';
+    groupLabel.innerHTML = '<span>Group by</span>';
+    transactionLotsGroupSelect = document.createElement('select');
+    transactionLotsGroupSelect.id = 'lots-group-by';
+    transactionLotsGroupSelect.setAttribute('aria-label', 'Group lots by');
+    LOT_GROUP_OPTIONS.forEach(option=>{
+        const opt = document.createElement('option');
+        opt.value = option.value;
+        opt.textContent = option.label;
+        transactionLotsGroupSelect.appendChild(opt);
+    });
+    groupLabel.appendChild(transactionLotsGroupSelect);
+    transactionLotsControls.appendChild(groupLabel);
+
+    transactionLotsSortSelect.addEventListener('change', ()=>{
+        transactionLotsSortField = transactionLotsSortSelect.value;
+        if(lastTransactionPosition && lastTransactionData){
+            renderTransactionLots(lastTransactionPosition, lastTransactionData);
+        }
+    });
+
+    transactionLotsDirectionSelect.addEventListener('change', ()=>{
+        transactionLotsSortDirection = transactionLotsDirectionSelect.value;
+        if(lastTransactionPosition && lastTransactionData){
+            renderTransactionLots(lastTransactionPosition, lastTransactionData);
+        }
+    });
+
+    transactionLotsGroupSelect.addEventListener('change', ()=>{
+        transactionLotsGroupKey = transactionLotsGroupSelect.value;
+        if(lastTransactionPosition && lastTransactionData){
+            renderTransactionLots(lastTransactionPosition, lastTransactionData);
+        }
+    });
+}
+
+function getLotGroupKey(item){
+    switch(transactionLotsGroupKey){
+        case 'type':
+            return item.typeLabel || 'Other';
+        case 'year':
+            return item.date instanceof Date && !Number.isNaN(item.date.getTime())
+                ? String(item.date.getFullYear())
+                : '__no-date__';
+        case 'gain':
+            return item.pnlValue >= 0 ? 'gain' : 'loss';
+        default:
+            return '__all__';
+    }
+}
+
+function getLotGroupLabel(key){
+    switch(transactionLotsGroupKey){
+        case 'type':
+            return key;
+        case 'year':
+            return key === '__no-date__' ? 'No date' : `Year ${key}`;
+        case 'gain':
+            if(key === 'gain') return 'Gains';
+            if(key === 'loss') return 'Losses';
+            return key;
+        default:
+            return '';
+    }
+}
+
+function renderTransactionLots(position, data){
+    if(!transactionLotsContainer) return;
+    ensureTransactionLotsControls();
+    const listElement = transactionLotsList || transactionLotsContainer;
+    const operations = Array.isArray(position.operations) ? position.operations.slice() : [];
+    if(!operations.length){
+        listElement.innerHTML = '<div class="pos">No transactions recorded yet.</div>';
+        return;
+    }
+    const currentPrice = Number(position.displayPrice || position.currentPrice || position.lastKnownPrice || position.avgPrice || 0);
+    const processed = [];
+    operations.forEach((op, index)=>{
+        if(op.skipInCharts) return;
+        const qtySigned = Number(op.amount || 0);
+        if(!qtySigned) return;
+        const absQty = Math.abs(qtySigned);
+        const date = op.date instanceof Date ? op.date : (op.rawDate ? new Date(op.rawDate) : null);
+        const price = Number(op.price || currentPrice || 0) || 0;
+        const rawSpent = Number(op.spent);
+        let baseAmount = Number.isFinite(rawSpent) ? Math.abs(rawSpent) : Math.abs(price * absQty);
+        const typeLabel = qtySigned > 0 ? 'Buy' : 'Sell';
+        const amountLabel = qtySigned > 0 ? 'Invested' : 'Proceeds';
+        let pnlValue = 0;
+        if(qtySigned > 0){
+            if(!baseAmount) baseAmount = Math.abs(price * absQty);
+            const currentValue = currentPrice * absQty;
+            pnlValue = currentValue - baseAmount;
+        }else{
+            if(!baseAmount) baseAmount = Math.abs(price * absQty);
+            const estimatedCost = Math.abs(price * absQty);
+            pnlValue = baseAmount - estimatedCost;
+        }
+        const pnlPct = baseAmount ? (pnlValue / baseAmount) * 100 : 0;
+        const pnlClass = pnlValue >= 0 ? 'lot-positive' : 'lot-negative';
+        processed.push({
+            id: op.id || `lot-${index}`,
+            date,
+            dateValue: date instanceof Date && !Number.isNaN(date.getTime()) ? date.getTime() : -Infinity,
+            dateLabel: date instanceof Date && !Number.isNaN(date.getTime()) ? formatDateShort(date) : '—',
+            typeLabel,
+            absQty,
+            price,
+            baseAmount,
+            amountLabel,
+            pnlValue,
+            pnlPct,
+            pnlClass
+        });
+    });
+
+    if(!processed.length){
+        listElement.innerHTML = '<div class="pos">No transactions recorded yet.</div>';
+        return;
+    }
+
+    const sortComparators = {
+        date: (a, b)=> a.dateValue - b.dateValue,
+        qty: (a, b)=> a.absQty - b.absQty,
+        price: (a, b)=> a.price - b.price,
+        amount: (a, b)=> a.baseAmount - b.baseAmount,
+        pnl: (a, b)=> a.pnlValue - b.pnlValue
+    };
+
+    const comparator = sortComparators[transactionLotsSortField] || sortComparators.date;
+    const sorted = processed.slice().sort((a, b)=>{
+        const result = comparator(a, b);
+        return transactionLotsSortDirection === 'desc' ? -result : result;
+    });
+
+    const groups = [];
+    if(transactionLotsGroupKey === 'none'){
+        groups.push({ label: null, items: sorted });
+    }else{
+        const map = new Map();
+        sorted.forEach(item=>{
+            const key = getLotGroupKey(item);
+            if(!map.has(key)){
+                map.set(key, []);
+            }
+            map.get(key).push(item);
+        });
+        map.forEach((items, key)=>{
+            groups.push({ label: getLotGroupLabel(key), items });
+        });
+    }
+
+    listElement.innerHTML = '';
+    groups.forEach(group=>{
+        if(transactionLotsGroupKey !== 'none'){
+            const heading = document.createElement('div');
+            heading.className = 'lot-group-heading';
+            heading.textContent = group.label;
+            listElement.appendChild(heading);
+        }
+        group.items.forEach(item=>{
+            const pnlPercentDisplay = Number.isFinite(item.pnlPct) ? formatPercent(item.pnlPct) : '—';
+            const row = document.createElement('div');
+            row.className = 'lot-row';
+            row.innerHTML = `
+                <div><strong>${item.dateLabel}</strong></div>
+                <div>${item.typeLabel} · ${formatQty(item.absQty)}</div>
+                <div>Price ${money(item.price)}</div>
+                <div>${item.amountLabel} ${money(item.baseAmount)}</div>
+                <div class="lot-value ${item.pnlClass}">${money(item.pnlValue)} (${pnlPercentDisplay})</div>
+            `;
+            listElement.appendChild(row);
+        });
+    });
+
+    listElement.scrollTop = 0;
+}
+
+function renderTransactionMeta(position, summary){
+    if(!transactionModalMeta) return;
+    transactionModalMeta.innerHTML = `
+        <div class="modal-meta-grid">
+            <div><strong>Net qty:</strong> ${formatQty(summary.netQty)}</div>
+            <div><strong>Total bought:</strong> ${formatQty(summary.totalBuys)}</div>
+            <div><strong>Total sold:</strong> ${formatQty(summary.totalSells)}</div>
+            <div><strong>Cash invested:</strong> ${money(summary.totalSpent)}</div>
+            <div><strong>Cash returned:</strong> ${money(summary.totalProceeds)}</div>
+        </div>
+    `;
+}
+
+function openTransactionModal(position){
+    ensureTransactionModalElements();
+    ensureNetWorthDetailModalElements();
+    if(!transactionModal || !transactionModalCanvas) return;
+    const data = buildTransactionChartData(position);
+    lastTransactionData = data;
+    lastTransactionPosition = position;
+    const displayName = position.displayName || position.Symbol || position.Name || position.id || 'Asset';
+    if(transactionModalTitle){
+        transactionModalTitle.textContent = `${displayName} transactions`;
+    }
+    if(transactionModalSubtitle){
+            transactionModalSubtitle.textContent = position.type || '—';
+            const note = document.createElement('div');
+            note.className = 'pos modal-note';
+            note.textContent = 'Dot size represents traded quantity.';
+            transactionModalSubtitle.appendChild(note);
+    }
+
+    const hasData = data.purchases.length || data.sales.length;
+    transactionModalCanvas.classList.remove('hidden');
+    registerFinancialControllers();
+    const config = buildTransactionChartConfig(data, position, data.fallbackPriceSeries);
+    if(transactionChart){
+        transactionChart.data = config.data;
+        transactionChart.options = config.options;
+        transactionChart.update('none');
+    }else{
+        const existing = window.Chart && typeof window.Chart.getChart === 'function' ? window.Chart.getChart(transactionModalCanvas) : null;
+        if(existing){
+            existing.destroy();
+        }
+            const ctx = transactionModalCanvas.getContext('2d');
+            transactionChart = new Chart(ctx, config);
+            transactionChart.canvas.classList.remove('hidden');
+    }
+    if(hasData){
+        renderTransactionMeta(position, data.summary);
+    }else if(transactionModalMeta){
+        transactionModalMeta.innerHTML = '<div class="pos">No purchase or sale operations recorded yet.</div>';
+    }
+    renderTransactionLots(position, data);
+    setModalView('chart');
+    loadHistoricalPriceSeries(position);
+
+    transactionModal.classList.remove('hidden');
+    transactionModal.setAttribute('aria-hidden','false');
+    document.body.classList.add('modal-open');
+    const closeButton = transactionModal.querySelector('.modal-close');
+    if(closeButton){
+        closeButton.focus();
+    }
+}
+
+async function loadHistoricalPriceSeries(position){
+    try{
+        const series = await fetchHistoricalPriceSeries(position);
+        if(!series.length){
+            if(transactionModalMeta){
+                const existing = transactionModalMeta.querySelector('.price-history-note');
+                if(!existing){
+                    const note = document.createElement('div');
+                    note.className = 'pos price-history-note';
+                    note.textContent = 'Historical price data unavailable.';
+                    transactionModalMeta.appendChild(note);
+                }
+            }
+            return;
+        }
+        if(transactionModalMeta){
+            const existing = transactionModalMeta.querySelector('.price-history-note');
+            if(existing) existing.remove();
+        }
+        if(!lastTransactionData || lastTransactionPosition !== position) return;
+        const config = buildTransactionChartConfig(lastTransactionData, position, series);
+        if(transactionChart){
+            transactionChart.destroy();
+        }
+        const ctx = transactionModalCanvas.getContext('2d');
+        transactionChart = new Chart(ctx, config);
+        transactionChart.canvas.classList.remove('hidden');
+    }catch(error){
+        console.warn('Failed to load historical price series', error);
+    }
+}
+
 function buildAnalyticsSection(categoryKey, title, positions, options){
     const details = document.createElement('details');
     details.className = 'analytics-section';
@@ -1467,22 +3051,99 @@ function buildAnalyticsSection(categoryKey, title, positions, options){
 function createOpenPositionRow(position, totalCategoryValue){
     const row = document.createElement('div');
     row.className = 'analytics-row';
-    const price = Number(position.displayPrice ?? position.currentPrice ?? position.lastKnownPrice ?? position.avgPrice ?? 0);
+    const priceCandidates = [
+        position.displayPrice,
+        position.currentPrice,
+        position.lastKnownPrice,
+        position.lastPurchasePrice,
+        position.avgPrice
+    ].map(value=> Number(value)).filter(value=> Number.isFinite(value));
+    const prioritizedPrice = priceCandidates.find(value => Math.abs(value) > 1e-9);
+    const fallbackPrice = Number(position.displayPrice ?? position.currentPrice ?? position.lastKnownPrice ?? position.avgPrice ?? position.lastPurchasePrice ?? 0) || 0;
+    const price = Number.isFinite(prioritizedPrice) ? prioritizedPrice : fallbackPrice;
     const marketValue = Number(position.marketValue || 0);
     const pnlValue = Number((position.rangePnl ?? position.pnl) || 0);
     const share = totalCategoryValue ? (marketValue / totalCategoryValue) * 100 : null;
+    const reinvestedQty = Math.max(0, Number(position.reinvested || 0));
+    const reinvestPrice = Math.abs(price) > 1e-9 ? price : fallbackPrice;
+    const hasReinvestValue = reinvestedQty > 1e-6 && Math.abs(reinvestPrice) > 1e-9;
+    const reinvestedValue = hasReinvestValue ? reinvestPrice * reinvestedQty : 0;
+    const reinvestedDisplay = hasReinvestValue ? money(reinvestedValue) : null;
     const shareText = Number.isFinite(share) ? `${share.toFixed(1)}%` : '—';
-    row.innerHTML = `
-        <div>
-            <div class="symbol">${position.displayName || position.Symbol || position.Name}</div>
-            <div class="pos">Qty ${formatQty(Number(position.qty || 0))} · Price ${money(price)}</div>
-        </div>
-        <div class="analytics-values">
-            <div class="value-strong">${money(marketValue)}</div>
-            <div class="${pnlValue >= 0 ? 'delta-positive' : 'delta-negative'}">${money(pnlValue)}</div>
-            <div class="muted">Category ${shareText}</div>
-        </div>
-    `;
+    const main = document.createElement('div');
+    main.className = 'analytics-main';
+    const iconEl = createAssetIconElement(position);
+    if(iconEl){
+        main.appendChild(iconEl);
+    }
+    const label = document.createElement('div');
+    label.className = 'asset-label';
+    const nameEl = document.createElement('div');
+    nameEl.className = 'symbol';
+    nameEl.textContent = position.displayName || position.Symbol || position.Name;
+    const metaEl = document.createElement('div');
+    metaEl.className = 'pos';
+    const qtyText = `Qty ${formatQty(Number(position.qty || 0))}`;
+    const metaParts = [
+        qtyText,
+        position.priceStatus
+            ? `Price <span class="price-warning">${money(price)} · ${position.priceStatus}</span>`
+            : `Price ${money(price)}`
+    ];
+    metaEl.innerHTML = metaParts.join(' · ');
+    label.appendChild(nameEl);
+    label.appendChild(metaEl);
+    main.appendChild(label);
+    row.appendChild(main);
+
+    const values = document.createElement('div');
+    values.className = 'analytics-values';
+    const marketEl = document.createElement('div');
+    marketEl.className = 'value-strong';
+    marketEl.textContent = money(marketValue);
+    const pnlEl = document.createElement('div');
+    pnlEl.className = pnlValue >= 0 ? 'delta-positive' : 'delta-negative';
+    const pnlPercent = Number(position.rangeChangePct);
+    pnlEl.textContent = formatMoneyWithPercent(pnlValue, Number.isFinite(pnlPercent) ? pnlPercent : null, 1);
+    const shareEl = document.createElement('div');
+    shareEl.className = 'muted';
+    shareEl.textContent = `Category ${shareText}`;
+    values.appendChild(marketEl);
+    values.appendChild(pnlEl);
+    values.appendChild(shareEl);
+    if(reinvestedDisplay){
+        const reinvestEl = document.createElement('div');
+        reinvestEl.className = 'reinvested-chip';
+        reinvestEl.textContent = `Reinvested ${reinvestedDisplay}`;
+        values.appendChild(reinvestEl);
+    }
+    row.appendChild(values);
+
+    const plateImage = getAssetPlateImage(position);
+    if(plateImage){
+        row.style.setProperty('--plate-image', `url("${plateImage}")`);
+        row.dataset.plateImage = plateImage;
+    }else{
+        row.style.removeProperty('--plate-image');
+        delete row.dataset.plateImage;
+    }
+
+    row.classList.add('interactive-asset-row');
+    row.setAttribute('role', 'button');
+    row.setAttribute('tabindex', '0');
+    row.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        lastTransactionTrigger = row;
+        openTransactionModal(position);
+    });
+    row.addEventListener('keydown', event => {
+        if(event.key === 'Enter' || event.key === ' '){
+            event.preventDefault();
+            lastTransactionTrigger = row;
+            openTransactionModal(position);
+        }
+    });
     return row;
 }
 
@@ -1490,17 +3151,1203 @@ function createClosedPositionRow(position){
     const row = document.createElement('div');
     row.className = 'analytics-row';
     const realized = Number(position.realized || 0);
-    row.innerHTML = `
-        <div>
-            <div class="symbol">${position.displayName || position.Symbol || position.Name}</div>
-            <div class="pos">Realized P&amp;L ${money(realized)}</div>
-        </div>
-        <div class="analytics-values">
-            <div class="${realized >= 0 ? 'delta-positive' : 'delta-negative'}">${money(realized)}</div>
-            <div class="muted">Position closed</div>
-        </div>
-    `;
+    const priceCandidates = [
+        position.displayPrice,
+        position.currentPrice,
+        position.lastKnownPrice,
+        position.lastPurchasePrice,
+        position.avgPrice
+    ].map(value=> Number(value)).filter(value=> Number.isFinite(value));
+    const prioritizedPrice = priceCandidates.find(value => Math.abs(value) > 1e-9);
+    const fallbackPrice = Number(position.displayPrice ?? position.currentPrice ?? position.lastKnownPrice ?? position.lastPurchasePrice ?? position.avgPrice ?? 0) || 0;
+    const price = Number.isFinite(prioritizedPrice) ? prioritizedPrice : fallbackPrice;
+    const reinvestedQty = Math.max(0, Number(position.reinvested || 0));
+    const reinvestPrice = Math.abs(price) > 1e-9 ? price : fallbackPrice;
+    const hasReinvestValue = reinvestedQty > 1e-6 && Math.abs(reinvestPrice) > 1e-9;
+    const reinvestedValue = hasReinvestValue ? reinvestPrice * reinvestedQty : 0;
+    const reinvestedDisplay = hasReinvestValue ? money(reinvestedValue) : null;
+    const main = document.createElement('div');
+    main.className = 'analytics-main';
+    const iconEl = createAssetIconElement(position);
+    if(iconEl){
+        main.appendChild(iconEl);
+    }
+    const label = document.createElement('div');
+    label.className = 'asset-label';
+    const nameEl = document.createElement('div');
+    nameEl.className = 'symbol';
+    nameEl.textContent = position.displayName || position.Symbol || position.Name;
+    const metaEl = document.createElement('div');
+    metaEl.className = 'pos';
+    const realizedPercent = Number(position.rangeChangePct);
+    const metaParts = [
+        `Realized P&L ${formatMoneyWithPercent(realized, Number.isFinite(realizedPercent) ? realizedPercent : null, 1)}`
+    ];
+    metaEl.innerHTML = metaParts.join(' · ');
+    label.appendChild(nameEl);
+    label.appendChild(metaEl);
+    main.appendChild(label);
+    row.appendChild(main);
+
+    const values = document.createElement('div');
+    values.className = 'analytics-values';
+    const pnlEl = document.createElement('div');
+    pnlEl.className = realized >= 0 ? 'delta-positive' : 'delta-negative';
+    pnlEl.textContent = formatMoneyWithPercent(realized, Number.isFinite(realizedPercent) ? realizedPercent : null, 1);
+    const statusEl = document.createElement('div');
+    statusEl.className = 'muted';
+    statusEl.textContent = 'Position closed';
+    values.appendChild(pnlEl);
+    values.appendChild(statusEl);
+    if(reinvestedDisplay){
+        const reinvestEl = document.createElement('div');
+        reinvestEl.className = 'reinvested-chip';
+        reinvestEl.textContent = `Reinvested ${reinvestedDisplay}`;
+        values.appendChild(reinvestEl);
+    }
+    row.appendChild(values);
+
+    const plateImage = getAssetPlateImage(position);
+    if(plateImage){
+        row.style.setProperty('--plate-image', `url("${plateImage}")`);
+        row.dataset.plateImage = plateImage;
+    }else{
+        row.style.removeProperty('--plate-image');
+        delete row.dataset.plateImage;
+    }
+
+    row.classList.add('interactive-asset-row');
+    row.setAttribute('role', 'button');
+    row.setAttribute('tabindex', '0');
+    row.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        lastTransactionTrigger = row;
+        openTransactionModal(position);
+    });
+    row.addEventListener('keydown', event => {
+        if(event.key === 'Enter' || event.key === ' '){
+            event.preventDefault();
+            lastTransactionTrigger = row;
+            openTransactionModal(position);
+        }
+    });
     return row;
+}
+
+function applyAssetViewMode(){
+    const lists = [
+        document.getElementById('crypto-positions'),
+        document.getElementById('stock-positions')
+    ].filter(Boolean);
+    lists.forEach(list => {
+        list.classList.toggle('plates', assetViewMode === 'plates');
+    });
+    if(assetViewToggleButton){
+        const isPlates = assetViewMode === 'plates';
+        const labelText = isPlates ? 'Switch to rows view' : 'Switch to plates view';
+        assetViewToggleButton.setAttribute('aria-label', labelText);
+        assetViewToggleButton.setAttribute('title', labelText);
+        const srLabel = assetViewToggleButton.querySelector('#asset-view-toggle-label');
+        if(srLabel){
+            srLabel.textContent = labelText;
+        }
+        assetViewToggleButton.classList.toggle('active', isPlates);
+        assetViewToggleButton.classList.toggle('mode-plates', isPlates);
+        assetViewToggleButton.classList.toggle('mode-rows', !isPlates);
+    }
+}
+
+function setAssetViewMode(mode){
+    const nextMode = mode === 'plates' ? 'plates' : 'rows';
+    if(assetViewMode === nextMode) return;
+    assetViewMode = nextMode;
+    try{
+        if(typeof window !== 'undefined' && window.localStorage){
+            window.localStorage.setItem(VIEW_MODE_STORAGE_KEY, assetViewMode);
+        }
+    }catch(error){
+        console.warn('Failed to persist asset view mode', error);
+    }
+    applyAssetViewMode();
+}
+
+function getNetWorthKey(position){
+    const baseType = position.type || position.Category || 'Other';
+    const normalized = normalizeCategory(baseType, position.displayName || position.Name || position.Symbol || '');
+    const sanitized = String(normalized || 'Other').toLowerCase().replace(/[^a-z]/g, '');
+    if(NET_WORTH_LABEL_MAP[sanitized]) return sanitized;
+    return 'other';
+}
+
+function computeNetWorthTimeline(totalValue){
+    const MS_PER_DAY = 24 * 60 * 60 * 1000;
+    const operations = positions.flatMap(position => Array.isArray(position.operations) ? position.operations : []);
+    const datedOps = operations.filter(op => op && op.date instanceof Date).map(op => {
+        let spent = Number(op.spent);
+        if(!Number.isFinite(spent)){
+            const amount = Number(op.amount || 0);
+            const price = Number(op.price || 0);
+            if(Number.isFinite(amount) && Number.isFinite(price)){
+                spent = amount * price;
+            }else{
+                spent = 0;
+            }
+        }
+        return { date: new Date(op.date), spent };
+    }).filter(entry => Number.isFinite(entry.spent) && entry.spent !== 0).sort((a,b)=> a.date - b.date);
+
+    const dayBuckets = new Map();
+    datedOps.forEach(({date, spent})=>{
+        const bucketDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        const key = bucketDate.getTime();
+        dayBuckets.set(key, (dayBuckets.get(key) || 0) + spent);
+    });
+
+    const sortedKeys = Array.from(dayBuckets.keys()).sort((a,b)=>a-b);
+    let cumulative = 0;
+    const actualRaw = [];
+    sortedKeys.forEach(ts=>{
+        cumulative += dayBuckets.get(ts);
+        const safeValue = Number.isFinite(cumulative) ? Math.max(0, cumulative) : 0;
+        actualRaw.push({ date: new Date(ts), value: safeValue });
+    });
+
+    const now = new Date();
+    if(!actualRaw.length){
+        actualRaw.push({ date: new Date(now.getTime() - 90 * MS_PER_DAY), value: 0 });
+    }
+    actualRaw.push({ date: now, value: Number.isFinite(totalValue) ? Math.max(0, totalValue) : 0 });
+    actualRaw.sort((a,b)=> a.date - b.date);
+
+    const actual = actualRaw.map(entry => ({
+        x: entry.date instanceof Date ? entry.date : new Date(entry.date),
+        y: Number.isFinite(entry.value) ? Math.max(0, entry.value) : 0
+    }));
+
+    if(actual.length < 2){
+        const anchorDate = new Date(actual[0].x.getTime() - 90 * MS_PER_DAY);
+        actual.unshift({ x: anchorDate, y: actual[0].y });
+    }
+
+    const firstDate = actual[0].x instanceof Date ? actual[0].x : new Date(actual[0].x);
+    const startOfFirstYear = new Date(firstDate.getFullYear(), 0, 1);
+    const lastActual = actual[actual.length - 1];
+    const baseProjectedValue = actual.reduce((max, point)=> Math.max(max, point.y), lastActual.y);
+    const projectedShort = [{ x: lastActual.x, y: lastActual.y }];
+    let projectedValue = Math.max(lastActual.y, baseProjectedValue);
+    for(let offset = 1; offset <= 2; offset += 1){
+        projectedValue = projectedValue * 1.1;
+        projectedShort.push({
+            x: new Date(now.getFullYear() + offset, 0, 1),
+            y: Number.isFinite(projectedValue) && projectedValue > 0 ? projectedValue : 0
+        });
+    }
+
+    const projectedExtended = [...projectedShort];
+    const MAX_PROJECTION_YEARS = 40;
+    let yearOffset = projectedShort.length - 1;
+    let extendedValue = projectedShort[projectedShort.length - 1].y;
+    while(projectedExtended[projectedExtended.length - 1].y < MILLION_TARGET && yearOffset < MAX_PROJECTION_YEARS){
+        yearOffset += 1;
+        extendedValue = extendedValue * 1.1;
+        projectedExtended.push({
+            x: new Date(now.getFullYear() + yearOffset, 0, 1),
+            y: Number.isFinite(extendedValue) && extendedValue > 0 ? extendedValue : 0
+        });
+    }
+
+    const lastProjectedPoint = projectedShort[projectedShort.length - 1];
+
+    return {
+        actual,
+        projected: projectedShort,
+        projectedExtended,
+        domain: {
+            min: startOfFirstYear,
+            max: lastProjectedPoint?.x || projectedShort[projectedShort.length - 1].x
+        }
+    };
+}
+
+function generateSmoothSeries(points, options = {}){
+    const stepDays = Math.max(1, Number.isFinite(options.stepDays) ? options.stepDays : 7);
+    const smoothing = Math.max(0, Math.min(0.9, Number.isFinite(options.smoothing) ? options.smoothing : 0.25));
+    const stepMs = stepDays * 24 * 60 * 60 * 1000;
+    const sorted = Array.isArray(points) ? points.map(point => {
+        const sourceDate = point?.x ?? point?.date;
+        const date = sourceDate instanceof Date ? new Date(sourceDate) : new Date(sourceDate || Date.now());
+        const value = Number(point?.y ?? point?.value ?? 0) || 0;
+        return { x: date, y: value < 0 ? 0 : value };
+    }).filter(entry => entry.x instanceof Date && !Number.isNaN(entry.x.getTime())) : [];
+    sorted.sort((a, b) => a.x - b.x);
+    if(!sorted.length){
+        return [];
+    }
+    const result = [];
+    let previous = sorted[0].y;
+    result.push({ x: sorted[0].x, y: previous });
+    for(let i = 0; i < sorted.length - 1; i += 1){
+        const start = sorted[i];
+        const end = sorted[i + 1];
+        const span = end.x.getTime() - start.x.getTime();
+        if(span <= 0){
+            previous = end.y;
+            result.push({ x: end.x, y: previous });
+            continue;
+        }
+        const steps = Math.max(1, Math.round(span / stepMs));
+        for(let step = 1; step <= steps; step += 1){
+            const ratio = step / steps;
+            const moment = new Date(start.x.getTime() + ratio * span);
+            const linearValue = start.y + (end.y - start.y) * ratio;
+            previous = previous + smoothing * (linearValue - previous);
+            result.push({ x: moment, y: previous });
+        }
+    }
+    const last = sorted[sorted.length - 1];
+    result[result.length - 1] = { x: last.x, y: last.y };
+    return result;
+}
+
+function renderNetWorthSparkline(timeline){
+    const canvas = document.getElementById('networth-sparkline');
+    if(!canvas){
+        if(netWorthSparklineChart){
+            netWorthSparklineChart.destroy();
+            netWorthSparklineChart = null;
+        }
+        return;
+    }
+    netWorthSparklineCanvas = canvas;
+    if(!canvas.dataset.networthDetailBound){
+        canvas.style.cursor = 'pointer';
+        canvas.setAttribute('role', 'button');
+        canvas.setAttribute('tabindex', '0');
+        canvas.setAttribute('aria-label', 'Open detailed net worth chart');
+        canvas.addEventListener('click', openNetWorthDetailModal);
+        canvas.addEventListener('keydown', event => {
+            if(event.key === 'Enter' || event.key === ' '){
+                event.preventDefault();
+                openNetWorthDetailModal();
+            }
+        });
+        canvas.dataset.networthDetailBound = 'true';
+    }
+    const actualRaw = Array.isArray(timeline?.actual) ? timeline.actual : [];
+    const projectedRaw = Array.isArray(timeline?.projected) ? timeline.projected : [];
+
+    if(!actualRaw.length){
+        if(netWorthSparklineChart){
+            netWorthSparklineChart.destroy();
+            netWorthSparklineChart = null;
+        }
+        const ctx = canvas.getContext('2d');
+        if(ctx){
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+        return;
+    }
+
+    const actualSeries = generateSmoothSeries(actualRaw, {
+        stepDays: SPARKLINE_ACTUAL_STEP_DAYS,
+        smoothing: SPARKLINE_ACTUAL_SMOOTHING
+    });
+
+    const projectedSeries = projectedRaw.length ? generateSmoothSeries(
+        [actualRaw[actualRaw.length - 1], ...projectedRaw],
+        {
+            stepDays: SPARKLINE_PROJECTED_STEP_DAYS,
+            smoothing: SPARKLINE_PROJECTED_SMOOTHING
+        }
+    ) : [];
+
+    if(projectedSeries.length){
+        const lastActual = actualSeries[actualSeries.length - 1];
+        projectedSeries[0] = { x: lastActual.x, y: lastActual.y };
+    }
+
+    const combinedData = [
+        ...actualSeries.map(point => ({ ...point, projected: false })),
+        ...projectedSeries.slice(1).map(point => ({ ...point, projected: true }))
+    ];
+
+    const axisMin = timeline?.domain?.min || new Date(actualSeries[0].x.getFullYear(), 0, 1);
+    const axisMax = timeline?.domain?.max || (projectedSeries.length ? projectedSeries[projectedSeries.length - 1].x : actualSeries[actualSeries.length - 1].x);
+
+    const dataset = {
+        type: 'line',
+        data: combinedData,
+        parsing: false,
+        spanGaps: true,
+        borderWidth: 2,
+        tension: 0.62,
+        borderCapStyle: 'round',
+        borderJoinStyle: 'round',
+        pointRadius: 0,
+        pointHoverRadius: 0,
+        pointHitRadius: 18,
+        fill: 'origin',
+        segment: {
+            borderColor(context){
+                return context.p1?.raw?.projected ? 'rgba(129, 140, 248, 0.9)' : 'rgba(56, 189, 248, 0.92)';
+            },
+            backgroundColor(context){
+                return context.p1?.raw?.projected ? 'rgba(129, 140, 248, 0.06)' : 'rgba(56, 189, 248, 0.12)';
+            },
+            borderDash(context){
+                return context.p1?.raw?.projected ? [6, 4] : undefined;
+            }
+        }
+    };
+
+    const options = {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 420, easing: 'easeOutCubic' },
+        plugins: {
+            legend: { display: false },
+            tooltip: {
+                enabled: true,
+                intersect: false,
+                mode: 'nearest',
+                displayColors: false,
+                position: 'nearest',
+                callbacks: {
+                    title(items){
+                        const item = items && items[0];
+                        if(!item) return '';
+                        const rawDate = item.raw?.x;
+                        const date = rawDate instanceof Date ? rawDate : new Date(rawDate);
+                        return date ? formatDateShort(date) : '';
+                    },
+                    label(item){
+                        const raw = item.raw || {};
+                        const value = Number(raw.y ?? item.parsed?.y ?? 0);
+                        const label = raw.projected ? 'Projected net worth' : 'Net worth';
+                        return `${label}: ${formatCompactMoney(value)}`;
+                    }
+                }
+            }
+        },
+        scales: {
+            x: {
+                type: 'time',
+                min: axisMin,
+                max: axisMax,
+                offset: false,
+                grid: {
+                    display: true,
+                    color: 'rgba(148, 163, 184, 0.12)',
+                    borderDash: [2, 6],
+                    drawTicks: false
+                },
+                ticks: {
+                    display: true,
+                    autoSkip: false,
+                    maxRotation: 0,
+                    align: 'start',
+                    font: { size: 10, family: 'Inter, system-ui' },
+                    callback(value){
+                        const date = new Date(value);
+                        return Number.isFinite(date.getFullYear()) ? date.getFullYear().toString() : '';
+                    }
+                },
+                time: {
+                    unit: 'year',
+                    round: 'year',
+                    displayFormats: { year: 'yyyy' }
+                }
+            },
+            y: {
+                display: false,
+                beginAtZero: false
+            }
+        },
+        interaction: {
+            intersect: false,
+            mode: 'nearest',
+            axis: 'x'
+        },
+        layout: {
+            padding: { top: 16, bottom: 6, left: 6, right: 6 }
+        }
+    };
+
+    if(netWorthSparklineChart){
+        netWorthSparklineChart.data.datasets = [dataset];
+        netWorthSparklineChart.options = options;
+        netWorthSparklineChart.update('none');
+        if(netWorthDetailModal && !netWorthDetailModal.classList.contains('hidden')){
+            renderNetWorthDetailChart(timeline);
+        }
+        return;
+    }
+
+    if(typeof Chart === 'undefined'){
+        return;
+    }
+
+    const ctx = canvas.getContext('2d');
+    netWorthSparklineChart = new Chart(ctx, {
+        type: 'line',
+        data: { datasets: [dataset] },
+        options,
+        plugins: [sparklineCrosshairPlugin]
+    });
+    if(netWorthDetailModal && !netWorthDetailModal.classList.contains('hidden')){
+        renderNetWorthDetailChart(timeline);
+    }
+}
+
+function flattenTimelinePoints(timeline, options = {}){
+    const includeProjected = options.includeProjected !== false;
+    const map = new Map();
+    const addPoint = point => {
+        if(!point) return;
+        const rawDate = point.x ?? point.date;
+        const date = rawDate instanceof Date ? new Date(rawDate) : new Date(rawDate || Date.now());
+        if(!(date instanceof Date) || Number.isNaN(date.getTime())){
+            return;
+        }
+        const valueRaw = point.y ?? point.value ?? 0;
+        const value = Number.isFinite(Number(valueRaw)) ? Number(valueRaw) : 0;
+        map.set(date.getTime(), { x: date, y: value });
+    };
+    if(Array.isArray(timeline?.actual)){
+        timeline.actual.forEach(addPoint);
+    }
+    if(includeProjected && Array.isArray(timeline?.projected)){
+        timeline.projected.forEach(addPoint);
+    }
+    if(includeProjected && Array.isArray(timeline?.projectedExtended)){
+        timeline.projectedExtended.forEach(addPoint);
+    }
+    return Array.from(map.values()).sort((a,b)=> a.x - b.x);
+}
+
+function computeMillionTargetDate(timeline){
+    const points = flattenTimelinePoints(timeline, { includeProjected: true });
+    if(!points.length){
+        return null;
+    }
+    for(let i = 0; i < points.length; i += 1){
+        const current = points[i];
+        if(current.y >= MILLION_TARGET){
+            if(i === 0){
+                return current.x;
+            }
+            const previous = points[i - 1];
+            if(!previous || previous.y >= MILLION_TARGET){
+                return current.x;
+            }
+            const span = current.x.getTime() - previous.x.getTime();
+            if(span <= 0 || current.y === previous.y){
+                return current.x;
+            }
+            const ratio = (MILLION_TARGET - previous.y) / (current.y - previous.y);
+            const clamped = Math.max(0, Math.min(1, ratio));
+            const interpolated = new Date(previous.x.getTime() + clamped * span);
+            return interpolated;
+        }
+    }
+    return null;
+}
+
+function updateMillionTargetNote(timeline){
+    const noteEl = document.getElementById('networth-million-note');
+    if(!noteEl){
+        return;
+    }
+    const targetDate = computeMillionTargetDate(timeline);
+    if(targetDate){
+        noteEl.textContent = `1M target: ${formatDateShort(targetDate)}`;
+        noteEl.classList.remove('unavailable');
+    }else{
+        noteEl.textContent = '1M target: —';
+        noteEl.classList.add('unavailable');
+    }
+}
+
+function createMindmapNode(options = {}){
+    const size = Math.max(60, Math.min(220, Number(options.size) || 80));
+    const wrapper = document.createElement('div');
+    wrapper.className = 'mindmap-node';
+    if(options.className){
+        wrapper.classList.add(options.className);
+    }
+    wrapper.style.width = `${size}px`;
+    wrapper.style.height = `${size}px`;
+    const inner = document.createElement('div');
+    inner.className = 'mindmap-node-inner';
+    const titleEl = document.createElement('div');
+    titleEl.className = 'mindmap-node-title';
+    titleEl.textContent = options.label || '';
+    inner.appendChild(titleEl);
+    if(options.valueText){
+        const valueEl = document.createElement('div');
+        valueEl.className = 'mindmap-node-value';
+        valueEl.textContent = options.valueText;
+        inner.appendChild(valueEl);
+    }
+    if(options.detailText){
+        titleEl.dataset.fullLabel = options.detailText;
+    }
+    if(options.styles){
+        const { background, borderColor, boxShadow, textColor, titleColor } = options.styles;
+        if(background) inner.style.background = background;
+        if(borderColor) inner.style.borderColor = borderColor;
+        if(boxShadow) inner.style.boxShadow = boxShadow;
+        if(textColor) inner.style.color = textColor;
+        if(titleColor) titleEl.style.color = titleColor;
+    }
+    const duration = options.animationDuration || 16 + Math.random() * 6;
+    const delay = options.animationDelay || Math.random() * -10;
+    inner.style.animationDuration = `${duration.toFixed(2)}s`;
+    inner.style.animationDelay = `${delay.toFixed(2)}s`;
+    wrapper.appendChild(inner);
+    return { node: wrapper, inner, size };
+}
+
+function getMindmapLabel(key, fallbackLabel){
+    const normalizedKey = String(key || '').toLowerCase();
+    if(MINDMAP_LABEL_OVERRIDES[normalizedKey]){
+        return MINDMAP_LABEL_OVERRIDES[normalizedKey];
+    }
+    const label = fallbackLabel || key || '';
+    if(label.length <= 12){
+        return label;
+    }
+    const words = label.split(/\s+/).filter(Boolean);
+    if(words.length > 1){
+        const acronym = words.map(word => word[0].toUpperCase()).join('');
+        if(acronym.length >= 2 && acronym.length <= 5){
+            return acronym;
+        }
+        const trimmedWords = words.slice(0, 2).map(word => word.slice(0, 3));
+        const candidate = trimmedWords.join(' ');
+        if(candidate.length <= 12){
+            return candidate;
+        }
+    }
+    return `${label.slice(0, 9)}…`;
+}
+
+function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
+    const container = document.getElementById('networth-mindmap');
+    const linksLayer = document.getElementById('networth-mindmap-links');
+    const nodesLayer = document.getElementById('networth-mindmap-nodes');
+    if(!container || !linksLayer || !nodesLayer){
+        return false;
+    }
+    const rect = container.getBoundingClientRect();
+    const width = rect.width || container.clientWidth || container.offsetWidth || 0;
+    const height = rect.height || container.clientHeight || container.offsetHeight || 0;
+    if((width <= 0 || height <= 0) && attempt < 3){
+        requestAnimationFrame(()=> renderNetWorthMindmap(categoryMap, totalValue, attempt + 1));
+        return null;
+    }
+    if(width <= 0 || height <= 0){
+        return false;
+    }
+
+    const filteredEntries = Object.entries(categoryMap || {})
+        .filter(([, value])=> Math.abs(Number(value)) > 1e-2)
+        .sort(([a],[b])=> a.localeCompare(b));
+
+    const hash = JSON.stringify({
+        total: Number(totalValue) || 0,
+        entries: filteredEntries.map(([key, value])=> [key, Number(value) || 0])
+    });
+    if(
+        attempt === 0 &&
+        hash === lastMindmapRenderHash &&
+        width === lastMindmapDimensions.width &&
+        height === lastMindmapDimensions.height
+    ){
+        return true;
+    }
+
+    nodesLayer.innerHTML = '';
+    linksLayer.innerHTML = '';
+
+    linksLayer.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    linksLayer.setAttribute('width', width);
+    linksLayer.setAttribute('height', height);
+    linksLayer.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const total = Number(totalValue) || 0;
+    const magnitudeSum = filteredEntries.reduce((sum, [, rawValue])=> sum + Math.abs(Number(rawValue) || 0), 0);
+
+    const nodesData = filteredEntries.map(([key, rawValue])=>{
+        const numericValue = Number(rawValue) || 0;
+        const magnitude = Math.abs(numericValue);
+        const percent = magnitudeSum > 0 ? (magnitude / magnitudeSum) * 100 : 0;
+        const baseSize = Math.max(68, Math.min(200, 68 + percent * 1.6));
+        const size = Math.max(58, Math.min(180, Math.round(baseSize * 0.85)));
+        const labelKey = key || 'other';
+        const fullLabel = NET_WORTH_LABEL_MAP[labelKey] || labelKey.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, letter => letter.toUpperCase());
+        const shortLabel = getMindmapLabel(labelKey, fullLabel);
+        return {
+            key: labelKey,
+            label: shortLabel,
+            fullLabel,
+            value: numericValue,
+            size,
+            percent
+        };
+    });
+
+    const mainDetail = total > 0 ? 'Total value' : 'Awaiting data';
+    const mainTitle = total > 0 ? `Total value: ${money(total)}` : 'Awaiting data';
+    const mainDisplayValue = total === 0 ? '$0' : formatCompactMoney(total);
+    const minDimension = Math.max(120, Math.min(width, height));
+    const sizeLimit = Math.max(110, Math.min(minDimension - 24, 220));
+    const baseMainSize = Math.min(sizeLimit, Math.max(110, Math.min(minDimension * 0.6, 200)));
+    const mainSize = Math.max(94, Math.min(sizeLimit, Math.round(baseMainSize * 0.85)));
+
+    const maxDiameter = nodesData.reduce((max, node)=> Math.max(max, node.size), 0);
+    const availableRadius = Math.max(110, Math.min(width, height) / 2 - 30);
+    const radius = Math.max(
+        availableRadius * 0.9,
+        availableRadius - (mainSize * 0.45) - (maxDiameter * 0.25),
+        (mainSize * 0.6) + 120
+    );
+
+    const mainNode = createMindmapNode({
+        label: 'Net Worth',
+        valueText: mainDisplayValue,
+        detailText: mainDetail,
+        size: mainSize,
+        className: 'mindmap-node-main',
+        animationDuration: 20,
+        animationDelay: -6,
+        styles: MINDMAP_MAIN_STYLE
+    });
+    mainNode.node.style.left = `${centerX}px`;
+    mainNode.node.style.top = `${centerY}px`;
+    mainNode.node.title = mainTitle;
+    mainNode.node.setAttribute('aria-hidden', 'true');
+    nodesLayer.appendChild(mainNode.node);
+
+    if(!nodesData.length){
+        lastMindmapRenderHash = hash;
+        lastMindmapDimensions = { width, height };
+        return true;
+    }
+
+    const twoPi = Math.PI * 2;
+    nodesData.forEach((node, index)=>{
+        const angle = twoPi * (index / nodesData.length) - Math.PI / 2;
+        const rawX = centerX + Math.cos(angle) * radius;
+        const rawY = centerY + Math.sin(angle) * radius;
+        const half = node.size / 2;
+        const clampedX = Math.min(width - half - 8, Math.max(half + 8, rawX));
+        const clampedY = Math.min(height - half - 8, Math.max(half + 8, rawY));
+        const percentLabel = node.percent > 0 ? `${node.percent.toFixed(1)}%` : '';
+        const valueWithPercent = percentLabel
+            ? `${formatCompactMoney(node.value)} (${percentLabel})`
+            : formatCompactMoney(node.value);
+        const detailText = node.fullLabel && node.fullLabel !== node.label ? node.fullLabel : '';
+        const colorTheme = MINDMAP_COLOR_PALETTE[index % MINDMAP_COLOR_PALETTE.length];
+        const bubble = createMindmapNode({
+            label: node.label,
+            valueText: valueWithPercent,
+            detailText,
+            size: node.size,
+            styles: colorTheme
+        });
+        bubble.node.style.left = `${clampedX}px`;
+        bubble.node.style.top = `${clampedY}px`;
+        const titlePercent = percentLabel ? ` (${percentLabel})` : '';
+        bubble.node.title = `${node.fullLabel}: ${money(node.value)}${titlePercent}`;
+        bubble.node.setAttribute('aria-hidden', 'true');
+        bubble.inner.style.animationDuration = `${(14 + Math.random() * 6).toFixed(2)}s`;
+        bubble.inner.style.animationDelay = `${(Math.random() * -12).toFixed(2)}s`;
+        nodesLayer.appendChild(bubble.node);
+
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', centerX);
+        line.setAttribute('y1', centerY);
+        line.setAttribute('x2', clampedX);
+        line.setAttribute('y2', clampedY);
+        line.setAttribute('stroke-width', '2');
+        line.setAttribute('stroke-dasharray', '6 6');
+        line.setAttribute('stroke-linecap', 'round');
+        if(colorTheme && colorTheme.lineColor){
+            line.setAttribute('stroke', colorTheme.lineColor);
+        }else{
+            line.setAttribute('stroke', 'rgba(56, 189, 248, 0.55)');
+        }
+        linksLayer.appendChild(line);
+    });
+
+    lastMindmapRenderHash = hash;
+    lastMindmapDimensions = { width, height };
+    return true;
+}
+
+function applyNetWorthInlineViewMode(){
+    const card = document.getElementById('net-worth-card');
+    if(!card){
+        return;
+    }
+    const isBubble = netWorthInlineViewMode === 'bubble';
+    card.classList.toggle('bubble-mode', isBubble);
+
+    if(netWorthBubbleToggleButton){
+        const labelText = isBubble ? 'Show chart view' : 'Show bubbles';
+        netWorthBubbleToggleButton.classList.toggle('active', isBubble);
+        netWorthBubbleToggleButton.setAttribute('aria-expanded', isBubble ? 'true' : 'false');
+        netWorthBubbleToggleButton.setAttribute('aria-pressed', isBubble ? 'true' : 'false');
+        const srLabel = netWorthBubbleToggleButton.querySelector('.sr-only');
+        if(srLabel){
+            srLabel.textContent = labelText;
+        }else{
+            netWorthBubbleToggleButton.textContent = labelText;
+        }
+        netWorthBubbleToggleButton.setAttribute('aria-label', labelText);
+        netWorthBubbleToggleButton.setAttribute('title', labelText);
+    }
+
+    const bubbleContainer = document.getElementById('networth-bubble-container');
+    if(bubbleContainer){
+        bubbleContainer.classList.toggle('hidden', !isBubble);
+        bubbleContainer.setAttribute('aria-hidden', isBubble ? 'false' : 'true');
+    }
+    const noteEl = document.getElementById('networth-million-note');
+    if(noteEl){
+        noteEl.setAttribute('aria-hidden', isBubble ? 'true' : 'false');
+    }
+
+    if(isBubble){
+        netWorthBubbleSnapshot = { ...(lastNetWorthTotals || {}) };
+        netWorthBubbleSnapshotTotal = lastNetWorthTotalValue;
+        netWorthBubbleNeedsRender = true;
+        lastMindmapRenderHash = null;
+        const attemptRender = ()=>{
+            const sourceTotals = netWorthBubbleSnapshot || lastNetWorthTotals;
+            const sourceTotalValue = netWorthBubbleSnapshot ? netWorthBubbleSnapshotTotal : lastNetWorthTotalValue;
+            const result = renderNetWorthMindmap(sourceTotals, sourceTotalValue);
+            if(result === null){
+                requestAnimationFrame(attemptRender);
+            }else if(result){
+                netWorthBubbleNeedsRender = false;
+            }
+        };
+        attemptRender();
+    }else{
+        netWorthBubbleNeedsRender = false;
+        netWorthBubbleSnapshot = null;
+        netWorthBubbleSnapshotTotal = 0;
+    }
+}
+
+function setNetWorthInlineViewMode(mode){
+    const next = mode === 'bubble' ? 'bubble' : 'chart';
+    if(netWorthInlineViewMode === next){
+        return;
+    }
+    netWorthInlineViewMode = next;
+    lastMindmapRenderHash = null;
+    if(next === 'chart'){
+        lastMindmapDimensions = { width: 0, height: 0 };
+    }
+    try{
+        if(typeof window !== 'undefined' && window.localStorage){
+            window.localStorage.setItem(NET_WORTH_INLINE_VIEW_STORAGE_KEY, netWorthInlineViewMode);
+        }
+    }catch(error){
+        console.warn('Failed to persist net worth view preference', error);
+    }
+    applyNetWorthInlineViewMode();
+}
+
+function ensureNetWorthDetailModalElements(){
+    if(netWorthDetailModal && netWorthDetailCanvas){
+        return;
+    }
+    netWorthDetailModal = document.getElementById('networth-detail-modal');
+    if(!netWorthDetailModal){
+        return;
+    }
+    netWorthDetailCanvas = document.getElementById('networth-detail-chart');
+    netWorthDetailSubtitle = document.getElementById('networth-detail-subtitle');
+    netWorthDetailMeta = document.getElementById('networth-detail-meta');
+    const closeButton = netWorthDetailModal.querySelector('.modal-close');
+    if(closeButton && !closeButton.dataset.networthBound){
+        closeButton.addEventListener('click', closeNetWorthDetailModal);
+        closeButton.dataset.networthBound = 'true';
+    }
+    if(!netWorthDetailModal.dataset.networthBound){
+        netWorthDetailModal.addEventListener('click', event => {
+            if(event.target === netWorthDetailModal){
+                closeNetWorthDetailModal();
+            }
+        });
+        netWorthDetailModal.dataset.networthBound = 'true';
+    }
+}
+
+function renderNetWorthDetailChart(timeline){
+    ensureNetWorthDetailModalElements();
+    if(!netWorthDetailCanvas){
+        return;
+    }
+    const usableTimeline = timeline || lastNetWorthTimeline;
+    if(!usableTimeline){
+        return;
+    }
+    if(typeof Chart === 'undefined'){
+        return;
+    }
+    const actualSeries = generateSmoothSeries(usableTimeline.actual || [], {
+        stepDays: 5,
+        smoothing: 0.2
+    });
+    if(!actualSeries.length){
+        if(netWorthDetailChart){
+            netWorthDetailChart.destroy();
+            netWorthDetailChart = null;
+        }
+        return;
+    }
+    let projectedSeries = [];
+    const projectedSource = Array.isArray(usableTimeline.projectedExtended) && usableTimeline.projectedExtended.length > 1
+        ? usableTimeline.projectedExtended
+        : usableTimeline.projected;
+    if(Array.isArray(projectedSource) && projectedSource.length > 1){
+        const stitched = [
+            usableTimeline.actual?.[usableTimeline.actual.length - 1],
+            ...projectedSource.slice(1)
+        ].filter(Boolean);
+        projectedSeries = generateSmoothSeries(stitched, {
+            stepDays: 10,
+            smoothing: 0.26
+        });
+    }
+    const datasets = [{
+        label: 'Net worth (actual)',
+        data: actualSeries,
+        borderColor: 'rgba(56, 189, 248, 0.95)',
+        backgroundColor: 'rgba(56, 189, 248, 0.16)',
+        borderWidth: 2.4,
+        tension: 0.55,
+        fill: 'origin',
+        pointRadius: 0,
+        pointHoverRadius: 3,
+        pointHitRadius: 12,
+        spanGaps: true
+    }];
+    if(projectedSeries.length){
+        datasets.push({
+            label: 'Net worth (projected)',
+            data: projectedSeries,
+            borderColor: 'rgba(129, 140, 248, 0.95)',
+            backgroundColor: 'rgba(129, 140, 248, 0.08)',
+            borderDash: [6, 4],
+            borderWidth: 2.1,
+            tension: 0.6,
+            fill: false,
+            pointRadius: 0,
+            pointHoverRadius: 3,
+            pointHitRadius: 12,
+            spanGaps: true
+        });
+    }
+    const firstPoint = actualSeries[0];
+    const lastActualPoint = actualSeries[actualSeries.length - 1];
+    const endPoint = (projectedSeries.length ? projectedSeries[projectedSeries.length - 1] : lastActualPoint);
+    const targetDate = computeMillionTargetDate(usableTimeline);
+    if(netWorthDetailSubtitle){
+        netWorthDetailSubtitle.textContent = `${formatDateShort(firstPoint.x)} – ${formatDateShort(endPoint.x)}`;
+    }
+    if(netWorthDetailMeta){
+        const targetText = targetDate ? formatDateShort(targetDate) : '—';
+        netWorthDetailMeta.innerHTML = `
+            <div>Current net worth: <strong>${money(lastActualPoint.y)}</strong></div>
+            <div>Projection horizon: <strong>${money(endPoint.y)}</strong></div>
+            <div>1M target: <strong>${targetText}</strong></div>
+        `;
+    }
+    const isLightTheme = document.body.classList.contains('light-theme');
+    const gridColor = isLightTheme ? 'rgba(148, 163, 184, 0.28)' : 'rgba(148, 163, 184, 0.18)';
+    const tickColor = isLightTheme ? 'rgba(30, 41, 59, 0.78)' : 'rgba(226, 232, 240, 0.82)';
+    const legendColor = isLightTheme ? 'rgba(30, 41, 59, 0.85)' : 'rgba(226, 232, 240, 0.88)';
+    const tooltipBg = isLightTheme ? 'rgba(255, 255, 255, 0.95)' : 'rgba(15, 23, 42, 0.95)';
+    const tooltipText = isLightTheme ? '#0f172a' : '#f8fafc';
+    const options = {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'nearest', intersect: false },
+        plugins: {
+            legend: {
+                display: true,
+                labels: {
+                    color: legendColor,
+                    usePointStyle: true,
+                    padding: 12
+                }
+            },
+            tooltip: {
+                enabled: true,
+                backgroundColor: tooltipBg,
+                titleColor: tooltipText,
+                bodyColor: tooltipText,
+                borderColor: isLightTheme ? 'rgba(148, 163, 184, 0.45)' : 'rgba(51, 65, 85, 0.45)',
+                borderWidth: 1,
+                callbacks: {
+                    title(items){
+                        const item = items && items[0];
+                        if(!item) return '';
+                        const rawDate = item.raw?.x;
+                        const date = rawDate instanceof Date ? rawDate : new Date(rawDate);
+                        return date ? formatDateShort(date) : '';
+                    },
+                    label(item){
+                        const value = item.raw?.y ?? item.parsed?.y ?? 0;
+                        return `${item.dataset?.label || 'Value'}: ${money(value)}`;
+                    }
+                }
+            }
+        },
+        scales: {
+            x: {
+                type: 'time',
+                grid: {
+                    color: gridColor,
+                    borderDash: [2, 6],
+                    drawTicks: false
+                },
+                ticks: {
+                    color: tickColor,
+                    autoSkip: true,
+                    maxRotation: 0,
+                    major: { enabled: false }
+                },
+                time: {
+                    unit: 'month',
+                    displayFormats: { month: 'MMM yyyy' }
+                }
+            },
+            y: {
+                grid: {
+                    color: gridColor,
+                    borderDash: [4, 6]
+                },
+                ticks: {
+                    color: tickColor,
+                    callback: value => money(value)
+                }
+            }
+        },
+        layout: {
+            padding: { top: 8, right: 12, bottom: 8, left: 8 }
+        }
+    };
+    const data = { datasets };
+    if(netWorthDetailChart){
+        netWorthDetailChart.data = data;
+        netWorthDetailChart.options = options;
+        netWorthDetailChart.update('none');
+    }else{
+        const ctx = netWorthDetailCanvas.getContext('2d');
+        netWorthDetailChart = new Chart(ctx, {
+            type: 'line',
+            data,
+            options
+        });
+    }
+}
+
+function openNetWorthDetailModal(){
+    ensureNetWorthDetailModalElements();
+    if(!netWorthDetailModal){
+        return;
+    }
+    if(netWorthDetailModal && !netWorthDetailModal.classList.contains('hidden')){
+        renderNetWorthDetailChart(lastNetWorthTimeline);
+        return;
+    }
+    const fallbackTotal = positions.reduce((sum, position)=> sum + Number(position.marketValue || 0), 0);
+    const timeline = lastNetWorthTimeline || computeNetWorthTimeline(fallbackTotal);
+    if(!lastNetWorthTimeline && timeline){
+        lastNetWorthTimeline = timeline;
+    }
+    renderNetWorthDetailChart(timeline);
+    netWorthDetailModal.classList.remove('hidden');
+    netWorthDetailModal.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('modal-open');
+    const closeButton = netWorthDetailModal.querySelector('.modal-close');
+    if(closeButton && typeof closeButton.focus === 'function'){
+        closeButton.focus({ preventScroll: true });
+    }
+}
+
+function closeNetWorthDetailModal(){
+    if(!netWorthDetailModal){
+        return;
+    }
+    netWorthDetailModal.classList.add('hidden');
+    netWorthDetailModal.setAttribute('aria-hidden', 'true');
+    if(netWorthSparklineCanvas && typeof netWorthSparklineCanvas.focus === 'function'){
+        netWorthSparklineCanvas.focus({ preventScroll: false });
+    }
+    if(!transactionModal || transactionModal.classList.contains('hidden')){
+        document.body.classList.remove('modal-open');
+    }
+}
+
+function extractEtContext(date){
+    const numericFormatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: MARKET_TIME_ZONE,
+        hour12: false,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    });
+    const offsetFormatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: MARKET_TIME_ZONE,
+        timeZoneName: 'shortOffset'
+    });
+    const weekdayFormatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: MARKET_TIME_ZONE,
+        weekday: 'short'
+    });
+    const parts = numericFormatter.formatToParts(date);
+    const partValue = type => Number(parts.find(part => part.type === type)?.value || 0);
+    const year = partValue('year');
+    const month = partValue('month');
+    const day = partValue('day');
+    const hour = partValue('hour');
+    const minute = partValue('minute');
+    const second = partValue('second');
+    const offsetParts = offsetFormatter.formatToParts(date);
+    const offsetString = offsetParts.find(part => part.type === 'timeZoneName')?.value || '';
+    const offsetMatch = /GMT([+-])(\d{1,2})(?::(\d{2}))?/i.exec(offsetString);
+    let offsetMinutes = 240;
+    if(offsetMatch){
+        const sign = offsetMatch[1] === '-' ? -1 : 1;
+        const hours = Number(offsetMatch[2] || 0);
+        const minutes = Number(offsetMatch[3] || 0);
+        const gmtOffset = sign * (hours * 60 + minutes);
+        offsetMinutes = -gmtOffset;
+    }
+    const weekdayString = weekdayFormatter.format(date).toLowerCase();
+    const weekdayIndex = WEEKDAY_NAME_TO_INDEX[weekdayString.slice(0,3)] ?? 0;
+    return { year, month, day, hour, minute, second, offsetMinutes, weekdayIndex };
+}
+
+function createEtInstant(context, minutes){
+    const hour = Math.floor(minutes / 60);
+    const minute = minutes % 60;
+    const utcMs = Date.UTC(context.year, context.month - 1, context.day, hour, minute, 0) + context.offsetMinutes * 60 * 1000;
+    return new Date(utcMs);
+}
+
+function formatDuration(ms){
+    if(!Number.isFinite(ms)) return '';
+    const totalMinutes = Math.max(0, Math.round(ms / 60000));
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if(hours <= 0 && minutes <= 0) return '0m';
+    if(hours <= 0) return `${minutes}m`;
+    if(minutes === 0) return `${hours}h`;
+    return `${hours}h ${minutes}m`;
+}
+
+function computeMarketStatusInfo(reference = new Date()){
+    const context = extractEtContext(reference);
+    const minutes = context.hour * 60 + context.minute;
+    const openInstant = createEtInstant(context, MARKET_OPEN_MINUTES);
+    const closeInstant = createEtInstant(context, MARKET_CLOSE_MINUTES);
+    const isWeekday = context.weekdayIndex >= 1 && context.weekdayIndex <= 5;
+    const isOpen = isWeekday && minutes >= MARKET_OPEN_MINUTES && minutes < MARKET_CLOSE_MINUTES;
+    let nextOpenInstant = null;
+    if(isOpen){
+        nextOpenInstant = closeInstant;
+    }else if(isWeekday && minutes < MARKET_OPEN_MINUTES){
+        nextOpenInstant = openInstant;
+    }else{
+        let searchDate = new Date(reference.getTime());
+        for(let i = 0; i < 7; i += 1){
+            searchDate = new Date(searchDate.getTime() + 24 * 60 * 60 * 1000);
+            const candidateContext = extractEtContext(searchDate);
+            const weekdayCandidate = candidateContext.weekdayIndex;
+            if(weekdayCandidate >= 1 && weekdayCandidate <= 5){
+                nextOpenInstant = createEtInstant(candidateContext, MARKET_OPEN_MINUTES);
+                break;
+            }
+        }
+    }
+    return { isOpen, openInstant, closeInstant, nextOpenInstant };
+}
+
+function updateMarketStatus(){
+    const statusEl = document.getElementById('market-status');
+    if(!statusEl) return;
+    const textEl = document.getElementById('market-status-text');
+    const usEl = document.getElementById('market-hours-us');
+    const localEl = document.getElementById('market-hours-local');
+    const nextEl = document.getElementById('market-next-open');
+    const now = new Date();
+    const info = computeMarketStatusInfo(now);
+    statusEl.classList.toggle('closed', !info.isOpen);
+    if(textEl){
+        textEl.textContent = info.isOpen ? 'Market open' : 'Market closed';
+    }
+    const usFormatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: MARKET_TIME_ZONE,
+        hour: 'numeric',
+        minute: '2-digit'
+    });
+    const localFormatter = new Intl.DateTimeFormat(undefined, {
+        hour: 'numeric',
+        minute: '2-digit'
+    });
+    const descriptorFormatter = new Intl.DateTimeFormat(undefined, {
+        weekday: 'short',
+        hour: 'numeric',
+        minute: '2-digit'
+    });
+    if(usEl){
+        usEl.textContent = `US hours: ${usFormatter.format(info.openInstant)} – ${usFormatter.format(info.closeInstant)} ET`;
+    }
+    if(localEl){
+        localEl.textContent = `Local: ${localFormatter.format(info.openInstant)} – ${localFormatter.format(info.closeInstant)}`;
+    }
+    if(nextEl){
+        if(info.isOpen){
+            const remaining = info.closeInstant.getTime() - now.getTime();
+            nextEl.textContent = `Closes ${descriptorFormatter.format(info.closeInstant)} (${formatDuration(remaining)})`;
+        }else if(info.nextOpenInstant){
+            const untilOpen = info.nextOpenInstant.getTime() - now.getTime();
+            nextEl.textContent = `Opens ${descriptorFormatter.format(info.nextOpenInstant)} (${formatDuration(untilOpen)})`;
+        }else{
+            nextEl.textContent = '—';
+        }
+    }
+}
+
+function initMarketStatusWatcher(){
+    updateMarketStatus();
+    if(marketStatusTimer){
+        clearInterval(marketStatusTimer);
+    }
+    marketStatusTimer = setInterval(updateMarketStatus, MARKET_STATUS_INTERVAL);
+    if(typeof document !== 'undefined' && !marketStatusVisibilityBound){
+        document.addEventListener('visibilitychange', ()=>{
+            if(document.visibilityState === 'visible'){
+                updateMarketStatus();
+            }
+        });
+        marketStatusVisibilityBound = true;
+    }
 }
 
 function setCategoryMetric(categoryKey, metricKey, value, elementId, formatter){
@@ -1533,7 +4380,13 @@ function renderCategoryAnalytics(categoryKey, config){
     const allocation = totalPortfolioValue ? (totalCategoryValue / totalPortfolioValue) * 100 : null;
 
     setCategoryMetric(config.metricKey, 'market', totalCategoryValue, config.summary.market, money);
-    setCategoryMetric(config.metricKey, 'pnl', totalPnl, config.summary.pnl, money);
+    setCategoryMetric(
+        config.metricKey,
+        'pnl',
+        totalPnl,
+        config.summary.pnl,
+        value => formatCategorySummaryPnl(value, totalCategoryValue)
+    );
     setCategoryMetric(config.metricKey, 'allocation', allocation, config.summary.allocation, value => {
         if(value === null) return '—';
         return `${value.toFixed(1)}%`;
@@ -1600,6 +4453,7 @@ function renderCategoryAnalytics(categoryKey, config){
             type: 'closed'
         }));
     }
+    applyAssetViewMode();
 }
 
 function renderCryptoAnalytics(){
@@ -1608,23 +4462,76 @@ function renderCryptoAnalytics(){
 
 function renderStockAnalytics(){
     renderCategoryAnalytics('stock', CATEGORY_CONFIG.stock);
+    updateMarketStatus();
 }
 
 function updateKpis(){
     positions.forEach(recomputePositionMetrics);
-    const categoryTotal = currentCategoryRangeTotals.crypto + currentCategoryRangeTotals.stock + currentCategoryRangeTotals.realEstate + currentCategoryRangeTotals.other;
-    const totalPnl = categoryTotal;
-    const cashAvailable = positions.filter(p=> (p.type||'').toLowerCase()==='cash').reduce((sum,p)=>sum + Number(p.marketValue||0),0);
+    const totalPnl = currentCategoryRangeTotals.crypto + currentCategoryRangeTotals.stock + currentCategoryRangeTotals.realEstate;
+    const netWorthTotals = positions.reduce((acc, position)=>{
+        const value = Number(position.marketValue || 0);
+        if(!value) return acc;
+        const key = getNetWorthKey(position);
+        acc[key] = (acc[key] || 0) + value;
+        return acc;
+    }, {});
+    try{
+        const realEstateAnalytics = computeRealEstateAnalytics();
+        if(realEstateAnalytics && Array.isArray(realEstateAnalytics.rows) && realEstateAnalytics.rows.length){
+            const projectedByCategory = realEstateAnalytics.rows.reduce((acc, stat)=>{
+                const value = Number(stat.projectedValue || 0);
+                if(!Number.isFinite(value) || value <= 0) return acc;
+                const key = getNetWorthKey(stat.positionRef || { type: stat.category, Name: stat.name });
+                acc[key] = (acc[key] || 0) + value;
+                return acc;
+            }, {});
+            Object.entries(projectedByCategory).forEach(([key, value])=>{
+                if(Number.isFinite(value)){
+                    netWorthTotals[key] = value;
+                }
+            });
+        }
+    }catch(error){
+        console.warn('Failed to compute real estate projected totals for net worth', error);
+    }
 
-    const updatedEl = document.getElementById('last-updated');
+    const totalMarketValue = Object.values(netWorthTotals).reduce((sum, value)=> sum + Number(value || 0), 0);
+
+    lastNetWorthTotals = { ...(netWorthTotals || {}) };
+    lastNetWorthTotalValue = totalMarketValue;
+
+    const netWorthTimeline = computeNetWorthTimeline(totalMarketValue);
+    lastNetWorthTimeline = netWorthTimeline;
+    renderNetWorthSparkline(netWorthTimeline);
+    updateMillionTargetNote(netWorthTimeline);
 
     setMoneyWithFlash('total-pnl', totalPnl, 'totalPnl');
-    setMoneyWithFlash('equity', netContributionTotal, 'netWorth');
-    setMoneyWithFlash('buying-power', cashAvailable, 'cashAvailable');
+    const totalPnlEl = document.getElementById('total-pnl');
+    if(totalPnlEl){
+        const totalPct = totalMarketValue ? (totalPnl / totalMarketValue) * 100 : null;
+        totalPnlEl.textContent = formatMoneyWithPercent(totalPnl, Number.isFinite(totalPct) ? totalPct : null, 1);
+    }
+    setMoneyWithFlash('equity', totalMarketValue, 'netWorth');
     setCategoryPnl('pnl-category-crypto', currentCategoryRangeTotals.crypto || 0, 'pnlCrypto');
     setCategoryPnl('pnl-category-stock', currentCategoryRangeTotals.stock || 0, 'pnlStock');
     setCategoryPnl('pnl-category-realestate', currentCategoryRangeTotals.realEstate || 0, 'pnlRealEstate');
-    if(updatedEl) updatedEl.textContent = lastUpdated ? formatTime(lastUpdated) : '—';
+    if(netWorthInlineViewMode === 'bubble'){
+        const snapshotHasData = netWorthBubbleSnapshot && Object.keys(netWorthBubbleSnapshot).length > 0;
+        const currentHasData = lastNetWorthTotals && Object.keys(lastNetWorthTotals).length > 0;
+        if(!snapshotHasData && currentHasData){
+            netWorthBubbleSnapshot = { ...lastNetWorthTotals };
+            netWorthBubbleSnapshotTotal = lastNetWorthTotalValue;
+            netWorthBubbleNeedsRender = true;
+        }
+    }
+    if(netWorthInlineViewMode === 'bubble' && netWorthBubbleNeedsRender){
+        const sourceTotals = netWorthBubbleSnapshot || lastNetWorthTotals;
+        const sourceTotalValue = netWorthBubbleSnapshot ? netWorthBubbleSnapshotTotal : lastNetWorthTotalValue;
+        const result = renderNetWorthMindmap(sourceTotals, sourceTotalValue);
+        if(result){
+            netWorthBubbleNeedsRender = false;
+        }
+    }
 
     const bestNameEl = document.getElementById('best-performer-name');
     const bestPnlEl = document.getElementById('best-performer-pnl');
@@ -1765,18 +4672,75 @@ function scheduleCryptoUiUpdate(){
     }
 }
 
+function updatePnlPercentageButtonState(){
+    if(!pnlPercentageToggleButton) return;
+    const active = showPnlPercentages;
+    const label = active ? 'Hide P&L percentages' : 'Show P&L percentages';
+    pnlPercentageToggleButton.classList.toggle('active', active);
+    pnlPercentageToggleButton.setAttribute('aria-pressed', active ? 'true' : 'false');
+    pnlPercentageToggleButton.setAttribute('aria-label', label);
+    pnlPercentageToggleButton.setAttribute('title', label);
+    const srLabel = pnlPercentageToggleButton.querySelector('#pnl-percentage-toggle-label');
+    if(srLabel){
+        srLabel.textContent = label;
+    }
+}
+
+function setPnlPercentageVisibility(enabled){
+    const next = Boolean(enabled);
+    if(showPnlPercentages === next){
+        updatePnlPercentageButtonState();
+        return;
+    }
+    showPnlPercentages = next;
+    if(typeof document !== 'undefined' && document.body){
+        document.body.classList.toggle('show-pnl-percentages', showPnlPercentages);
+    }
+    updatePnlPercentageButtonState();
+    try{
+        if(typeof window !== 'undefined' && window.localStorage){
+            window.localStorage.setItem(PNL_PERCENTAGE_STORAGE_KEY, showPnlPercentages ? 'true' : 'false');
+        }
+    }catch(error){
+        console.warn('Failed to persist P&L percentage preference', error);
+    }
+    scheduleUIUpdate({immediate:true});
+}
+
 // ----------------- BOOTSTRAP LOGIC -----------------
 async function bootstrap(){
     await loadPositions();
 
     const finnhubSymbols = Array.from(symbolSet);
     if(finnhubSymbols.length){
+        const batches = [];
         for(let i=0;i<finnhubSymbols.length;i+=MAX_REST_BATCH){
-            const batch = finnhubSymbols.slice(i, i + MAX_REST_BATCH);
-            const results = await fetchSnapshotBatch(batch);
-            applySnapshotResults(results);
-            await new Promise(resolve=>setTimeout(resolve,120));
+            batches.push(finnhubSymbols.slice(i, i + MAX_REST_BATCH));
         }
+        const MAX_SNAPSHOT_CONCURRENCY = 4;
+        let nextIndex = 0;
+
+        async function snapshotWorker(){
+            while(nextIndex < batches.length){
+                const currentIndex = nextIndex;
+                nextIndex += 1;
+                const batch = batches[currentIndex];
+                if(!batch || !batch.length) continue;
+                try{
+                    const results = await fetchSnapshotBatch(batch);
+                    applySnapshotResults(results);
+                }catch(error){
+                    console.warn('Snapshot batch failed', batch, error);
+                }finally{
+                    if(nextIndex < batches.length && batches.length > MAX_SNAPSHOT_CONCURRENCY){
+                        await new Promise(resolve=>setTimeout(resolve, 60));
+                    }
+                }
+            }
+        }
+
+        const workerCount = Math.min(MAX_SNAPSHOT_CONCURRENCY, batches.length);
+        await Promise.all(Array.from({length: workerCount}, snapshotWorker));
     }
 
     positions.forEach(recomputePositionMetrics);
@@ -1790,14 +4754,105 @@ document.addEventListener('DOMContentLoaded', ()=>{
     if(loadingOverlay){
         setLoadingState('visible','Loading Airtable…');
     }
+    ensureTransactionModalElements();
+    ensureNetWorthDetailModalElements();
+    document.addEventListener('keydown', event => {
+        if(event.key === 'Escape'){
+            let handled = false;
+            if(netWorthDetailModal && !netWorthDetailModal.classList.contains('hidden')){
+                closeNetWorthDetailModal();
+                handled = true;
+            }
+            if(transactionModal && !transactionModal.classList.contains('hidden')){
+                closeTransactionModal();
+                handled = true;
+            }
+            if(handled){
+                event.preventDefault();
+            }
+        }
+    });
     const themeToggle = document.getElementById('theme-toggle');
     if(themeToggle){
         updateThemeToggleIcon(themeToggle, document.body.classList.contains('light-theme'));
         themeToggle.addEventListener('click', ()=>{
             const isLight = document.body.classList.toggle('light-theme');
             updateThemeToggleIcon(themeToggle, isLight);
+            if(netWorthDetailModal && !netWorthDetailModal.classList.contains('hidden')){
+                renderNetWorthDetailChart(lastNetWorthTimeline);
+            }
+            if(netWorthInlineViewMode === 'bubble'){
+                netWorthBubbleNeedsRender = true;
+                const sourceTotals = netWorthBubbleSnapshot || lastNetWorthTotals;
+                const sourceTotalValue = netWorthBubbleSnapshot ? netWorthBubbleSnapshotTotal : lastNetWorthTotalValue;
+                const result = renderNetWorthMindmap(sourceTotals, sourceTotalValue);
+                if(result){
+                    netWorthBubbleNeedsRender = false;
+                }
+            }
         });
     }
+
+    assetViewToggleButton = document.getElementById('asset-view-toggle');
+    try{
+        if(typeof window !== 'undefined' && window.localStorage){
+            const storedMode = window.localStorage.getItem(VIEW_MODE_STORAGE_KEY);
+            if(storedMode === 'plates' || storedMode === 'rows'){
+                assetViewMode = storedMode;
+            }
+        }
+    }catch(error){
+        console.warn('Failed to read stored asset view mode', error);
+    }
+    applyAssetViewMode();
+    if(assetViewToggleButton){
+        assetViewToggleButton.addEventListener('click', ()=>{
+            const nextMode = assetViewMode === 'plates' ? 'rows' : 'plates';
+            setAssetViewMode(nextMode);
+        });
+    }
+
+    netWorthBubbleToggleButton = document.getElementById('networth-mindmap-button');
+    try{
+        if(typeof window !== 'undefined' && window.localStorage){
+            const storedViewMode = window.localStorage.getItem(NET_WORTH_INLINE_VIEW_STORAGE_KEY);
+            if(storedViewMode === 'bubble' || storedViewMode === 'chart'){
+                netWorthInlineViewMode = storedViewMode;
+            }
+        }
+    }catch(error){
+        console.warn('Failed to read net worth view preference', error);
+    }
+    if(netWorthBubbleToggleButton){
+        netWorthBubbleToggleButton.addEventListener('click', ()=>{
+            const nextMode = netWorthInlineViewMode === 'bubble' ? 'chart' : 'bubble';
+            setNetWorthInlineViewMode(nextMode);
+        });
+    }
+    applyNetWorthInlineViewMode();
+
+    pnlPercentageToggleButton = document.getElementById('pnl-percentage-toggle');
+    if(pnlPercentageToggleButton){
+        try{
+            if(typeof window !== 'undefined' && window.localStorage){
+                const storedPercentPref = window.localStorage.getItem(PNL_PERCENTAGE_STORAGE_KEY);
+                if(storedPercentPref === 'true' || storedPercentPref === 'false'){
+                    showPnlPercentages = storedPercentPref === 'true';
+                }
+            }
+        }catch(error){
+            console.warn('Failed to read P&L percentage preference', error);
+        }
+        if(typeof document !== 'undefined' && document.body){
+            document.body.classList.toggle('show-pnl-percentages', showPnlPercentages);
+        }
+        updatePnlPercentageButtonState();
+        pnlPercentageToggleButton.addEventListener('click', ()=>{
+            setPnlPercentageVisibility(!showPnlPercentages);
+        });
+    }
+
+    initMarketStatusWatcher();
 
     document.querySelectorAll('details[data-chart]').forEach(section=>{
         section.addEventListener('toggle', ()=>{
@@ -1819,6 +4874,15 @@ document.addEventListener('DOMContentLoaded', ()=>{
         clearTimeout(resizeTimer);
         resizeTimer = setTimeout(()=>{
             Object.values(charts).forEach(chart=>chart && chart.resize());
+            if(netWorthInlineViewMode === 'bubble'){
+                netWorthBubbleNeedsRender = true;
+                const sourceTotals = netWorthBubbleSnapshot || lastNetWorthTotals;
+                const sourceTotalValue = netWorthBubbleSnapshot ? netWorthBubbleSnapshotTotal : lastNetWorthTotalValue;
+                const result = renderNetWorthMindmap(sourceTotals, sourceTotalValue);
+                if(result){
+                    netWorthBubbleNeedsRender = false;
+                }
+            }
         }, 160);
     });
 

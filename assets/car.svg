@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+    <defs>
+        <linearGradient id="carBody" x1="8" y1="48" x2="56" y2="20" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#6366f1" />
+            <stop offset="1" stop-color="#38bdf8" />
+        </linearGradient>
+        <linearGradient id="carGlass" x1="18" y1="24" x2="46" y2="12" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#0f172a" />
+            <stop offset="1" stop-color="#1e3a8a" />
+        </linearGradient>
+    </defs>
+    <path d="M12 44c0-6 4.5-15 10-18s18-3 24 0 10 12 10 18" fill="url(#carBody)" stroke="#111827" stroke-width="2.6" stroke-linejoin="round" />
+    <path d="M20 44h24" stroke="#e2e8f0" stroke-width="2" stroke-linecap="round" opacity="0.7" />
+    <path d="M22 42l-3-7c-1.2-2.8 0.4-6 3.4-6h19.2c2.4 0 4.1 2.4 3.5 4.7L43 42" fill="url(#carGlass)" stroke="#38bdf8" stroke-width="2" stroke-linejoin="round" />
+    <circle cx="20" cy="46" r="5" fill="#0f172a" stroke="#1e293b" stroke-width="3" />
+    <circle cx="44" cy="46" r="5" fill="#0f172a" stroke="#1e293b" stroke-width="3" />
+    <circle cx="20" cy="46" r="2" fill="#38bdf8" />
+    <circle cx="44" cy="46" r="2" fill="#38bdf8" />
+</svg>

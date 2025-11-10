@@ -9,6 +9,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="styles.css" />
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@3.3.0/dist/chartjs-chart-financial.min.js" defer></script>
 <script src="./config.sample.js" defer></script>
 <script src="./config.local.js" defer></script>
 <script src="./app.js" defer></script>
@@ -17,6 +19,21 @@
 <button id="theme-toggle" class="theme-toggle" aria-label="Switch to light mode">
     <span class="theme-icon">&#9728;</span>
     <span class="sr-only">Toggle theme</span>
+</button>
+
+<button id="asset-view-toggle" type="button" class="floating-view-toggle" aria-label="Switch to plates view" title="Switch to plates view">
+    <svg class="view-toggle-icon" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <rect x="3" y="3" width="7" height="7" rx="1.5"></rect>
+        <rect x="14" y="3" width="7" height="7" rx="1.5"></rect>
+        <rect x="3" y="14" width="7" height="7" rx="1.5"></rect>
+        <rect x="14" y="14" width="7" height="7" rx="1.5"></rect>
+    </svg>
+    <span class="sr-only" id="asset-view-toggle-label">Switch to plates view</span>
+</button>
+
+<button id="pnl-percentage-toggle" type="button" class="floating-pnl-toggle" aria-label="Show P&amp;L percentages" title="Show P&amp;L percentages" aria-pressed="false">
+    <span class="pnl-toggle-icon" aria-hidden="true">%</span>
+    <span class="sr-only" id="pnl-percentage-toggle-label">Show P&amp;L percentages</span>
 </button>
 
 <div id="loading-overlay">
@@ -37,7 +54,6 @@
         <div class="kpi" id="pnl-card">
             <div class="label">Total P&amp;L</div>
             <div class="big" id="total-pnl">$0.00</div>
-            <small>Updated: <span id="last-updated">&mdash;</span></small>
             <div class="pnl-breakdown">
                 <div class="pnl-sub">
                     <span class="pnl-sub-label">Crypto</span>
@@ -52,39 +68,58 @@
                     <span class="pnl-sub-value" id="pnl-category-realestate">$0.00</span>
                 </div>
             </div>
+            <div class="best-performer-inline" id="best-performer-card">
+                <div class="best-performer-header">
+                    <div class="label">Best Performer</div>
+                </div>
+                <div class="best-performer-name" id="best-performer-name">&mdash;</div>
+                <div class="best-performer-metrics">
+                    <span class="best-performer-pnl" id="best-performer-pnl">$0.00</span>
+                    <span class="best-performer-change" id="best-performer-change">&mdash;</span>
+                </div>
+                <small class="best-performer-meta" id="best-performer-meta">Awaiting data&hellip;</small>
+            </div>
         </div>
         <div class="kpi" id="net-worth-card">
             <div class="label">Net Worth</div>
             <div class="big" id="equity">$0.00</div>
-            <small>Net contributions deployed to date</small>
-        </div>
-        <div class="kpi" id="liquidity-card">
-            <div class="label">Liquidity</div>
-            <div class="big" id="buying-power">$0.00</div>
-            <small>Cash &amp; cash-equivalents from Operations</small>
-        </div>
-        <div class="kpi best-performer-card" id="best-performer-card">
-            <div class="best-performer-header">
-                <div class="label">Best Performer</div>
+            <small class="networth-note unavailable" id="networth-million-note">1M target: —</small>
+            <div class="networth-controls">
+                <button id="networth-mindmap-button" type="button" class="networth-view-toggle" aria-controls="networth-bubble-container" aria-expanded="false" aria-pressed="false">
+                    <span class="bubbles-icon" aria-hidden="true">
+                        <span class="bubble-dot bubble-dot-main"></span>
+                        <span class="bubble-dot bubble-dot-mid"></span>
+                        <span class="bubble-dot bubble-dot-small"></span>
+                    </span>
+                    <span class="sr-only" id="networth-mindmap-button-label">Show bubbles</span>
+                </button>
             </div>
-            <div class="best-performer-name" id="best-performer-name">&mdash;</div>
-            <div class="best-performer-metrics">
-                <span class="best-performer-pnl" id="best-performer-pnl">$0.00</span>
-                <span class="best-performer-change" id="best-performer-change">&mdash;</span>
+            <div class="networth-chart">
+                <canvas id="networth-sparkline"></canvas>
             </div>
-            <small class="best-performer-meta" id="best-performer-meta">Awaiting data&hellip;</small>
+            <div class="networth-bubble-container hidden" id="networth-bubble-container" aria-hidden="true">
+                <div class="networth-mindmap" id="networth-mindmap">
+                    <svg class="mindmap-links" id="networth-mindmap-links" role="presentation" aria-hidden="true"></svg>
+                    <div class="mindmap-nodes" id="networth-mindmap-nodes"></div>
+                </div>
+            </div>
         </div>
     </div>
 
     <div class="card full realestate-card">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;position:relative;z-index:1">
-            <div>
-                <strong>Rental Portfolio Analytics</strong>
-                <div class="pos" style="margin-top:4px">Real estate assets with recurring rent performance insight.</div>
+        <div class="card-header-with-icon">
+            <div class="card-heading">
+                <span class="card-icon">
+                    <img src="assets/real-estate.svg" alt="Real estate and automobile" loading="lazy" decoding="async" />
+                </span>
+                <div>
+                    <strong>Rental and Automobile Portfolio Analytics</strong>
+                    <div class="pos" style="margin-top:4px">Real estate and vehicle assets with recurring cashflow performance insight.</div>
+                </div>
             </div>
             <div class="analytics-summary">
                 <div class="metric">
-                    <span class="label">Value</span>
+                        <span class="label">Value (projected)</span>
                     <span class="value" id="realestate-value">$0.00</span>
                 </div>
                 <div class="metric">
@@ -167,6 +202,17 @@
                     <span class="value" id="stock-allocation">?</span>
                 </div>
             </div>
+          <div class="market-status" id="market-status">
+              <span class="market-dot" id="market-status-dot"></span>
+              <div class="market-status-text">
+                  <span id="market-status-text">Checking market hours…</span>
+                  <div class="market-hours">
+                      <span id="market-hours-us"></span>
+                      <span id="market-hours-local"></span>
+                      <span id="market-next-open"></span>
+                  </div>
+              </div>
+          </div>
         </div>
         <details class="analytics-section chart-section" data-chart="stockPortfolioChart">
             <summary>
@@ -184,30 +230,38 @@
         </div>
     </div>
 
-    <div class="card full asset-dynamic-card">
-        <div class="analytics-header">
-            <div>
-                <strong>Asset Growth Over Years</strong>
-                <div class="pos" style="margin-top:4px">Cumulative contributions by asset with a forward projection based on recent dynamics.</div>
-            </div>
-        </div>
-        <details class="analytics-section chart-section" data-chart="assetDynamicChart">
-            <summary>
-                <div class="summary-left"><span class="summary-title">Asset growth chart</span></div>
-                <div class="summary-extra">Cumulative trend</div>
-            </summary>
-            <div class="analytics-section-content">
-                <div class="analytics-chart asset-dynamic-chart">
-                    <canvas id="assetDynamicChart"></canvas>
-                </div>
-            </div>
-        </details>
-    </div>
-
     <footer>
         <div><span class="status-dot"></span><span id="status">&nbsp;</span></div>
         <div>Powered by Airtable &middot; Finnhub &middot; Chart.js</div>
     </footer>
+</div>
+
+<div id="networth-detail-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-content networth-detail-content" role="dialog" aria-modal="true" aria-labelledby="networth-detail-title">
+        <button type="button" class="modal-close" aria-label="Close net worth detail chart">&times;</button>
+        <h3 class="modal-title" id="networth-detail-title">Net Worth Timeline</h3>
+        <div class="modal-subtitle" id="networth-detail-subtitle"></div>
+        <div class="modal-chart networth-detail-chart">
+            <canvas id="networth-detail-chart"></canvas>
+        </div>
+        <div class="modal-meta" id="networth-detail-meta"></div>
+    </div>
+</div>
+
+<div id="transaction-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="transaction-modal-title">
+        <button type="button" class="modal-close" aria-label="Close transactions chart">&times;</button>
+        <h3 class="modal-title" id="transaction-modal-title">Asset transactions</h3>
+        <div class="modal-subtitle" id="transaction-modal-subtitle"></div>
+        <div class="modal-chart">
+            <canvas id="transaction-chart"></canvas>
+        </div>
+        <div class="modal-meta" id="transaction-modal-meta"></div>
+        <div class="modal-lots hidden" id="transaction-lots"></div>
+        <div class="modal-toolbar modal-toolbar-bottom">
+            <button type="button" id="view-lots-btn" class="btn btn-secondary">View lots</button>
+        </div>
+    </div>
 </div>
 </body>
 </html>
