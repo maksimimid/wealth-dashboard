@@ -1001,7 +1001,8 @@ function mapFinnhubSymbol(asset, category, isOverride = false){
     const cat = (category||'').toLowerCase();
     const cleaned = String(asset).trim().toUpperCase();
     const overrides = {
-        ISAC: 'NASDAQ:ISAC'
+        ISAC: 'ISAC.SW',
+        'NASDAQ:ISAC': 'ISAC.SW'
     };
     if(overrides[cleaned]) return overrides[cleaned];
     if(cat==='cash') return null;
@@ -1030,7 +1031,7 @@ function isCryptoFinnhubSymbol(symbol, type){
 function shouldPreferYahoo(position){
     if(!position) return false;
     const symbol = (position.finnhubSymbol || position.Symbol || position.id || '').toUpperCase();
-    return symbol === 'NASDAQ:ISAC' || symbol === 'ISAC';
+    return symbol === 'ISAC.SW' || symbol === 'NASDAQ:ISAC' || symbol === 'ISAC';
 }
 
 function mapYahooSymbol(position){
