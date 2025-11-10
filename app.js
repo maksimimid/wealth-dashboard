@@ -1027,6 +1027,12 @@ function isCryptoFinnhubSymbol(symbol, type){
     return CRYPTO_FH_PREFIXES.some(prefix => upper.startsWith(prefix));
 }
 
+function shouldPreferYahoo(position){
+    if(!position) return false;
+    const symbol = (position.finnhubSymbol || position.Symbol || position.id || '').toUpperCase();
+    return symbol === 'NASDAQ:ISAC' || symbol === 'ISAC';
+}
+
 function mapYahooSymbol(position){
     const typeKey = String(position.type || '').toLowerCase();
     const rawSymbol = position.finnhubSymbol || position.Symbol || position.displayName || position.Name;
