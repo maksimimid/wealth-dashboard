@@ -57,6 +57,7 @@ let pnlRangeTabsContainer = null;
 const pnlRangeButtons = new Map();
 let pnlCardLabelElement = null;
 let pnlCardLabelBase = 'Total P&L';
+const yahooQuoteCache = new Map();
 const previousKpiValues = { totalPnl: null, netWorth: null, netContribution: null, cashAvailable: null, pnlCrypto: null, pnlStock: null, pnlRealEstate: null };
 const previousBestPerformer = { id: null, pnl: null, change: null };
 let assetYearSeries = { labels: [], datasets: [] };
@@ -741,6 +742,34 @@ function applyLivePrice(position, price){
     position.priceStatus = null;
 }
 
+function applyPriceUpdate(position, price, prevClose, source){
+    if(!Number.isFinite(price) || price <= 0){
+        return false;
+    }
+    applyLivePrice(position, price);
+    if(Number.isFinite(prevClose) && prevClose > 0){
+        position.prevClose = prevClose;
+    }
+    const reference = Number.isFinite(position.prevClose) && Math.abs(position.prevClose) > 1e-9
+        ? position.prevClose
+        : (Number.isFinite(position.avgPrice) && Math.abs(position.avgPrice) > 1e-9
+            ? position.avgPrice
+            : (Number.isFinite(position.lastKnownPrice) ? position.lastKnownPrice : price));
+    if(Number.isFinite(reference) && Math.abs(reference) > 1e-9){
+        position.change = price - reference;
+        position.changePct = reference ? ((price - reference) / reference) * 100 : 0;
+    }else{
+        position.change = 0;
+        position.changePct = 0;
+    }
+    if(source){
+        position.priceSource = source;
+    }
+    position.priceStatus = null;
+    recomputePositionMetrics(position);
+    return true;
+}
+
 function flashElement(element, direction){
     if(!element || !direction) return;
     element.classList.remove('flash-up','flash-down','flash-up-text','flash-down-text');
@@ -1017,8 +1046,8 @@ function mapYahooSymbol(position){
     }
     let symbol = rawSymbol.replace(/\s+/g,'').toUpperCase();
     const overrides = {
-        'NASDAQ:ISAC': 'ISAC',
-        'ISAC': 'ISAC'
+        'NASDAQ:ISAC': 'ISAC.SW',
+        'ISAC': 'ISAC.SW'
     };
     if(overrides[symbol]) return overrides[symbol];
     if(symbol.includes(':')){
@@ -1536,25 +1565,28 @@ async function fetchSnapshotBatch(symbols){
     return Promise.all(promises);
 }
 
-function applySnapshotResults(results){
+async function applySnapshotResults(results){
+    const fallbackTasks = [];
     results.forEach(result=>{
-        if(!result.ok) return;
         const pos = finnhubIndex.get(result.symbol);
-        if(!pos) return;
-        const data = result.data || {};
-        const price = data.c ?? pos.currentPrice ?? pos.lastKnownPrice ?? pos.avgPrice;
-        applyLivePrice(pos, price);
-        pos.prevClose = data.pc ?? pos.prevClose ?? null;
-        if(pos.prevClose && price !== null && price !== undefined){
-            pos.change = price - pos.prevClose;
-            pos.changePct = pos.prevClose ? ((price - pos.prevClose) / pos.prevClose) * 100 : 0;
-        }else{
-            const reference = pos.avgPrice || pos.lastKnownPrice || price;
-            pos.change = price - reference;
-            pos.changePct = reference ? (pos.change / reference) * 100 : 0;
+        if(!pos){
+            return;
         }
-        recomputePositionMetrics(pos);
+        if(!result.ok){
+            fallbackTasks.push(scheduleYahooFallback(pos));
+            return;
+        }
+        const data = result.data || {};
+        const price = Number(data.c ?? data.p ?? data.lp ?? data.lastPrice);
+        const prevClose = Number(data.pc ?? data.previousClose);
+        const applied = applyPriceUpdate(pos, price, prevClose, 'finnhub');
+        if(!applied){
+            fallbackTasks.push(scheduleYahooFallback(pos));
+        }
     });
+    if(fallbackTasks.length){
+        await Promise.allSettled(fallbackTasks);
+    }
     rangeDirty = true;
 }
 
@@ -1596,23 +1628,18 @@ function subscribeAll(){
 function applyRealtime(symbol, price){
     const pos = finnhubIndex.get(symbol);
     if(!pos) return;
-    applyLivePrice(pos, price);
-    if(pos.prevClose){
-        pos.change = price - pos.prevClose;
-        pos.changePct = pos.prevClose ? ((price - pos.prevClose) / pos.prevClose) * 100 : 0;
+    const numericPrice = Number(price);
+    if(applyPriceUpdate(pos, numericPrice, pos.prevClose ?? null, 'finnhub')){
+        lastUpdated = new Date();
+        rangeDirty = true;
+        const type = (pos.type || '').toLowerCase();
+        if(type === 'crypto'){
+            scheduleCryptoUiUpdate();
+        }else{
+            scheduleUIUpdate();
+        }
     }else{
-        const ref = pos.avgPrice || pos.lastKnownPrice || price;
-        pos.change = price - ref;
-        pos.changePct = ref ? ((price - ref)/ref)*100 : 0;
-    }
-    recomputePositionMetrics(pos);
-    lastUpdated = new Date();
-    rangeDirty = true;
-    const type = (pos.type || '').toLowerCase();
-    if(type === 'crypto'){
-        scheduleCryptoUiUpdate();
-    }else{
-        scheduleUIUpdate();
+        scheduleYahooFallback(pos);
     }
 }
 
@@ -2477,6 +2504,66 @@ async function fetchAlphaVantageSeries(symbol, typeKey, firstPurchaseTime){
         console.warn('Alpha Vantage history fetch failed', symbol, error);
     }
     return [];
+}
+
+async function fetchYahooQuote(symbol){
+    const cacheKey = `quote:${symbol}`;
+    const cached = yahooQuoteCache.get(cacheKey);
+    const now = Date.now();
+    if(cached && (now - cached.time) < 60 * 1000){
+        return cached.value;
+    }
+    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbol)}`;
+    try{
+        const response = await fetch(url);
+        if(!response.ok) return null;
+        const json = await response.json();
+        const quote = json?.quoteResponse?.result?.[0];
+        if(!quote) return null;
+        const price = Number(quote.regularMarketPrice ?? quote.postMarketPrice ?? quote.preMarketPrice);
+        const prevClose = Number(quote.regularMarketPreviousClose ?? quote.previousClose);
+        const currency = quote.currency || null;
+        const value = {
+            price: Number.isFinite(price) && price > 0 ? price : null,
+            prevClose: Number.isFinite(prevClose) && prevClose > 0 ? prevClose : null,
+            currency
+        };
+        yahooQuoteCache.set(cacheKey, { time: now, value });
+        return value;
+    }catch(error){
+        console.warn('Yahoo quote fetch failed', symbol, error);
+        return null;
+    }
+}
+
+function scheduleYahooFallback(position){
+    if(!position) return Promise.resolve(false);
+    if(position._yahooFallbackPromise){
+        return position._yahooFallbackPromise;
+    }
+    const yahooSymbol = mapYahooSymbol(position);
+    if(!yahooSymbol){
+        return Promise.resolve(false);
+    }
+    const task = (async ()=>{
+        const quote = await fetchYahooQuote(yahooSymbol);
+        if(quote && Number.isFinite(quote.price) && quote.price > 0){
+            const success = applyPriceUpdate(position, quote.price, quote.prevClose ?? null, 'yahoo');
+            if(success){
+                rangeDirty = true;
+                scheduleUIUpdate({ immediate: true });
+            }
+            return success;
+        }
+        return false;
+    })().catch(error=>{
+        console.warn('Yahoo fallback error', yahooSymbol, error);
+        return false;
+    }).finally(()=>{
+        position._yahooFallbackPromise = null;
+    });
+    position._yahooFallbackPromise = task;
+    return task;
 }
 
 async function fetchCoinGeckoSeries(coinId, firstPurchaseTime){
@@ -4851,7 +4938,7 @@ async function bootstrap(){
                 if(!batch || !batch.length) continue;
                 try{
                     const results = await fetchSnapshotBatch(batch);
-                    applySnapshotResults(results);
+                    await applySnapshotResults(results);
                 }catch(error){
                     console.warn('Snapshot batch failed', batch, error);
                 }finally{
