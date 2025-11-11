@@ -2228,9 +2228,14 @@ function createRealEstateRow(stat){
                 const progressAngle = utilizationProgress * 360;
                 const highlightAngle = Math.min(progressAngle, lastRentShare * 360);
                 const startAngle = Math.max(progressAngle - highlightAngle, 0);
-                const backgroundStyle = (hasUtilization && highlightAngle > 0)
-                    ? `background:conic-gradient(var(--fill-color) 0deg ${startAngle}deg, var(--highlight-color) ${startAngle}deg ${progressAngle}deg, var(--track-color) ${progressAngle}deg 360deg);`
-                    : '';
+                let backgroundStyle = '';
+                if(hasUtilization){
+                    const baseGradient = `conic-gradient(var(--fill-color) 0deg ${progressAngle}deg, var(--track-color) ${progressAngle}deg 360deg)`;
+                    const highlightGradient = highlightAngle > 0
+                        ? `, conic-gradient(transparent 0deg ${startAngle}deg, var(--highlight-color) ${startAngle}deg ${progressAngle}deg, transparent ${progressAngle}deg 360deg)`
+                        : '';
+                    backgroundStyle = `background:${baseGradient}${highlightGradient};`;
+                }
                 const styleAttr = `--progress:${utilizationProgress};${backgroundStyle}`;
                 const title = lastRentDate
                     ? ` title="Last rent ${money(stat.lastRentAmount || 0)} · ${formatDateShort(lastRentDate)}"`
