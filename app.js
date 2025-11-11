@@ -2222,7 +2222,7 @@ function createRealEstateRow(stat){
                 const highlightAngle = Math.min(progressAngle, lastRentShare * 360);
                 const startAngle = Math.max(progressAngle - highlightAngle, 0);
                 const backgroundStyle = (hasUtilization && highlightAngle > 0)
-                    ? `background:conic-gradient(var(--fill-color) 0deg ${startAngle}deg, var(--highlight-color) ${startAngle}deg ${progressAngle}deg, var(--track-color) ${progressAngle}deg 360deg);`
+                    ? `background:conic-gradient(var(--fill-color) 0deg ${startAngle}deg, rgba(34,197,94,0.85) ${startAngle}deg ${progressAngle}deg, var(--track-color) ${progressAngle}deg 360deg);`
                     : '';
                 const styleAttr = `--progress:${utilizationProgress};${backgroundStyle}`;
                 const title = lastRentDate
@@ -2959,12 +2959,6 @@ function updateLotsSort(field, direction){
     const changed = nextField !== transactionLotsSortField || nextDirection !== transactionLotsSortDirection;
     transactionLotsSortField = nextField;
     transactionLotsSortDirection = nextDirection;
-    if(transactionLotsSortSelect){
-        transactionLotsSortSelect.value = transactionLotsSortField;
-    }
-    if(transactionLotsDirectionSelect){
-        transactionLotsDirectionSelect.value = transactionLotsSortDirection;
-    }
     return changed;
 }
 
@@ -2988,12 +2982,6 @@ function ensureTransactionLotsControls(){
         transactionLotsControls = transactionLotsContainer.querySelector('.lots-controls');
         transactionLotsList = transactionLotsContainer.querySelector('.lots-list');
     }
-    if(transactionLotsSortSelect){
-        transactionLotsSortSelect.value = transactionLotsSortField;
-    }
-    if(transactionLotsDirectionSelect){
-        transactionLotsDirectionSelect.value = transactionLotsSortDirection;
-    }
     if(transactionLotsGroupSelect){
         transactionLotsGroupSelect.value = transactionLotsGroupKey;
     }
@@ -3002,36 +2990,6 @@ function ensureTransactionLotsControls(){
 function buildTransactionLotsControls(){
     if(!transactionLotsControls) return;
     transactionLotsControls.innerHTML = '';
-
-    const sortLabel = document.createElement('label');
-    sortLabel.className = 'lots-control';
-    sortLabel.innerHTML = '<span>Sort by</span>';
-    transactionLotsSortSelect = document.createElement('select');
-    transactionLotsSortSelect.id = 'lots-sort-field';
-    transactionLotsSortSelect.setAttribute('aria-label', 'Sort lots by');
-    LOT_SORT_FIELDS.forEach(option=>{
-        const opt = document.createElement('option');
-        opt.value = option.value;
-        opt.textContent = option.label;
-        transactionLotsSortSelect.appendChild(opt);
-    });
-    sortLabel.appendChild(transactionLotsSortSelect);
-    transactionLotsControls.appendChild(sortLabel);
-
-    const orderLabel = document.createElement('label');
-    orderLabel.className = 'lots-control';
-    orderLabel.innerHTML = '<span>Order</span>';
-    transactionLotsDirectionSelect = document.createElement('select');
-    transactionLotsDirectionSelect.id = 'lots-sort-direction';
-    transactionLotsDirectionSelect.setAttribute('aria-label', 'Sort direction');
-    LOT_DIRECTION_OPTIONS.forEach(option=>{
-        const opt = document.createElement('option');
-        opt.value = option.value;
-        opt.textContent = option.label;
-        transactionLotsDirectionSelect.appendChild(opt);
-    });
-    orderLabel.appendChild(transactionLotsDirectionSelect);
-    transactionLotsControls.appendChild(orderLabel);
 
     const groupLabel = document.createElement('label');
     groupLabel.className = 'lots-control';
@@ -3047,20 +3005,6 @@ function buildTransactionLotsControls(){
     });
     groupLabel.appendChild(transactionLotsGroupSelect);
     transactionLotsControls.appendChild(groupLabel);
-
-    transactionLotsSortSelect.addEventListener('change', ()=>{
-        const changed = updateLotsSort(transactionLotsSortSelect.value, transactionLotsSortDirection);
-        if(changed && lastTransactionPosition && lastTransactionData){
-            renderTransactionLots(lastTransactionPosition, lastTransactionData);
-        }
-    });
-
-    transactionLotsDirectionSelect.addEventListener('change', ()=>{
-        const changed = updateLotsSort(transactionLotsSortField, transactionLotsDirectionSelect.value);
-        if(changed && lastTransactionPosition && lastTransactionData){
-            renderTransactionLots(lastTransactionPosition, lastTransactionData);
-        }
-    });
 
     transactionLotsGroupSelect.addEventListener('change', ()=>{
         transactionLotsGroupKey = transactionLotsGroupSelect.value;
