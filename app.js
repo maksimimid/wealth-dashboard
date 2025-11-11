@@ -2067,6 +2067,8 @@ function computeRealEstateAnalytics(){
         }
         projectedValue = Number(projectedValue.toFixed(2));
 
+        const arrPercent = finalAssetPrice > 0 && rentLast12 > 0 ? (rentLast12 / finalAssetPrice) * 100 : null;
+
         results.push({
             name: position.displayName || position.Symbol || position.Name || `Asset ${idx+1}`,
             totalPurchase,
@@ -2075,7 +2077,7 @@ function computeRealEstateAnalytics(){
             rentCollected,
             rentYtd,
             avgMonthlyRent,
-            arr: rentLast12,
+            arrPercent,
             lastRentAmount: latestRentAmount,
             lastRentDate: latestRentDate,
             utilization,
@@ -2192,7 +2194,9 @@ function createRealEstateRow(stat){
     const daysSinceLastRent = lastRentDate instanceof Date
         ? (Date.now() - lastRentDate.getTime()) / (24 * 3600 * 1000)
         : null;
-    const arrValue = Number(stat.arr || 0);
+    const arrPercent = Number(stat.arrPercent);
+    const hasArrPercent = Number.isFinite(arrPercent);
+    const arrDisplay = hasArrPercent ? `${arrPercent.toFixed(1)}%` : null;
     const rows = [
         `<div><span class="label">Final Asset Price</span><span class="value">${money(stat.finalAssetPrice)}</span></div>`,
         `<div><span class="label">Projected Value</span><span class="value">${money(stat.projectedValue)}</span></div>`
@@ -2205,7 +2209,7 @@ function createRealEstateRow(stat){
             `<div><span class="label">Rent Collected</span><span class="value">${money(stat.rentCollected)}</span></div>`,
             `<div><span class="label">Rent YTD</span><span class="value">${money(stat.rentYtd)}</span></div>`,
             `<div><span class="label">Rent / Mo</span><span class="value">${money(stat.avgMonthlyRent)}</span></div>`,
-            (arrValue > 0 ? `<div><span class="label">ARR</span><span class="value arr-value">${money(arrValue)}</span></div>` : ''),
+            (arrDisplay ? `<div><span class="label">ARR</span><span class="value arr-value">${arrDisplay}</span></div>` : ''),
             (() => {
                 const classes = ['circle-progress'];
                 if(lastRentDate && Number.isFinite(daysSinceLastRent) && daysSinceLastRent <= 60){
