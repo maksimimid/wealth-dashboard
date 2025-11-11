@@ -1729,6 +1729,7 @@ body.light-theme .price-warning {
     --progress: 0;
     --track-color: rgba(148, 163, 184, 0.3);
     --fill-color: #38bdf8;
+    --highlight-color: #4ade80;
     width: var(--size);
     height: var(--size);
     border-radius: 50%;
@@ -1766,12 +1767,7 @@ body.light-theme .price-warning {
 }
 
 .circle-progress.recent-rent {
-    --fill-color: #4ade80;
-    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.45), 0 0 18px rgba(34, 197, 94, 0.35);
-}
-
-.circle-progress.recent-rent .circle-progress-inner span {
-    color: #bbf7d0;
+    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.35), 0 0 18px rgba(34, 197, 94, 0.28);
 }
 
 .last-rent-note {
@@ -2166,8 +2162,7 @@ body.light-theme .asset-icon-wrapper { background: transparent; border: 0; box-s
 body.light-theme .circle-progress { --track-color: rgba(148, 163, 184, 0.45); --fill-color: #4f46e5; background: conic-gradient(var(--fill-color) calc(var(--progress) * 360deg), var(--track-color) 0deg); }
 body.light-theme .circle-progress::after { background: rgba(255, 255, 255, 0.96); }
 body.light-theme .circle-progress-inner span { color: #1e293b; }
-body.light-theme .circle-progress.recent-rent { --fill-color: #16a34a; box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.35), 0 0 14px rgba(34, 197, 94, 0.25); }
-body.light-theme .circle-progress.recent-rent .circle-progress-inner span { color: #065f46; }
+body.light-theme .circle-progress { --highlight-color: #16a34a; }
 body.light-theme .last-rent-note { color: #0f766e; }
 body.light-theme .arr-value { color: #0284c7; }
 body.light-theme .modal-content { background: rgba(255, 255, 255, 0.96); border-color: rgba(148, 163, 184, 0.4); color: #0f172a; }
