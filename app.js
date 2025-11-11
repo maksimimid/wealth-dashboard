@@ -2227,7 +2227,7 @@ function createRealEstateRow(stat){
             `<div><span class="label">Payoff ETA</span><span class="value">${formatDurationFromMonths(stat.payoffMonths)}</span></div>`
         );
     }
-    metrics.innerHTML = rows.join('');
+    metrics.innerHTML = rows.filter(Boolean).join('');
     row.appendChild(metrics);
 
     const canOpenModal = stat.positionRef && Array.isArray(stat.positionRef.operations) && stat.positionRef.operations.some(op => Number(op.amount || 0));
@@ -2941,6 +2941,22 @@ const LOT_GROUP_OPTIONS = [
     { value: 'gain', label: 'Gains / Losses' }
 ];
 
+function updateLotsSort(field, direction){
+    const allowed = new Set(LOT_SORT_FIELDS.map(option => option.value));
+    const nextField = allowed.has(field) ? field : transactionLotsSortField;
+    const nextDirection = direction === 'asc' ? 'asc' : direction === 'desc' ? 'desc' : transactionLotsSortDirection;
+    const changed = nextField !== transactionLotsSortField || nextDirection !== transactionLotsSortDirection;
+    transactionLotsSortField = nextField;
+    transactionLotsSortDirection = nextDirection;
+    if(transactionLotsSortSelect){
+        transactionLotsSortSelect.value = transactionLotsSortField;
+    }
+    if(transactionLotsDirectionSelect){
+        transactionLotsDirectionSelect.value = transactionLotsSortDirection;
+    }
+    return changed;
+}
+
 function ensureTransactionLotsControls(){
     if(!transactionLotsContainer) return;
     if(!transactionLotsContainer.dataset.controls){
@@ -3022,15 +3038,15 @@ function buildTransactionLotsControls(){
     transactionLotsControls.appendChild(groupLabel);
 
     transactionLotsSortSelect.addEventListener('change', ()=>{
-        transactionLotsSortField = transactionLotsSortSelect.value;
-        if(lastTransactionPosition && lastTransactionData){
+        const changed = updateLotsSort(transactionLotsSortSelect.value, transactionLotsSortDirection);
+        if(changed && lastTransactionPosition && lastTransactionData){
             renderTransactionLots(lastTransactionPosition, lastTransactionData);
         }
     });
 
     transactionLotsDirectionSelect.addEventListener('change', ()=>{
-        transactionLotsSortDirection = transactionLotsDirectionSelect.value;
-        if(lastTransactionPosition && lastTransactionData){
+        const changed = updateLotsSort(transactionLotsSortField, transactionLotsDirectionSelect.value);
+        if(changed && lastTransactionPosition && lastTransactionData){
             renderTransactionLots(lastTransactionPosition, lastTransactionData);
         }
     });
@@ -3160,23 +3176,62 @@ function renderTransactionLots(position, data){
     }
 
     listElement.innerHTML = '';
+    const LOT_COLUMNS = [
+        { key: 'date', label: 'Date', className: 'lot-cell-date' },
+        { key: 'qty', label: 'Type / Qty', className: 'lot-cell-type' },
+        { key: 'price', label: 'Price', className: 'lot-cell-price' },
+        { key: 'amount', label: 'Amount', className: 'lot-cell-amount' },
+        { key: 'pnl', label: 'P&L', className: 'lot-cell-pnl' }
+    ];
+
+    const appendLotsHeader = target => {
+        const header = document.createElement('div');
+        header.className = 'lot-header';
+        LOT_COLUMNS.forEach(column=>{
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'lot-header-cell';
+            button.textContent = column.label;
+            const isActive = transactionLotsSortField === column.key;
+            button.setAttribute('aria-sort', isActive ? (transactionLotsSortDirection === 'asc' ? 'ascending' : 'descending') : 'none');
+            if(isActive){
+                button.classList.add('sorted', `dir-${transactionLotsSortDirection}`);
+            }
+            button.addEventListener('click', ()=>{
+                const currentlyActive = transactionLotsSortField === column.key;
+                const nextDirection = currentlyActive && transactionLotsSortDirection === 'asc' ? 'desc' : 'asc';
+                updateLotsSort(column.key, nextDirection);
+                if(lastTransactionPosition && lastTransactionData){
+                    renderTransactionLots(lastTransactionPosition, lastTransactionData);
+                }
+            });
+            header.appendChild(button);
+        });
+        target.appendChild(header);
+    };
+
+    let headerInserted = false;
     groups.forEach(group=>{
         if(transactionLotsGroupKey !== 'none'){
             const heading = document.createElement('div');
             heading.className = 'lot-group-heading';
             heading.textContent = group.label;
             listElement.appendChild(heading);
+            appendLotsHeader(listElement);
+        }else if(group.items.length && !headerInserted){
+            appendLotsHeader(listElement);
+            headerInserted = true;
         }
         group.items.forEach(item=>{
             const pnlPercentDisplay = Number.isFinite(item.pnlPct) ? formatPercent(item.pnlPct) : '—';
             const row = document.createElement('div');
             row.className = 'lot-row';
             row.innerHTML = `
-                <div><strong>${item.dateLabel}</strong></div>
-                <div>${item.typeLabel} · ${formatQty(item.absQty)}</div>
-                <div>Price ${money(item.price)}</div>
-                <div>${item.amountLabel} ${money(item.baseAmount)}</div>
-                <div class="lot-value ${item.pnlClass}">${money(item.pnlValue)} (${pnlPercentDisplay})</div>
+                <div class="lot-cell lot-cell-date"><strong>${item.dateLabel}</strong></div>
+                <div class="lot-cell lot-cell-type">${item.typeLabel} · ${formatQty(item.absQty)}</div>
+                <div class="lot-cell lot-cell-price">${money(item.price)}</div>
+                <div class="lot-cell lot-cell-amount">${item.amountLabel} ${money(item.baseAmount)}</div>
+                <div class="lot-cell lot-cell-pnl"><span class="lot-value ${item.pnlClass}">${money(item.pnlValue)} (${pnlPercentDisplay})</span></div>
             `;
             listElement.appendChild(row);
         });
