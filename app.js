@@ -1935,6 +1935,8 @@ function computeRealEstateAnalytics(){
     const currentYear = now.getFullYear();
     const cutoffStart = new Date(now.getFullYear(), now.getMonth(), 1);
     cutoffStart.setMonth(cutoffStart.getMonth() - 11);
+    const THIRTY_DAYS_MS = 30 * 24 * 3600 * 1000;
+    const last30Cutoff = new Date(now.getTime() - THIRTY_DAYS_MS);
     const results = [];
     const rentYearTotals = new Map();
     const rentYearTotalsByAsset = new Map();
@@ -1950,6 +1952,7 @@ function computeRealEstateAnalytics(){
         let rentCollected = 0;
         let rentYtd = 0;
         let rentLast12 = 0;
+        let rentLast30 = 0;
         let latestRentDate = null;
         let latestRentAmount = 0;
         let earliestPurchase = null;
@@ -2023,6 +2026,9 @@ function computeRealEstateAnalytics(){
                         if(date.getFullYear() === currentYear){
                             rentYtd += rentAmount;
                         }
+                        if(date >= last30Cutoff){
+                            rentLast30 += rentAmount;
+                        }
                     }
                 }
                 return;
@@ -2068,6 +2074,7 @@ function computeRealEstateAnalytics(){
         projectedValue = Number(projectedValue.toFixed(2));
 
         const arrPercent = finalAssetPrice > 0 && rentLast12 > 0 ? (rentLast12 / finalAssetPrice) * 100 : null;
+        const lastMonthShare = finalAssetPrice > 0 && rentLast30 > 0 ? Math.min(rentLast30 / finalAssetPrice, 1) : 0;
 
         results.push({
             name: position.displayName || position.Symbol || position.Name || `Asset ${idx+1}`,
@@ -2080,6 +2087,7 @@ function computeRealEstateAnalytics(){
             arrPercent,
             lastRentAmount: latestRentAmount,
             lastRentDate: latestRentDate,
+            lastMonthShare,
             utilization,
             netOutstanding: outstanding,
             payoffMonths,
@@ -2197,6 +2205,7 @@ function createRealEstateRow(stat){
     const arrPercent = Number(stat.arrPercent);
     const hasArrPercent = Number.isFinite(arrPercent);
     const arrDisplay = hasArrPercent ? `${arrPercent.toFixed(1)}%` : null;
+    const lastMonthShare = Number.isFinite(stat.lastMonthShare) ? Math.max(0, Math.min(Number(stat.lastMonthShare), 1)) : 0;
     const rows = [
         `<div><span class="label">Final Asset Price</span><span class="value">${money(stat.finalAssetPrice)}</span></div>`,
         `<div><span class="label">Projected Value</span><span class="value">${money(stat.projectedValue)}</span></div>`
@@ -2215,9 +2224,7 @@ function createRealEstateRow(stat){
                 if(lastRentDate && Number.isFinite(daysSinceLastRent) && daysSinceLastRent <= 60){
                     classes.push('recent-rent');
                 }
-                const lastRentShare = stat.lastRentAmount && stat.finalAssetPrice
-                    ? Math.min(Math.max(stat.lastRentAmount / stat.finalAssetPrice, 0), 1)
-                    : 0;
+                const lastRentShare = lastMonthShare;
                 const progressAngle = utilizationProgress * 360;
                 const highlightAngle = Math.min(progressAngle, lastRentShare * 360);
                 const startAngle = Math.max(progressAngle - highlightAngle, 0);
