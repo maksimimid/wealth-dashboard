@@ -1758,12 +1758,20 @@ body.light-theme .price-warning {
     width: calc(var(--size) - 16px);
     height: calc(var(--size) - 16px);
     border-radius: 50%;
+    flex-direction: column;
+    gap: 2px;
 }
 
 .circle-progress-inner span {
     font-weight: 600;
     font-size: 0.9rem;
     color: #f8fafc;
+}
+
+.circle-progress-inner .inner-note {
+    font-size: 0.65rem;
+    font-weight: 500;
+    color: rgba(148, 197, 255, 0.88);
 }
 
 .last-rent-note {

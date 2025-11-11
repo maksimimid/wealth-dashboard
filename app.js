@@ -2206,6 +2206,7 @@ function createRealEstateRow(stat){
     const hasArrPercent = Number.isFinite(arrPercent);
     const arrDisplay = hasArrPercent ? `${arrPercent.toFixed(1)}%` : null;
     const lastMonthShare = Number.isFinite(stat.lastMonthShare) ? Math.max(0, Math.min(Number(stat.lastMonthShare), 1)) : 0;
+    const lastMonthPercentDisplay = lastMonthShare > 0 ? `${(lastMonthShare * 100).toFixed(1)}%` : null;
     const rows = [
         `<div><span class="label">Final Asset Price</span><span class="value">${money(stat.finalAssetPrice)}</span></div>`,
         `<div><span class="label">Projected Value</span><span class="value">${money(stat.projectedValue)}</span></div>`
@@ -2242,7 +2243,7 @@ function createRealEstateRow(stat){
                     : '';
                 let html = `<div class="utilization-block"><span class="label">Utilization</span>`
                     + `<div class="${classes.join(' ')}" style="${styleAttr}"${title}>`
-                    + `<div class="circle-progress-inner"><span>${utilizationDisplay}</span></div>`
+                    + `<div class="circle-progress-inner"><span>${utilizationDisplay}</span>${lastMonthPercentDisplay ? `<span class="inner-note">(${lastMonthPercentDisplay})</span>` : ''}</div>`
                     + `</div>`;
                 html += `</div>`;
                 return html;
