@@ -2215,16 +2215,23 @@ function createRealEstateRow(stat){
                 if(lastRentDate && Number.isFinite(daysSinceLastRent) && daysSinceLastRent <= 60){
                     classes.push('recent-rent');
                 }
+                const lastRentShare = stat.lastRentAmount && stat.finalAssetPrice
+                    ? Math.min(Math.max(stat.lastRentAmount / stat.finalAssetPrice, 0), 1)
+                    : 0;
+                const progressAngle = utilizationProgress * 360;
+                const highlightAngle = Math.min(progressAngle, lastRentShare * 360);
+                const startAngle = Math.max(progressAngle - highlightAngle, 0);
+                const backgroundStyle = (hasUtilization && highlightAngle > 0)
+                    ? `background:conic-gradient(var(--fill-color) 0deg ${startAngle}deg, var(--highlight-color) ${startAngle}deg ${progressAngle}deg, var(--track-color) ${progressAngle}deg 360deg);`
+                    : '';
+                const styleAttr = `--progress:${utilizationProgress};${backgroundStyle}`;
                 const title = lastRentDate
                     ? ` title="Last rent ${money(stat.lastRentAmount || 0)} · ${formatDateShort(lastRentDate)}"`
                     : '';
                 let html = `<div class="utilization-block"><span class="label">Utilization</span>`
-                    + `<div class="${classes.join(' ')}" style="--progress:${utilizationProgress};"${title}>`
+                    + `<div class="${classes.join(' ')}" style="${styleAttr}"${title}>`
                     + `<div class="circle-progress-inner"><span>${utilizationDisplay}</span></div>`
                     + `</div>`;
-                if(lastRentDate && stat.lastRentAmount){
-                    html += `<span class="last-rent-note">Last rent ${money(stat.lastRentAmount)} · ${formatDateShort(lastRentDate)}</span>`;
-                }
                 html += `</div>`;
                 return html;
             })(),
