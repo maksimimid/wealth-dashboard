@@ -1950,6 +1950,8 @@ function computeRealEstateAnalytics(){
         let rentCollected = 0;
         let rentYtd = 0;
         let rentLast12 = 0;
+        let latestRentDate = null;
+        let latestRentAmount = 0;
         let earliestPurchase = null;
         let earliestEvent = null;
         const rentMonths = new Set();
@@ -2001,6 +2003,10 @@ function computeRealEstateAnalytics(){
                 if(rentAmount > 0){
                     rentCollected += rentAmount;
                     if(date){
+                        if(!latestRentDate || (date instanceof Date && date > latestRentDate)){
+                            latestRentDate = date instanceof Date ? date : latestRentDate;
+                            latestRentAmount = rentAmount;
+                        }
                         const key = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;
                         rentMonths.add(key);
                         const yr = date.getFullYear();
@@ -2069,6 +2075,9 @@ function computeRealEstateAnalytics(){
             rentCollected,
             rentYtd,
             avgMonthlyRent,
+            arr: rentLast12,
+            lastRentAmount: latestRentAmount,
+            lastRentDate: latestRentDate,
             utilization,
             netOutstanding: outstanding,
             payoffMonths,
@@ -2177,6 +2186,13 @@ function createRealEstateRow(stat){
     const utilizationDisplay = hasUtilization ? `${utilizationValue.toFixed(1)}%` : '—';
     const utilizationProgress = hasUtilization ? (utilizationValue / 100) : 0;
     const isPassive = !stat.rentCollected && !stat.rentYtd && !stat.avgMonthlyRent;
+    const lastRentDate = stat.lastRentDate instanceof Date
+        ? stat.lastRentDate
+        : (stat.lastRentDate ? new Date(stat.lastRentDate) : null);
+    const daysSinceLastRent = lastRentDate instanceof Date
+        ? (Date.now() - lastRentDate.getTime()) / (24 * 3600 * 1000)
+        : null;
+    const arrValue = Number(stat.arr || 0);
     const rows = [
         `<div><span class="label">Final Asset Price</span><span class="value">${money(stat.finalAssetPrice)}</span></div>`,
         `<div><span class="label">Projected Value</span><span class="value">${money(stat.projectedValue)}</span></div>`
@@ -2189,12 +2205,25 @@ function createRealEstateRow(stat){
             `<div><span class="label">Rent Collected</span><span class="value">${money(stat.rentCollected)}</span></div>`,
             `<div><span class="label">Rent YTD</span><span class="value">${money(stat.rentYtd)}</span></div>`,
             `<div><span class="label">Rent / Mo</span><span class="value">${money(stat.avgMonthlyRent)}</span></div>`,
-            `<div class="utilization-block">`
-            + `<span class="label">Utilization</span>`
-            + `<div class="circle-progress" style="--progress:${utilizationProgress};">`
-            + `<div class="circle-progress-inner"><span>${utilizationDisplay}</span></div>`
-            + `</div>`
-            + `</div>`,
+            (arrValue > 0 ? `<div><span class="label">ARR</span><span class="value arr-value">${money(arrValue)}</span></div>` : ''),
+            (() => {
+                const classes = ['circle-progress'];
+                if(lastRentDate && Number.isFinite(daysSinceLastRent) && daysSinceLastRent <= 60){
+                    classes.push('recent-rent');
+                }
+                const title = lastRentDate
+                    ? ` title="Last rent ${money(stat.lastRentAmount || 0)} · ${formatDateShort(lastRentDate)}"`
+                    : '';
+                let html = `<div class="utilization-block"><span class="label">Utilization</span>`
+                    + `<div class="${classes.join(' ')}" style="--progress:${utilizationProgress};"${title}>`
+                    + `<div class="circle-progress-inner"><span>${utilizationDisplay}</span></div>`
+                    + `</div>`;
+                if(lastRentDate && stat.lastRentAmount){
+                    html += `<span class="last-rent-note">Last rent ${money(stat.lastRentAmount)} · ${formatDateShort(lastRentDate)}</span>`;
+                }
+                html += `</div>`;
+                return html;
+            })(),
             `<div><span class="label">Payoff ETA</span><span class="value">${formatDurationFromMonths(stat.payoffMonths)}</span></div>`
         );
     }
