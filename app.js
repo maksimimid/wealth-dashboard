@@ -35,9 +35,29 @@ let currentRangeTotalPnl = 0;
 let currentCategoryRangeTotals = { crypto: 0, stock: 0, realEstate: 0, other: 0 };
 let rangeDirty = true;
 const referencePriceCache = new Map();
-const RANGE_LOOKBACK = {};
-const RANGE_LABELS = { 'ALL': 'All Time' };
+const PNL_RANGE_CONFIG = [
+    { key: '1D', label: 'Daily PNL' },
+    { key: '1W', label: 'Weekly PNL' },
+    { key: '1M', label: 'Monthly PNL' },
+    { key: '1Y', label: 'Yearly PNL' },
+    { key: 'ALL', label: 'All' }
+];
+const RANGE_LOOKBACK = {
+    '1D': 24 * 60 * 60,
+    '1W': 7 * 24 * 60 * 60,
+    '1M': 30 * 24 * 60 * 60,
+    '1Y': 365 * 24 * 60 * 60
+};
+const RANGE_LABELS = PNL_RANGE_CONFIG.reduce((acc, item)=>{
+    acc[item.key] = item.label;
+    return acc;
+}, {});
 let pnlRange = 'ALL';
+let pnlRangeTabsContainer = null;
+const pnlRangeButtons = new Map();
+let pnlCardLabelElement = null;
+let pnlCardLabelBase = 'Total P&L';
+const yahooQuoteCache = new Map();
 const previousKpiValues = { totalPnl: null, netWorth: null, netContribution: null, cashAvailable: null, pnlCrypto: null, pnlStock: null, pnlRealEstate: null };
 const previousBestPerformer = { id: null, pnl: null, change: null };
 let assetYearSeries = { labels: [], datasets: [] };
@@ -259,7 +279,67 @@ const MINDMAP_LABEL_OVERRIDES = {
     unclassified: 'Other'
 };
 
-function applyRangeButtons(){ /* no-op */ }
+const CRYPTO_FH_PREFIXES = [
+    'BINANCE:',
+    'COINBASE:',
+    'KRAKEN:',
+    'GEMINI:',
+    'BITFINEX:',
+    'BITSTAMP:',
+    'HUOBI:',
+    'OKX:',
+    'POLONIEX:',
+    'BYBIT:'
+];
+
+function applyRangeButtons(activeRange){
+    if(!pnlRangeButtons.size) return;
+    pnlRangeButtons.forEach((button, range)=>{
+        const isActive = range === activeRange;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        button.setAttribute('tabindex', isActive ? '0' : '-1');
+    });
+    if(pnlRangeTabsContainer){
+        pnlRangeTabsContainer.setAttribute('data-active-range', activeRange);
+    }
+    if(pnlCardLabelElement){
+        const config = PNL_RANGE_CONFIG.find(item => item.key === activeRange);
+        const nextLabel = activeRange === 'ALL'
+            ? pnlCardLabelBase
+            : (config?.label || pnlCardLabelBase);
+        pnlCardLabelElement.textContent = nextLabel;
+    }
+}
+
+function initializePnlRangeTabs(){
+    if(typeof document === 'undefined') return;
+    pnlRangeTabsContainer = document.getElementById('pnl-range-tabs');
+    pnlRangeButtons.clear();
+    if(!pnlRangeTabsContainer) return;
+    if(!pnlCardLabelElement){
+        pnlCardLabelElement = document.querySelector('#pnl-card .label');
+        if(pnlCardLabelElement){
+            pnlCardLabelBase = pnlCardLabelElement.textContent || pnlCardLabelBase;
+        }
+    }
+    const buttons = pnlRangeTabsContainer.querySelectorAll('[data-pnl-range]');
+    buttons.forEach(button=>{
+        const range = button.dataset.pnlRange;
+        if(!range) return;
+        pnlRangeButtons.set(range, button);
+        button.addEventListener('click', ()=>{
+            setPnlRange(range);
+        });
+    });
+    if(!pnlRangeButtons.has(pnlRange) && pnlRangeButtons.size){
+        const first = pnlRangeButtons.keys().next().value;
+        if(first){
+            pnlRange = first;
+        }
+    }
+    applyRangeButtons(pnlRange);
+}
 
 function setLoadingState(state, message){
     if(!loadingOverlay) return;
@@ -283,6 +363,47 @@ function reportLoading(message){
     if(!message) return;
     setLoadingState('visible', message);
     setStatus(message);
+}
+
+const CORS_PROXY_PREFIXES = ['https://r.jina.ai/'];
+
+async function fetchJsonWithCorsFallback(url, options){
+    const attempts = [url];
+    if(typeof window !== 'undefined'){
+        CORS_PROXY_PREFIXES.forEach(prefix=>{
+            const proxied = `${prefix}${url}`;
+            if(!attempts.includes(proxied)){
+                attempts.push(proxied);
+            }
+        });
+    }
+    for(const target of attempts){
+        try{
+            const response = await fetch(target, options);
+            if(!response.ok){
+                continue;
+            }
+            const contentType = response.headers?.get?.('content-type') || '';
+            const text = await response.text();
+            if(!text){
+                continue;
+            }
+            const trimmed = text.trim();
+            if(!trimmed){
+                continue;
+            }
+            if(contentType.includes('application/json') || trimmed.startsWith('{') || trimmed.startsWith('[')){
+                try{
+                    return JSON.parse(trimmed);
+                }catch(parseError){
+                    console.warn('Failed to parse JSON for', target, parseError);
+                }
+            }
+        }catch(error){
+            console.warn('fetchJsonWithCorsFallback error', target, error);
+        }
+    }
+    return null;
 }
 
 // ----------------- UTIL ---------------------
@@ -662,6 +783,34 @@ function applyLivePrice(position, price){
     position.priceStatus = null;
 }
 
+function applyPriceUpdate(position, price, prevClose, source){
+    if(!Number.isFinite(price) || price <= 0){
+        return false;
+    }
+    applyLivePrice(position, price);
+    if(Number.isFinite(prevClose) && prevClose > 0){
+        position.prevClose = prevClose;
+    }
+    const reference = Number.isFinite(position.prevClose) && Math.abs(position.prevClose) > 1e-9
+        ? position.prevClose
+        : (Number.isFinite(position.avgPrice) && Math.abs(position.avgPrice) > 1e-9
+            ? position.avgPrice
+            : (Number.isFinite(position.lastKnownPrice) ? position.lastKnownPrice : price));
+    if(Number.isFinite(reference) && Math.abs(reference) > 1e-9){
+        position.change = price - reference;
+        position.changePct = reference ? ((price - reference) / reference) * 100 : 0;
+    }else{
+        position.change = 0;
+        position.changePct = 0;
+    }
+    if(source){
+        position.priceSource = source;
+    }
+    position.priceStatus = null;
+    recomputePositionMetrics(position);
+    return true;
+}
+
 function flashElement(element, direction){
     if(!element || !direction) return;
     element.classList.remove('flash-up','flash-down','flash-up-text','flash-down-text');
@@ -765,7 +914,7 @@ async function ensureRangeReference(position, range){
     const now = Math.floor(Date.now()/1000);
     const lookback = RANGE_LOOKBACK[range] ?? 0;
     const from = now - lookback - 3600; // pad an hour to ensure candle availability
-    const endpoint = position.finnhubSymbol.includes(':') ? 'crypto/candle' : 'stock/candle';
+    const endpoint = isCryptoFinnhubSymbol(position.finnhubSymbol, position.type) ? 'crypto/candle' : 'stock/candle';
     const url = `${FINNHUB_REST}/${endpoint}?symbol=${encodeURIComponent(position.finnhubSymbol)}&resolution=D&from=${from}&to=${now}&token=${FINNHUB_KEY}`;
     try{
         const res = await fetch(url);
@@ -807,18 +956,25 @@ function recomputeRangeMetrics(range){
         const prevRange = position.rangePnl ?? null;
         const unrealized = (price - base) * qty;
         const realized = Number(position.realized || 0);
-        let pnl = unrealized + realized;
+        const reinvestedQty = Math.max(0, Number(position.reinvested || 0));
+        const reinvestBasePrice = Math.abs(price) > 1e-9 ? price : base;
+        const reinvestedValue = (reinvestedQty > 1e-6 && Math.abs(reinvestBasePrice) > 1e-9) ? reinvestBasePrice * reinvestedQty : 0;
+        let pnl = unrealized + realized + reinvestedValue;
         const typeKey = (position.type || '').toLowerCase();
         if(typeKey === 'real estate'){
             const rentPnl = position.rentRealized || 0;
             pnl = rentPnl;
             categoryTotals.realEstate += rentPnl;
+            position.rangeReinvestedValue = 0;
         }else if(typeKey === 'crypto'){
             categoryTotals.crypto += pnl;
+            position.rangeReinvestedValue = reinvestedValue;
         }else if(typeKey === 'stock'){
             categoryTotals.stock += pnl;
+            position.rangeReinvestedValue = reinvestedValue;
         }else{
             categoryTotals.other += pnl;
+            position.rangeReinvestedValue = reinvestedValue;
         }
         position.rangePnl = pnl;
         const baseValue = base * qty;
@@ -826,6 +982,7 @@ function recomputeRangeMetrics(range){
         if(typeKey === 'real estate'){
             denominator = Math.abs(position.invested) || Math.abs(pnl) || 1;
         }
+        position.rangeBaseDenominator = denominator;
         position.rangeChangePct = denominator ? (pnl / denominator) * 100 : 0;
         if(prevRange !== null){
             position.rangeDirection = pnl > prevRange ? 'up' : pnl < prevRange ? 'down' : null;
@@ -840,13 +997,14 @@ function recomputeRangeMetrics(range){
 }
 
 async function setPnlRange(range){
-    if(isRangeUpdateInFlight || range === pnlRange) return;
+    const normalized = PNL_RANGE_CONFIG.some(item=> item.key === range) ? range : 'ALL';
+    if(isRangeUpdateInFlight || normalized === pnlRange) return;
     isRangeUpdateInFlight = true;
     try{
-        pnlRange = range;
-        applyRangeButtons(range);
-        if(range !== 'ALL'){
-            const tasks = positions.map(position => ensureRangeReference(position, range));
+        pnlRange = normalized;
+        applyRangeButtons(pnlRange);
+        if(pnlRange !== 'ALL'){
+            const tasks = positions.map(position => ensureRangeReference(position, pnlRange));
             await Promise.all(tasks);
         }
         rangeDirty = true;
@@ -884,7 +1042,8 @@ function mapFinnhubSymbol(asset, category, isOverride = false){
     const cat = (category||'').toLowerCase();
     const cleaned = String(asset).trim().toUpperCase();
     const overrides = {
-        ISAC: 'NASDAQ:ISAC'
+        ISAC: 'LSE:ISAC',
+        'NASDAQ:ISAC': 'LSE:ISAC'
     };
     if(overrides[cleaned]) return overrides[cleaned];
     if(cat==='cash') return null;
@@ -896,6 +1055,24 @@ function mapFinnhubSymbol(asset, category, isOverride = false){
     if(cleaned.includes(':')) return cleaned;
     if(/[A-Z0-9]{1,5}/.test(cleaned) && !cleaned.includes(' ')) return cleaned;
     return null;
+}
+
+function isCryptoFinnhubSymbol(symbol, type){
+    if(!symbol){
+        return String(type || '').toLowerCase() === 'crypto';
+    }
+    const typeKey = String(type || '').toLowerCase();
+    if(typeKey === 'crypto'){
+        return true;
+    }
+    const upper = String(symbol).toUpperCase();
+    return CRYPTO_FH_PREFIXES.some(prefix => upper.startsWith(prefix));
+}
+
+function shouldPreferYahoo(position){
+    if(!position) return false;
+    const symbol = (position.finnhubSymbol || position.Symbol || position.id || '').toUpperCase();
+    return symbol === 'ISAC.L' || symbol === 'LSE:ISAC' || symbol === 'NASDAQ:ISAC' || symbol === 'ISAC';
 }
 
 function mapYahooSymbol(position){
@@ -917,8 +1094,9 @@ function mapYahooSymbol(position){
     }
     let symbol = rawSymbol.replace(/\s+/g,'').toUpperCase();
     const overrides = {
-        'NASDAQ:ISAC': 'ISAC',
-        'ISAC': 'ISAC'
+        'NASDAQ:ISAC': 'ISAC.L',
+        'ISAC': 'ISAC.L',
+        'LSE:ISAC': 'ISAC.L'
     };
     if(overrides[symbol]) return overrides[symbol];
     if(symbol.includes(':')){
@@ -1083,7 +1261,20 @@ function recomputePositionMetrics(position){
     position.avgPrice = qty !== 0 ? costBasis / qty : fallbackPrice;
     position.marketValue = marketValue;
     position.unrealized = marketValue - costBasis;
-    position.pnl = position.unrealized + realized;
+    const priceCandidates = [
+        position.displayPrice,
+        position.currentPrice,
+        position.lastKnownPrice,
+        position.lastPurchasePrice,
+        position.avgPrice,
+        fallbackPrice
+    ].map(value=> Number(value)).filter(value=> Number.isFinite(value));
+    const prioritizedPrice = priceCandidates.find(value => Math.abs(value) > 1e-9);
+    const effectivePrice = Number.isFinite(prioritizedPrice) ? prioritizedPrice : 0;
+    const reinvestedQty = Math.max(0, Number(position.reinvested || 0));
+    const reinvestedValue = (reinvestedQty > 1e-6 && Math.abs(effectivePrice) > 1e-9) ? reinvestedQty * effectivePrice : 0;
+    position.reinvestedValue = reinvestedValue;
+    position.pnl = position.unrealized + realized + reinvestedValue;
     position.totalReturn = position.pnl;
     if(prevMarketValue !== null){
         position.marketDirection = marketValue > prevMarketValue ? 'up' : marketValue < prevMarketValue ? 'down' : null;
@@ -1102,6 +1293,7 @@ function recomputePositionMetrics(position){
         position.totalReturn = rentPnl;
         position.prevMarketValue = propertyValue;
         position.displayPrice = propertyValue;
+        position.reinvestedValue = 0;
     }
     return position;
 }
@@ -1422,25 +1614,28 @@ async function fetchSnapshotBatch(symbols){
     return Promise.all(promises);
 }
 
-function applySnapshotResults(results){
+async function applySnapshotResults(results){
+    const fallbackTasks = [];
     results.forEach(result=>{
-        if(!result.ok) return;
         const pos = finnhubIndex.get(result.symbol);
-        if(!pos) return;
-        const data = result.data || {};
-        const price = data.c ?? pos.currentPrice ?? pos.lastKnownPrice ?? pos.avgPrice;
-        applyLivePrice(pos, price);
-        pos.prevClose = data.pc ?? pos.prevClose ?? null;
-        if(pos.prevClose && price !== null && price !== undefined){
-            pos.change = price - pos.prevClose;
-            pos.changePct = pos.prevClose ? ((price - pos.prevClose) / pos.prevClose) * 100 : 0;
-        }else{
-            const reference = pos.avgPrice || pos.lastKnownPrice || price;
-            pos.change = price - reference;
-            pos.changePct = reference ? (pos.change / reference) * 100 : 0;
+        if(!pos){
+            return;
         }
-        recomputePositionMetrics(pos);
+        if(!result.ok){
+            fallbackTasks.push(scheduleYahooFallback(pos));
+            return;
+        }
+        const data = result.data || {};
+        const price = Number(data.c ?? data.p ?? data.lp ?? data.lastPrice);
+        const prevClose = Number(data.pc ?? data.previousClose);
+        const applied = applyPriceUpdate(pos, price, prevClose, 'finnhub');
+        if(!applied){
+            fallbackTasks.push(scheduleYahooFallback(pos));
+        }
     });
+    if(fallbackTasks.length){
+        await Promise.allSettled(fallbackTasks);
+    }
     rangeDirty = true;
 }
 
@@ -1482,23 +1677,18 @@ function subscribeAll(){
 function applyRealtime(symbol, price){
     const pos = finnhubIndex.get(symbol);
     if(!pos) return;
-    applyLivePrice(pos, price);
-    if(pos.prevClose){
-        pos.change = price - pos.prevClose;
-        pos.changePct = pos.prevClose ? ((price - pos.prevClose) / pos.prevClose) * 100 : 0;
+    const numericPrice = Number(price);
+    if(applyPriceUpdate(pos, numericPrice, pos.prevClose ?? null, 'finnhub')){
+        lastUpdated = new Date();
+        rangeDirty = true;
+        const type = (pos.type || '').toLowerCase();
+        if(type === 'crypto'){
+            scheduleCryptoUiUpdate();
+        }else{
+            scheduleUIUpdate();
+        }
     }else{
-        const ref = pos.avgPrice || pos.lastKnownPrice || price;
-        pos.change = price - ref;
-        pos.changePct = ref ? ((price - ref)/ref)*100 : 0;
-    }
-    recomputePositionMetrics(pos);
-    lastUpdated = new Date();
-    rangeDirty = true;
-    const type = (pos.type || '').toLowerCase();
-    if(type === 'crypto'){
-        scheduleCryptoUiUpdate();
-    }else{
-        scheduleUIUpdate();
+        scheduleYahooFallback(pos);
     }
 }
 
@@ -1745,6 +1935,8 @@ function computeRealEstateAnalytics(){
     const currentYear = now.getFullYear();
     const cutoffStart = new Date(now.getFullYear(), now.getMonth(), 1);
     cutoffStart.setMonth(cutoffStart.getMonth() - 11);
+    const THIRTY_DAYS_MS = 30 * 24 * 3600 * 1000;
+    const last30Cutoff = new Date(now.getTime() - THIRTY_DAYS_MS);
     const results = [];
     const rentYearTotals = new Map();
     const rentYearTotalsByAsset = new Map();
@@ -1760,6 +1952,9 @@ function computeRealEstateAnalytics(){
         let rentCollected = 0;
         let rentYtd = 0;
         let rentLast12 = 0;
+        let rentLast30 = 0;
+        let latestRentDate = null;
+        let latestRentAmount = 0;
         let earliestPurchase = null;
         let earliestEvent = null;
         const rentMonths = new Set();
@@ -1811,6 +2006,10 @@ function computeRealEstateAnalytics(){
                 if(rentAmount > 0){
                     rentCollected += rentAmount;
                     if(date){
+                        if(!latestRentDate || (date instanceof Date && date > latestRentDate)){
+                            latestRentDate = date instanceof Date ? date : latestRentDate;
+                            latestRentAmount = rentAmount;
+                        }
                         const key = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;
                         rentMonths.add(key);
                         const yr = date.getFullYear();
@@ -1826,6 +2025,9 @@ function computeRealEstateAnalytics(){
                         }
                         if(date.getFullYear() === currentYear){
                             rentYtd += rentAmount;
+                        }
+                        if(date >= last30Cutoff){
+                            rentLast30 += rentAmount;
                         }
                     }
                 }
@@ -1871,6 +2073,9 @@ function computeRealEstateAnalytics(){
         }
         projectedValue = Number(projectedValue.toFixed(2));
 
+        const arrPercent = finalAssetPrice > 0 && rentLast12 > 0 ? (rentLast12 / finalAssetPrice) * 100 : null;
+        const lastMonthShare = finalAssetPrice > 0 && rentLast30 > 0 ? Math.min(rentLast30 / finalAssetPrice, 1) : 0;
+
         results.push({
             name: position.displayName || position.Symbol || position.Name || `Asset ${idx+1}`,
             totalPurchase,
@@ -1879,6 +2084,10 @@ function computeRealEstateAnalytics(){
             rentCollected,
             rentYtd,
             avgMonthlyRent,
+            arrPercent,
+            lastRentAmount: latestRentAmount,
+            lastRentDate: latestRentDate,
+            lastMonthShare,
             utilization,
             netOutstanding: outstanding,
             payoffMonths,
@@ -1987,6 +2196,17 @@ function createRealEstateRow(stat){
     const utilizationDisplay = hasUtilization ? `${utilizationValue.toFixed(1)}%` : '—';
     const utilizationProgress = hasUtilization ? (utilizationValue / 100) : 0;
     const isPassive = !stat.rentCollected && !stat.rentYtd && !stat.avgMonthlyRent;
+    const lastRentDate = stat.lastRentDate instanceof Date
+        ? stat.lastRentDate
+        : (stat.lastRentDate ? new Date(stat.lastRentDate) : null);
+    const daysSinceLastRent = lastRentDate instanceof Date
+        ? (Date.now() - lastRentDate.getTime()) / (24 * 3600 * 1000)
+        : null;
+    const arrPercent = Number(stat.arrPercent);
+    const hasArrPercent = Number.isFinite(arrPercent);
+    const arrDisplay = hasArrPercent ? `${arrPercent.toFixed(1)}%` : null;
+    const lastMonthShare = Number.isFinite(stat.lastMonthShare) ? Math.max(0, Math.min(Number(stat.lastMonthShare), 1)) : 0;
+    const lastMonthPercentDisplay = lastMonthShare > 0 ? `${(lastMonthShare * 100).toFixed(1)}%` : null;
     const rows = [
         `<div><span class="label">Final Asset Price</span><span class="value">${money(stat.finalAssetPrice)}</span></div>`,
         `<div><span class="label">Projected Value</span><span class="value">${money(stat.projectedValue)}</span></div>`
@@ -1999,16 +2219,39 @@ function createRealEstateRow(stat){
             `<div><span class="label">Rent Collected</span><span class="value">${money(stat.rentCollected)}</span></div>`,
             `<div><span class="label">Rent YTD</span><span class="value">${money(stat.rentYtd)}</span></div>`,
             `<div><span class="label">Rent / Mo</span><span class="value">${money(stat.avgMonthlyRent)}</span></div>`,
-            `<div class="utilization-block">`
-            + `<span class="label">Utilization</span>`
-            + `<div class="circle-progress" style="--progress:${utilizationProgress};">`
-            + `<div class="circle-progress-inner"><span>${utilizationDisplay}</span></div>`
-            + `</div>`
-            + `</div>`,
+            (arrDisplay ? `<div><span class="label">ARR</span><span class="value arr-value">${arrDisplay}</span></div>` : ''),
+            (() => {
+                const classes = ['circle-progress'];
+                if(lastRentDate && Number.isFinite(daysSinceLastRent) && daysSinceLastRent <= 60){
+                    classes.push('recent-rent');
+                }
+                const lastRentShare = lastMonthShare;
+                const progressAngle = utilizationProgress * 360;
+                const highlightAngle = Math.min(progressAngle, lastRentShare * 360);
+                const startAngle = Math.max(progressAngle - highlightAngle, 0);
+                let backgroundStyle = '';
+                if(hasUtilization){
+                    const baseGradient = `conic-gradient(var(--fill-color) 0deg ${progressAngle}deg, var(--track-color) ${progressAngle}deg 360deg)`;
+                    const highlightGradient = highlightAngle > 0
+                        ? `, conic-gradient(transparent 0deg ${startAngle}deg, var(--highlight-color) ${startAngle}deg ${progressAngle}deg, transparent ${progressAngle}deg 360deg)`
+                        : '';
+                    backgroundStyle = `background:${baseGradient}${highlightGradient};`;
+                }
+                const styleAttr = `--progress:${utilizationProgress};${backgroundStyle}`;
+                const title = lastRentDate
+                    ? ` title="Last rent ${money(stat.lastRentAmount || 0)} · ${formatDateShort(lastRentDate)}"`
+                    : '';
+                let html = `<div class="utilization-block"><span class="label">Utilization</span>`
+                    + `<div class="${classes.join(' ')}" style="${styleAttr}"${title}>`
+                    + `<div class="circle-progress-inner"><span>${utilizationDisplay}</span>${lastMonthPercentDisplay ? `<span class="inner-note">(${lastMonthPercentDisplay})</span>` : ''}</div>`
+                    + `</div>`;
+                html += `</div>`;
+                return html;
+            })(),
             `<div><span class="label">Payoff ETA</span><span class="value">${formatDurationFromMonths(stat.payoffMonths)}</span></div>`
         );
     }
-    metrics.innerHTML = rows.join('');
+    metrics.innerHTML = rows.filter(Boolean).join('');
     row.appendChild(metrics);
 
     const canOpenModal = stat.positionRef && Array.isArray(stat.positionRef.operations) && stat.positionRef.operations.some(op => Number(op.amount || 0));
@@ -2294,7 +2537,7 @@ async function fetchFinnhubSeries(position, rawSymbol, firstPurchaseTime){
             fromMs = Math.max(fromMs, firstPurchaseTime - marginMs);
         }
         const fromSec = Math.floor(fromMs / 1000);
-        const endpoint = (/crypto/i.test(position.type || '') || rawSymbol.includes(':')) ? 'crypto/candle' : 'stock/candle';
+        const endpoint = isCryptoFinnhubSymbol(rawSymbol, position.type) ? 'crypto/candle' : 'stock/candle';
         const url = `${FINNHUB_REST}/${endpoint}?symbol=${encodeURIComponent(rawSymbol)}&resolution=D&from=${fromSec}&to=${nowSec}&token=${FINNHUB_KEY}`;
         const response = await fetch(url);
         if(!response.ok) return [];
@@ -2363,6 +2606,64 @@ async function fetchAlphaVantageSeries(symbol, typeKey, firstPurchaseTime){
         console.warn('Alpha Vantage history fetch failed', symbol, error);
     }
     return [];
+}
+
+async function fetchYahooQuote(symbol){
+    const cacheKey = `quote:${symbol}`;
+    const cached = yahooQuoteCache.get(cacheKey);
+    const now = Date.now();
+    if(cached && (now - cached.time) < 60 * 1000){
+        return cached.value;
+    }
+    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbol)}`;
+    try{
+        const json = await fetchJsonWithCorsFallback(url);
+        const quote = json?.quoteResponse?.result?.[0];
+        if(!quote) return null;
+        const price = Number(quote.regularMarketPrice ?? quote.postMarketPrice ?? quote.preMarketPrice);
+        const prevClose = Number(quote.regularMarketPreviousClose ?? quote.previousClose);
+        const currency = quote.currency || null;
+        const value = {
+            price: Number.isFinite(price) && price > 0 ? price : null,
+            prevClose: Number.isFinite(prevClose) && prevClose > 0 ? prevClose : null,
+            currency
+        };
+        yahooQuoteCache.set(cacheKey, { time: now, value });
+        return value;
+    }catch(error){
+        console.warn('Yahoo quote fetch failed', symbol, error);
+        return null;
+    }
+}
+
+function scheduleYahooFallback(position){
+    if(!position) return Promise.resolve(false);
+    if(position._yahooFallbackPromise){
+        return position._yahooFallbackPromise;
+    }
+    const yahooSymbol = mapYahooSymbol(position);
+    if(!yahooSymbol){
+        return Promise.resolve(false);
+    }
+    const task = (async ()=>{
+        const quote = await fetchYahooQuote(yahooSymbol);
+        if(quote && Number.isFinite(quote.price) && quote.price > 0){
+            const success = applyPriceUpdate(position, quote.price, quote.prevClose ?? null, 'yahoo');
+            if(success){
+                rangeDirty = true;
+                scheduleUIUpdate({ immediate: true });
+            }
+            return success;
+        }
+        return false;
+    })().catch(error=>{
+        console.warn('Yahoo fallback error', yahooSymbol, error);
+        return false;
+    }).finally(()=>{
+        position._yahooFallbackPromise = null;
+    });
+    position._yahooFallbackPromise = task;
+    return task;
 }
 
 async function fetchCoinGeckoSeries(coinId, firstPurchaseTime){
@@ -2664,6 +2965,16 @@ const LOT_GROUP_OPTIONS = [
     { value: 'gain', label: 'Gains / Losses' }
 ];
 
+function updateLotsSort(field, direction){
+    const allowed = new Set(LOT_SORT_FIELDS.map(option => option.value));
+    const nextField = allowed.has(field) ? field : transactionLotsSortField;
+    const nextDirection = direction === 'asc' ? 'asc' : direction === 'desc' ? 'desc' : transactionLotsSortDirection;
+    const changed = nextField !== transactionLotsSortField || nextDirection !== transactionLotsSortDirection;
+    transactionLotsSortField = nextField;
+    transactionLotsSortDirection = nextDirection;
+    return changed;
+}
+
 function ensureTransactionLotsControls(){
     if(!transactionLotsContainer) return;
     if(!transactionLotsContainer.dataset.controls){
@@ -2684,12 +2995,6 @@ function ensureTransactionLotsControls(){
         transactionLotsControls = transactionLotsContainer.querySelector('.lots-controls');
         transactionLotsList = transactionLotsContainer.querySelector('.lots-list');
     }
-    if(transactionLotsSortSelect){
-        transactionLotsSortSelect.value = transactionLotsSortField;
-    }
-    if(transactionLotsDirectionSelect){
-        transactionLotsDirectionSelect.value = transactionLotsSortDirection;
-    }
     if(transactionLotsGroupSelect){
         transactionLotsGroupSelect.value = transactionLotsGroupKey;
     }
@@ -2698,36 +3003,6 @@ function ensureTransactionLotsControls(){
 function buildTransactionLotsControls(){
     if(!transactionLotsControls) return;
     transactionLotsControls.innerHTML = '';
-
-    const sortLabel = document.createElement('label');
-    sortLabel.className = 'lots-control';
-    sortLabel.innerHTML = '<span>Sort by</span>';
-    transactionLotsSortSelect = document.createElement('select');
-    transactionLotsSortSelect.id = 'lots-sort-field';
-    transactionLotsSortSelect.setAttribute('aria-label', 'Sort lots by');
-    LOT_SORT_FIELDS.forEach(option=>{
-        const opt = document.createElement('option');
-        opt.value = option.value;
-        opt.textContent = option.label;
-        transactionLotsSortSelect.appendChild(opt);
-    });
-    sortLabel.appendChild(transactionLotsSortSelect);
-    transactionLotsControls.appendChild(sortLabel);
-
-    const orderLabel = document.createElement('label');
-    orderLabel.className = 'lots-control';
-    orderLabel.innerHTML = '<span>Order</span>';
-    transactionLotsDirectionSelect = document.createElement('select');
-    transactionLotsDirectionSelect.id = 'lots-sort-direction';
-    transactionLotsDirectionSelect.setAttribute('aria-label', 'Sort direction');
-    LOT_DIRECTION_OPTIONS.forEach(option=>{
-        const opt = document.createElement('option');
-        opt.value = option.value;
-        opt.textContent = option.label;
-        transactionLotsDirectionSelect.appendChild(opt);
-    });
-    orderLabel.appendChild(transactionLotsDirectionSelect);
-    transactionLotsControls.appendChild(orderLabel);
 
     const groupLabel = document.createElement('label');
     groupLabel.className = 'lots-control';
@@ -2743,20 +3018,6 @@ function buildTransactionLotsControls(){
     });
     groupLabel.appendChild(transactionLotsGroupSelect);
     transactionLotsControls.appendChild(groupLabel);
-
-    transactionLotsSortSelect.addEventListener('change', ()=>{
-        transactionLotsSortField = transactionLotsSortSelect.value;
-        if(lastTransactionPosition && lastTransactionData){
-            renderTransactionLots(lastTransactionPosition, lastTransactionData);
-        }
-    });
-
-    transactionLotsDirectionSelect.addEventListener('change', ()=>{
-        transactionLotsSortDirection = transactionLotsDirectionSelect.value;
-        if(lastTransactionPosition && lastTransactionData){
-            renderTransactionLots(lastTransactionPosition, lastTransactionData);
-        }
-    });
 
     transactionLotsGroupSelect.addEventListener('change', ()=>{
         transactionLotsGroupKey = transactionLotsGroupSelect.value;
@@ -2808,7 +3069,7 @@ function renderTransactionLots(position, data){
     const currentPrice = Number(position.displayPrice || position.currentPrice || position.lastKnownPrice || position.avgPrice || 0);
     const processed = [];
     operations.forEach((op, index)=>{
-        if(op.skipInCharts) return;
+        if(op.skipInCharts || op.isReinvesting) return;
         const qtySigned = Number(op.amount || 0);
         if(!qtySigned) return;
         const absQty = Math.abs(qtySigned);
@@ -2883,23 +3144,62 @@ function renderTransactionLots(position, data){
     }
 
     listElement.innerHTML = '';
+    const LOT_COLUMNS = [
+        { key: 'date', label: 'Date', className: 'lot-cell-date' },
+        { key: 'qty', label: 'Type / Qty', className: 'lot-cell-type' },
+        { key: 'price', label: 'Price', className: 'lot-cell-price' },
+        { key: 'amount', label: 'Amount', className: 'lot-cell-amount' },
+        { key: 'pnl', label: 'P&L', className: 'lot-cell-pnl' }
+    ];
+
+    const appendLotsHeader = target => {
+        const header = document.createElement('div');
+        header.className = 'lot-header';
+        LOT_COLUMNS.forEach(column=>{
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'lot-header-cell';
+            button.textContent = column.label;
+            const isActive = transactionLotsSortField === column.key;
+            button.setAttribute('aria-sort', isActive ? (transactionLotsSortDirection === 'asc' ? 'ascending' : 'descending') : 'none');
+            if(isActive){
+                button.classList.add('sorted', `dir-${transactionLotsSortDirection}`);
+            }
+            button.addEventListener('click', ()=>{
+                const currentlyActive = transactionLotsSortField === column.key;
+                const nextDirection = currentlyActive && transactionLotsSortDirection === 'asc' ? 'desc' : 'asc';
+                updateLotsSort(column.key, nextDirection);
+                if(lastTransactionPosition && lastTransactionData){
+                    renderTransactionLots(lastTransactionPosition, lastTransactionData);
+                }
+            });
+            header.appendChild(button);
+        });
+        target.appendChild(header);
+    };
+
+    let headerInserted = false;
     groups.forEach(group=>{
         if(transactionLotsGroupKey !== 'none'){
             const heading = document.createElement('div');
             heading.className = 'lot-group-heading';
             heading.textContent = group.label;
             listElement.appendChild(heading);
+            appendLotsHeader(listElement);
+        }else if(group.items.length && !headerInserted){
+            appendLotsHeader(listElement);
+            headerInserted = true;
         }
         group.items.forEach(item=>{
             const pnlPercentDisplay = Number.isFinite(item.pnlPct) ? formatPercent(item.pnlPct) : '—';
             const row = document.createElement('div');
             row.className = 'lot-row';
             row.innerHTML = `
-                <div><strong>${item.dateLabel}</strong></div>
-                <div>${item.typeLabel} · ${formatQty(item.absQty)}</div>
-                <div>Price ${money(item.price)}</div>
-                <div>${item.amountLabel} ${money(item.baseAmount)}</div>
-                <div class="lot-value ${item.pnlClass}">${money(item.pnlValue)} (${pnlPercentDisplay})</div>
+                <div class="lot-cell lot-cell-date"><strong>${item.dateLabel}</strong></div>
+                <div class="lot-cell lot-cell-type">${item.typeLabel} · ${formatQty(item.absQty)}</div>
+                <div class="lot-cell lot-cell-price">${money(item.price)}</div>
+                <div class="lot-cell lot-cell-amount">${item.amountLabel} ${money(item.baseAmount)}</div>
+                <div class="lot-cell lot-cell-pnl"><span class="lot-value ${item.pnlClass}">${money(item.pnlValue)} (${pnlPercentDisplay})</span></div>
             `;
             listElement.appendChild(row);
         });
@@ -3068,7 +3368,7 @@ function createOpenPositionRow(position, totalCategoryValue){
     const reinvestPrice = Math.abs(price) > 1e-9 ? price : fallbackPrice;
     const hasReinvestValue = reinvestedQty > 1e-6 && Math.abs(reinvestPrice) > 1e-9;
     const reinvestedValue = hasReinvestValue ? reinvestPrice * reinvestedQty : 0;
-    const reinvestedDisplay = hasReinvestValue ? money(reinvestedValue) : null;
+    const displayPnlValue = pnlValue + reinvestedValue;
     const shareText = Number.isFinite(share) ? `${share.toFixed(1)}%` : '—';
     const main = document.createElement('div');
     main.className = 'analytics-main';
@@ -3102,21 +3402,25 @@ function createOpenPositionRow(position, totalCategoryValue){
     marketEl.className = 'value-strong';
     marketEl.textContent = money(marketValue);
     const pnlEl = document.createElement('div');
-    pnlEl.className = pnlValue >= 0 ? 'delta-positive' : 'delta-negative';
-    const pnlPercent = Number(position.rangeChangePct);
-    pnlEl.textContent = formatMoneyWithPercent(pnlValue, Number.isFinite(pnlPercent) ? pnlPercent : null, 1);
+    pnlEl.className = displayPnlValue >= 0 ? 'delta-positive' : 'delta-negative';
+    const denominator = Number(position.rangeBaseDenominator);
+    const basePercent = Number(position.rangeChangePct);
+    const effectivePercent = Number.isFinite(denominator) && Math.abs(denominator) > 1e-6
+        ? (displayPnlValue / denominator) * 100
+        : (Number.isFinite(basePercent) ? basePercent : null);
+    pnlEl.textContent = formatMoneyWithPercent(displayPnlValue, Number.isFinite(effectivePercent) ? effectivePercent : null, 1);
+    if(showPnlPercentages && hasReinvestValue){
+        const reinvestSpan = document.createElement('span');
+        reinvestSpan.className = 'reinvested-note';
+        reinvestSpan.textContent = ` · Reinvested ${money(reinvestedValue)}`;
+        pnlEl.appendChild(reinvestSpan);
+    }
     const shareEl = document.createElement('div');
     shareEl.className = 'muted';
     shareEl.textContent = `Category ${shareText}`;
     values.appendChild(marketEl);
     values.appendChild(pnlEl);
     values.appendChild(shareEl);
-    if(reinvestedDisplay){
-        const reinvestEl = document.createElement('div');
-        reinvestEl.className = 'reinvested-chip';
-        reinvestEl.textContent = `Reinvested ${reinvestedDisplay}`;
-        values.appendChild(reinvestEl);
-    }
     row.appendChild(values);
 
     const plateImage = getAssetPlateImage(position);
@@ -3165,7 +3469,7 @@ function createClosedPositionRow(position){
     const reinvestPrice = Math.abs(price) > 1e-9 ? price : fallbackPrice;
     const hasReinvestValue = reinvestedQty > 1e-6 && Math.abs(reinvestPrice) > 1e-9;
     const reinvestedValue = hasReinvestValue ? reinvestPrice * reinvestedQty : 0;
-    const reinvestedDisplay = hasReinvestValue ? money(reinvestedValue) : null;
+    const displayRealized = realized + reinvestedValue;
     const main = document.createElement('div');
     main.className = 'analytics-main';
     const iconEl = createAssetIconElement(position);
@@ -3192,19 +3496,24 @@ function createClosedPositionRow(position){
     const values = document.createElement('div');
     values.className = 'analytics-values';
     const pnlEl = document.createElement('div');
-    pnlEl.className = realized >= 0 ? 'delta-positive' : 'delta-negative';
-    pnlEl.textContent = formatMoneyWithPercent(realized, Number.isFinite(realizedPercent) ? realizedPercent : null, 1);
+    pnlEl.className = displayRealized >= 0 ? 'delta-positive' : 'delta-negative';
+    const denominator = Number(position.rangeBaseDenominator);
+    const basePercent = Number(position.rangeChangePct);
+    const effectivePercent = Number.isFinite(denominator) && Math.abs(denominator) > 1e-6
+        ? (displayRealized / denominator) * 100
+        : (Number.isFinite(realizedPercent) ? realizedPercent : null);
+    pnlEl.textContent = formatMoneyWithPercent(displayRealized, Number.isFinite(effectivePercent) ? effectivePercent : null, 1);
+    if(showPnlPercentages && hasReinvestValue){
+        const reinvestSpan = document.createElement('span');
+        reinvestSpan.className = 'reinvested-note';
+        reinvestSpan.textContent = ` · Reinvested ${money(reinvestedValue)}`;
+        pnlEl.appendChild(reinvestSpan);
+    }
     const statusEl = document.createElement('div');
     statusEl.className = 'muted';
     statusEl.textContent = 'Position closed';
     values.appendChild(pnlEl);
     values.appendChild(statusEl);
-    if(reinvestedDisplay){
-        const reinvestEl = document.createElement('div');
-        reinvestEl.className = 'reinvested-chip';
-        reinvestEl.textContent = `Reinvested ${reinvestedDisplay}`;
-        values.appendChild(reinvestEl);
-    }
     row.appendChild(values);
 
     const plateImage = getAssetPlateImage(position);
@@ -4728,7 +5037,7 @@ async function bootstrap(){
                 if(!batch || !batch.length) continue;
                 try{
                     const results = await fetchSnapshotBatch(batch);
-                    applySnapshotResults(results);
+                    await applySnapshotResults(results);
                 }catch(error){
                     console.warn('Snapshot batch failed', batch, error);
                 }finally{
@@ -4756,6 +5065,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
     }
     ensureTransactionModalElements();
     ensureNetWorthDetailModalElements();
+    initializePnlRangeTabs();
     document.addEventListener('keydown', event => {
         if(event.key === 'Escape'){
             let handled = false;
