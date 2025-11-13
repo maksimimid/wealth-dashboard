@@ -59,12 +59,18 @@ let pnlCardLabelElement = null;
 let pnlCardLabelBase = 'Total P&L';
 const yahooQuoteCache = new Map();
 const previousKpiValues = { totalPnl: null, netWorth: null, netContribution: null, cashAvailable: null, pnlCrypto: null, pnlStock: null, pnlRealEstate: null };
-const previousBestPerformer = { id: null, pnl: null, change: null };
+const bestPerformerCache = { crypto: null, stock: null, realEstate: null };
+let bestInfoPopover = null;
+let bestInfoPopoverElements = null;
+let activeBestInfoCategory = null;
+let activeBestInfoTrigger = null;
+let bestInfoListenersAttached = false;
 let assetYearSeries = { labels: [], datasets: [] };
 let assetYearSeriesDirty = true;
 const assetColorCache = new Map();
 let realEstateRentSeries = { labels: [], datasets: [] };
 let realEstateRentSeriesDirty = true;
+let lastRealEstateAnalytics = null;
 const realEstateRentFilters = new Map();
 const realEstateGroupState = { active: true, passive: false };
 let transactionModal = null;
@@ -485,6 +491,238 @@ function formatCompactMoney(value){
     if(abs >= 1e6) return format(abs / 1e6, 'm');
     if(abs >= 1e3) return format(abs / 1e3, 'k');
     return `${sign}$${Math.round(abs).toString()}`;
+}
+
+function getRangeStartDate(range){
+    if(range === 'ALL') return null;
+    const now = new Date();
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    switch(range){
+        case '1D':
+            start.setDate(start.getDate() - 1);
+            break;
+        case '1W':
+            start.setDate(start.getDate() - 7);
+            break;
+        case '1M':
+            start.setMonth(start.getMonth() - 1);
+            break;
+        case '1Y':
+            start.setFullYear(start.getFullYear() - 1);
+            break;
+        default:
+            return null;
+    }
+    return start;
+}
+
+function getCategoryDisplayName(categoryKey){
+    switch(categoryKey){
+        case 'crypto':
+            return 'Crypto';
+        case 'stock':
+            return 'Stocks';
+        case 'realEstate':
+            return 'Real Estate';
+        default:
+            if(!categoryKey) return 'Assets';
+            const spaced = String(categoryKey)
+                .replace(/([A-Z])/g, ' $1')
+                .replace(/[_-]+/g, ' ')
+                .trim();
+            return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : 'Assets';
+    }
+}
+
+function getRealEstateRangePnl(position, range){
+    if(!position) return 0;
+    if(range === 'ALL'){
+        if(!position.rentRangeTotals){
+            position.rentRangeTotals = {};
+        }
+        const total = Number(position.rentRealized || 0) || 0;
+        position.rentRangeTotals.ALL = total;
+        return total;
+    }
+    if(!position.rentRangeTotals){
+        position.rentRangeTotals = {};
+    }
+    if(position.rentRangeTotals[range] !== undefined){
+        return position.rentRangeTotals[range];
+    }
+    const rangeStart = getRangeStartDate(range);
+    if(!(rangeStart instanceof Date)){
+        const total = Number(position.rentRealized || 0) || 0;
+        position.rentRangeTotals[range] = total;
+        return total;
+    }
+    const operations = Array.isArray(position.operations) ? position.operations : [];
+    const total = operations.reduce((sum, op)=>{
+        if(!op || !op.isRent) return sum;
+        const opDate = op.date instanceof Date ? op.date : (op.rawDate ? new Date(op.rawDate) : null);
+        if(!(opDate instanceof Date) || Number.isNaN(opDate.getTime())) return sum;
+        if(opDate < rangeStart) return sum;
+        const amount = Number(op.spent || 0);
+        if(!Number.isFinite(amount)) return sum;
+        return sum + (amount < 0 ? -amount : amount);
+    }, 0);
+    position.rentRangeTotals[range] = total;
+    return total;
+}
+
+function computeCategoryBest(categoryKey, context = {}){
+    const label = getCategoryDisplayName(categoryKey);
+    const normalizedKey = categoryKey === 'realEstate' ? 'real estate' : categoryKey;
+    const eligiblePositions = positions.filter(position=>{
+        if(!position) return false;
+        const type = (position.type || '').toLowerCase();
+        if(categoryKey === 'realEstate'){
+            return type === 'real estate';
+        }
+        return type === normalizedKey;
+    }).filter(position=>{
+        if(categoryKey === 'realEstate'){
+            return true;
+        }
+        const qty = Number(position.qty || 0);
+        const marketValue = Number(position.marketValue || 0);
+        return Math.abs(qty) > 1e-6 || Math.abs(marketValue) > 1e-2;
+    });
+    if(!eligiblePositions.length){
+        return null;
+    }
+    let best = null;
+    eligiblePositions.forEach(position=>{
+        let pnlValue;
+        if(categoryKey === 'realEstate'){
+            pnlValue = getRealEstateRangePnl(position, pnlRange);
+        }else{
+            const raw = position.rangePnl ?? position.pnl;
+            pnlValue = Number(raw);
+        }
+        if(!Number.isFinite(pnlValue)) return;
+        if(best === null || pnlValue > best.pnl){
+            best = { position, pnl: pnlValue };
+        }
+    });
+    if(!best){
+        return null;
+    }
+    const position = best.position;
+    const displayName = position.displayName || position.Symbol || position.Name || position.id || '—';
+    const priceCandidates = [
+        position.displayPrice,
+        position.currentPrice,
+        position.lastKnownPrice,
+        position.lastPurchasePrice,
+        position.avgPrice
+    ].map(value=> Number(value)).filter(value=> Number.isFinite(value));
+    const prioritizedPrice = priceCandidates.find(value => Math.abs(value) > 1e-9);
+    const fallbackPrice = Number(position.displayPrice ?? position.currentPrice ?? position.lastKnownPrice ?? position.avgPrice ?? position.lastPurchasePrice ?? 0) || 0;
+    const price = Number.isFinite(prioritizedPrice) ? prioritizedPrice : fallbackPrice;
+    const qty = Number(position.qty || 0);
+    const marketValue = Number(position.marketValue || 0);
+    let changePct = Number(position.rangeChangePct);
+    if(!Number.isFinite(changePct)){
+        changePct = Number(position.changePct);
+    }
+    const rangeLabel = RANGE_LABELS[pnlRange] || pnlRange;
+    const rangeStart = getRangeStartDate(pnlRange);
+    const result = {
+        id: position.id,
+        label,
+        position,
+        displayName,
+        pnl: best.pnl,
+        changePct: Number.isFinite(changePct) ? changePct : null,
+        rangeLabel,
+        rangeStart,
+        meta: '',
+        extraItems: []
+    };
+    if(categoryKey === 'realEstate'){
+        const analytics = context.realEstateAnalytics;
+        const stat = analytics && Array.isArray(analytics.rows)
+            ? analytics.rows.find(row => row.positionRef === position)
+            : null;
+        const rentTotal = stat ? Number(stat.rentCollected || 0) : Number(position.rentRealized || 0);
+        const metaParts = [];
+        const utilization = stat && Number.isFinite(stat.utilization)
+            ? Math.max(0, Math.min(Number(stat.utilization), 100))
+            : null;
+        if(stat && stat.category){
+            metaParts.push(`Category ${stat.category}`);
+        }else if(position.type){
+            metaParts.push(position.type);
+        }
+        if(utilization !== null){
+            metaParts.push(`Utilization ${utilization.toFixed(1)}%`);
+        }
+        if(metaParts.length){
+            result.meta = metaParts.join(' · ');
+        }else{
+            result.meta = `Rent total ${money(rentTotal)}`;
+        }
+        const extraItems = [];
+        extraItems.push({ label: 'Rent total', value: money(rentTotal) });
+        if(stat){
+            extraItems.push({ label: 'Rent YTD', value: money(stat.rentYtd) });
+            if(Number.isFinite(stat.avgMonthlyRent)){
+                extraItems.push({ label: 'Avg rent/mo', value: money(stat.avgMonthlyRent) });
+            }
+            extraItems.push({ label: 'Projected value', value: money(stat.projectedValue) });
+            if(Number.isFinite(stat.netOutstanding)){
+                extraItems.push({ label: 'Outstanding', value: money(stat.netOutstanding) });
+            }
+            if(Number.isFinite(stat.payoffMonths)){
+                extraItems.push({ label: 'Payoff ETA', value: formatDurationFromMonths(stat.payoffMonths) });
+            }
+        }else{
+            extraItems.push({ label: 'Rent realized', value: money(position.rentRealized || 0) });
+        }
+        const totalMarketValue = Number(context.categoryTotal || 0);
+        if(Number.isFinite(totalMarketValue) && totalMarketValue > 0 && Number.isFinite(marketValue) && marketValue > 0){
+            const share = (marketValue / totalMarketValue) * 100;
+            extraItems.push({ label: 'Category share', value: `${share.toFixed(1)}%` });
+        }
+        result.extraItems = extraItems;
+        return result;
+    }
+    const metaParts = [`Qty ${formatQty(qty)}`, `Price ${money(price)}`];
+    result.meta = metaParts.join(' · ');
+    const extraItems = [
+        { label: 'Market value', value: money(marketValue) }
+    ];
+    const totalCategoryValue = Number(context.categoryTotal || 0);
+    if(Number.isFinite(totalCategoryValue) && totalCategoryValue > 0 && Number.isFinite(marketValue) && marketValue > 0){
+        const share = (marketValue / totalCategoryValue) * 100;
+        extraItems.push({ label: 'Category share', value: `${share.toFixed(1)}%` });
+    }
+    const realized = Number(position.realized || 0);
+    if(Number.isFinite(realized) && Math.abs(realized) > 1e-2){
+        extraItems.push({ label: 'Realized P&L', value: money(realized) });
+    }
+    const reinvestedValue = Number(position.reinvestedValue || 0);
+    if(Number.isFinite(reinvestedValue) && Math.abs(reinvestedValue) > 1e-2){
+        extraItems.push({ label: 'Reinvested', value: money(reinvestedValue) });
+    }
+    result.extraItems = extraItems;
+    return result;
+}
+
+function updateBestPerformerCache(realEstateAnalytics){
+    const totals = {
+        crypto: positions.filter(p => (p.type || '').toLowerCase() === 'crypto').reduce((sum, p)=> sum + Number(p.marketValue || 0), 0),
+        stock: positions.filter(p => (p.type || '').toLowerCase() === 'stock').reduce((sum, p)=> sum + Number(p.marketValue || 0), 0),
+        realEstate: positions.filter(p => (p.type || '').toLowerCase() === 'real estate').reduce((sum, p)=> sum + Number(p.marketValue || 0), 0)
+    };
+    bestPerformerCache.crypto = computeCategoryBest('crypto', { categoryTotal: totals.crypto });
+    bestPerformerCache.stock = computeCategoryBest('stock', { categoryTotal: totals.stock });
+    bestPerformerCache.realEstate = computeCategoryBest('realEstate', {
+        categoryTotal: totals.realEstate,
+        realEstateAnalytics
+    });
 }
 
 function deriveCryptoIconKey(position){
@@ -962,7 +1200,7 @@ function recomputeRangeMetrics(range){
         let pnl = unrealized + realized + reinvestedValue;
         const typeKey = (position.type || '').toLowerCase();
         if(typeKey === 'real estate'){
-            const rentPnl = position.rentRealized || 0;
+            const rentPnl = getRealEstateRangePnl(position, range);
             pnl = rentPnl;
             categoryTotals.realEstate += rentPnl;
             position.rangeReinvestedValue = 0;
@@ -1404,6 +1642,7 @@ function transformOperations(records, progressCb){
             spent,
             tags: tagsNormalized,
             isReinvesting,
+            isRent: Boolean(isRentOp),
             skipInCharts: Boolean(isReinvesting)
         });
 
@@ -1494,6 +1733,7 @@ function transformOperations(records, progressCb){
         recomputePositionMetrics(p);
         ensurePositionDefaults(p);
         p.referencePrices = {};
+        p.rentRangeTotals = {};
         return p;
     });
 }
@@ -1524,6 +1764,7 @@ function useFallbackPositions(){
         p.referencePrices = {};
         p.finnhubOverride = false;
         p.rentRealized = 0;
+        p.rentRangeTotals = {};
         return p;
     });
 }
@@ -4678,6 +4919,266 @@ function setCategoryMetric(categoryKey, metricKey, value, elementId, formatter){
     store[metricKey] = (value === null || value === undefined || Number.isNaN(value)) ? null : value;
 }
 
+function applyDeltaClass(element, value){
+    if(!element) return;
+    element.classList.remove('delta-positive','delta-negative');
+    if(!Number.isFinite(value)) return;
+    if(value > 0){
+        element.classList.add('delta-positive');
+    }else if(value < 0){
+        element.classList.add('delta-negative');
+    }
+}
+
+function ensureBestInfoPopoverElements(){
+    if(typeof document === 'undefined') return null;
+    if(bestInfoPopoverElements){
+        return bestInfoPopoverElements;
+    }
+    bestInfoPopover = document.getElementById('best-info-popover');
+    if(!bestInfoPopover){
+        return null;
+    }
+    const content = bestInfoPopover.querySelector('.best-info-content');
+    const closeButton = bestInfoPopover.querySelector('.best-info-close');
+    bestInfoPopoverElements = {
+        popover: bestInfoPopover,
+        content,
+        closeButton,
+        title: document.getElementById('best-info-title'),
+        range: document.getElementById('best-info-range'),
+        category: document.getElementById('best-info-category'),
+        name: document.getElementById('best-info-name'),
+        pnl: document.getElementById('best-info-pnl'),
+        change: document.getElementById('best-info-change'),
+        meta: document.getElementById('best-info-meta'),
+        extra: document.getElementById('best-info-extra')
+    };
+    if(closeButton){
+        closeButton.addEventListener('click', hideBestInfoPopover);
+    }
+    return bestInfoPopoverElements;
+}
+
+function positionBestInfoPopover(trigger){
+    const elements = ensureBestInfoPopoverElements();
+    if(!elements || !elements.popover || !trigger) return;
+    const popover = elements.popover;
+    const previousVisibility = popover.style.visibility;
+    popover.style.visibility = 'hidden';
+    popover.classList.remove('hidden');
+    const triggerRect = trigger.getBoundingClientRect();
+    const popRect = popover.getBoundingClientRect();
+    const viewportWidth = document.documentElement.clientWidth || window.innerWidth || 0;
+    const viewportHeight = document.documentElement.clientHeight || window.innerHeight || 0;
+    const padding = 16;
+    let top = triggerRect.bottom + window.scrollY + 12;
+    let left = triggerRect.right + window.scrollX - popRect.width;
+    if(left + popRect.width > window.scrollX + viewportWidth - padding){
+        left = window.scrollX + viewportWidth - popRect.width - padding;
+    }
+    if(left < window.scrollX + padding){
+        left = window.scrollX + padding;
+    }
+    const maxTop = window.scrollY + viewportHeight - popRect.height - padding;
+    if(top > maxTop){
+        top = Math.max(triggerRect.top + window.scrollY - popRect.height - 12, window.scrollY + padding);
+    }
+    popover.style.left = `${Math.max(window.scrollX + padding, left)}px`;
+    popover.style.top = `${Math.max(window.scrollY + padding, top)}px`;
+    popover.style.visibility = previousVisibility || '';
+}
+
+function renderBestInfoPopover(entry, categoryKey){
+    const elements = ensureBestInfoPopoverElements();
+    if(!elements || !elements.popover) return;
+    const categoryLabel = entry?.label || getCategoryDisplayName(categoryKey);
+    if(elements.category){
+        elements.category.textContent = categoryLabel;
+    }
+    if(elements.range){
+        elements.range.textContent = entry?.rangeLabel || (RANGE_LABELS[pnlRange] || pnlRange);
+    }
+    elements.popover.dataset.category = categoryKey || '';
+    elements.popover.setAttribute('data-has-data', entry ? 'true' : 'false');
+    if(!entry){
+        if(elements.name) elements.name.textContent = 'No data available';
+        if(elements.pnl) elements.pnl.textContent = '—';
+        if(elements.change) elements.change.textContent = '—';
+        applyDeltaClass(elements.pnl, null);
+        applyDeltaClass(elements.change, null);
+        if(elements.meta){
+            elements.meta.textContent = 'No holdings available for this asset group in the selected range.';
+        }
+        if(elements.extra){
+            elements.extra.innerHTML = '';
+            const empty = document.createElement('div');
+            empty.className = 'best-info-extra-empty';
+            empty.textContent = 'No additional metrics for this range.';
+            elements.extra.appendChild(empty);
+        }
+        return;
+    }
+    if(elements.name){
+        elements.name.textContent = entry.displayName || '—';
+    }
+    if(elements.pnl){
+        elements.pnl.textContent = money(entry.pnl);
+        applyDeltaClass(elements.pnl, entry.pnl);
+    }
+    if(elements.change){
+        if(Number.isFinite(entry.changePct)){
+            elements.change.textContent = `${entry.changePct >= 0 ? '+' : ''}${entry.changePct.toFixed(2)}%`;
+        }else{
+            elements.change.textContent = '—';
+        }
+        applyDeltaClass(elements.change, Number.isFinite(entry.changePct) ? entry.changePct : null);
+    }
+    if(elements.meta){
+        elements.meta.textContent = entry.meta || '—';
+    }
+    if(elements.extra){
+        elements.extra.innerHTML = '';
+        const rows = [];
+        if(entry.rangeStart instanceof Date && !Number.isNaN(entry.rangeStart.getTime()) && pnlRange !== 'ALL'){
+            rows.push({
+                label: 'Window start',
+                value: entry.rangeStart.toLocaleDateString(undefined,{ year:'numeric', month:'short', day:'numeric' })
+            });
+        }
+        if(Array.isArray(entry.extraItems)){
+            entry.extraItems.forEach(item=>{
+                if(item && item.label){
+                    rows.push({ label: item.label, value: item.value });
+                }
+            });
+        }
+        if(rows.length){
+            rows.forEach(item=>{
+                const row = document.createElement('div');
+                row.className = 'best-info-extra-row';
+                const labelEl = document.createElement('span');
+                labelEl.className = 'label';
+                labelEl.textContent = item.label;
+                const valueEl = document.createElement('span');
+                valueEl.className = 'value';
+                valueEl.textContent = item.value;
+                row.appendChild(labelEl);
+                row.appendChild(valueEl);
+                elements.extra.appendChild(row);
+            });
+        }else{
+            const empty = document.createElement('div');
+            empty.className = 'best-info-extra-empty';
+            empty.textContent = 'No additional metrics for this range.';
+            elements.extra.appendChild(empty);
+        }
+    }
+}
+
+function handleBestInfoOutsideClick(event){
+    const elements = bestInfoPopoverElements;
+    if(!elements || !elements.popover || elements.popover.classList.contains('hidden')) return;
+    if(elements.popover.contains(event.target)) return;
+    if(activeBestInfoTrigger && activeBestInfoTrigger.contains(event.target)){
+        return;
+    }
+    hideBestInfoPopover();
+}
+
+function handleBestInfoWindowChange(){
+    if(!activeBestInfoTrigger) return;
+    const elements = bestInfoPopoverElements;
+    if(!elements || !elements.popover || elements.popover.classList.contains('hidden')) return;
+    positionBestInfoPopover(activeBestInfoTrigger);
+}
+
+function attachBestInfoListeners(){
+    if(bestInfoListenersAttached) return;
+    document.addEventListener('pointerdown', handleBestInfoOutsideClick, true);
+    window.addEventListener('scroll', handleBestInfoWindowChange, true);
+    window.addEventListener('resize', handleBestInfoWindowChange, true);
+    bestInfoListenersAttached = true;
+}
+
+function detachBestInfoListeners(){
+    if(!bestInfoListenersAttached) return;
+    document.removeEventListener('pointerdown', handleBestInfoOutsideClick, true);
+    window.removeEventListener('scroll', handleBestInfoWindowChange, true);
+    window.removeEventListener('resize', handleBestInfoWindowChange, true);
+    bestInfoListenersAttached = false;
+}
+
+function showBestInfoPopover(categoryKey, trigger){
+    const elements = ensureBestInfoPopoverElements();
+    if(!elements || !elements.popover || !trigger) return;
+    activeBestInfoCategory = categoryKey;
+    activeBestInfoTrigger = trigger;
+    renderBestInfoPopover(bestPerformerCache[categoryKey] || null, categoryKey);
+    elements.popover.classList.remove('hidden');
+    elements.popover.setAttribute('aria-hidden','false');
+    trigger.setAttribute('aria-expanded','true');
+    positionBestInfoPopover(trigger);
+    attachBestInfoListeners();
+    if(elements.closeButton){
+        elements.closeButton.focus({ preventScroll: true });
+    }else if(elements.content){
+        elements.content.setAttribute('tabindex','-1');
+        elements.content.focus({ preventScroll: true });
+    }
+}
+
+function hideBestInfoPopover(){
+    const elements = ensureBestInfoPopoverElements();
+    if(!elements || !elements.popover || elements.popover.classList.contains('hidden')) return;
+    elements.popover.classList.add('hidden');
+    elements.popover.setAttribute('aria-hidden','true');
+    detachBestInfoListeners();
+    if(activeBestInfoTrigger){
+        activeBestInfoTrigger.setAttribute('aria-expanded','false');
+        if(typeof activeBestInfoTrigger.focus === 'function'){
+            activeBestInfoTrigger.focus({ preventScroll: true });
+        }
+    }
+    activeBestInfoCategory = null;
+    activeBestInfoTrigger = null;
+}
+
+function initializeBestInfoTriggers(){
+    if(typeof document === 'undefined') return;
+    const buttons = document.querySelectorAll('[data-best-info-trigger]');
+    if(!buttons.length) return;
+    buttons.forEach(button=>{
+        button.setAttribute('aria-controls', 'best-info-popover');
+        button.addEventListener('click', event=>{
+            event.preventDefault();
+            const categoryKey = button.dataset.bestInfoTrigger;
+            if(!categoryKey) return;
+            const elements = bestInfoPopoverElements;
+            const isActive = activeBestInfoCategory === categoryKey
+                && elements
+                && elements.popover
+                && !elements.popover.classList.contains('hidden');
+            if(isActive){
+                hideBestInfoPopover();
+                return;
+            }
+            showBestInfoPopover(categoryKey, button);
+        });
+    });
+    ensureBestInfoPopoverElements();
+}
+
+function refreshActiveBestInfoPopover(){
+    if(!activeBestInfoCategory) return;
+    const elements = ensureBestInfoPopoverElements();
+    if(!elements || !elements.popover || elements.popover.classList.contains('hidden')) return;
+    renderBestInfoPopover(bestPerformerCache[activeBestInfoCategory] || null, activeBestInfoCategory);
+    if(activeBestInfoTrigger){
+        positionBestInfoPopover(activeBestInfoTrigger);
+    }
+}
+
 function renderCategoryAnalytics(categoryKey, config){
     const normalized = categoryKey.toLowerCase();
     const listEl = document.getElementById(config.listId);
@@ -4784,8 +5285,9 @@ function updateKpis(){
         acc[key] = (acc[key] || 0) + value;
         return acc;
     }, {});
+    let realEstateAnalytics = null;
     try{
-        const realEstateAnalytics = computeRealEstateAnalytics();
+        realEstateAnalytics = computeRealEstateAnalytics();
         if(realEstateAnalytics && Array.isArray(realEstateAnalytics.rows) && realEstateAnalytics.rows.length){
             const projectedByCategory = realEstateAnalytics.rows.reduce((acc, stat)=>{
                 const value = Number(stat.projectedValue || 0);
@@ -4803,6 +5305,7 @@ function updateKpis(){
     }catch(error){
         console.warn('Failed to compute real estate projected totals for net worth', error);
     }
+    lastRealEstateAnalytics = realEstateAnalytics;
 
     const totalMarketValue = Object.values(netWorthTotals).reduce((sum, value)=> sum + Number(value || 0), 0);
 
@@ -4824,6 +5327,8 @@ function updateKpis(){
     setCategoryPnl('pnl-category-crypto', currentCategoryRangeTotals.crypto || 0, 'pnlCrypto');
     setCategoryPnl('pnl-category-stock', currentCategoryRangeTotals.stock || 0, 'pnlStock');
     setCategoryPnl('pnl-category-realestate', currentCategoryRangeTotals.realEstate || 0, 'pnlRealEstate');
+    updateBestPerformerCache(lastRealEstateAnalytics);
+    refreshActiveBestInfoPopover();
     if(netWorthInlineViewMode === 'bubble'){
         const snapshotHasData = netWorthBubbleSnapshot && Object.keys(netWorthBubbleSnapshot).length > 0;
         const currentHasData = lastNetWorthTotals && Object.keys(lastNetWorthTotals).length > 0;
@@ -4839,75 +5344,6 @@ function updateKpis(){
         const result = renderNetWorthMindmap(sourceTotals, sourceTotalValue);
         if(result){
             netWorthBubbleNeedsRender = false;
-        }
-    }
-
-    const bestNameEl = document.getElementById('best-performer-name');
-    const bestPnlEl = document.getElementById('best-performer-pnl');
-    const bestChangeEl = document.getElementById('best-performer-change');
-    const bestMetaEl = document.getElementById('best-performer-meta');
-    if(bestNameEl || bestPnlEl || bestChangeEl || bestMetaEl){
-        const eligible = positions.filter(position=>{
-            const type = (position.type || '').toLowerCase();
-            if(type === 'real estate') return false;
-            const qty = Number(position.qty || 0);
-            const mv = Number(position.marketValue || 0);
-            if(Math.abs(qty) <= 1e-6 && Math.abs(mv) <= 1e-6) return false;
-            return true;
-        });
-        const bestCandidate = eligible.reduce((acc, position)=>{
-            const raw = position.rangePnl ?? position.pnl ?? Number.NEGATIVE_INFINITY;
-            const value = Number(raw);
-            const usable = Number.isFinite(value) ? value : Number.NEGATIVE_INFINITY;
-            if(acc === null) return { position, value: usable };
-            return usable > acc.value ? { position, value: usable } : acc;
-        }, null);
-
-        if(bestCandidate && bestCandidate.position && bestCandidate.value !== Number.NEGATIVE_INFINITY){
-            const best = bestCandidate.position;
-            const displayName = best.displayName || best.Symbol || best.Name || '—';
-            const bestChanged = previousBestPerformer.id && previousBestPerformer.id !== best.id;
-            if(bestNameEl){
-                bestNameEl.textContent = displayName;
-                if(bestChanged){
-                    flashElement(bestNameEl, 'up');
-                }
-            }
-            if(bestMetaEl){
-                bestMetaEl.textContent = `${best.type || '—'} · Qty ${formatQty(Number(best.qty || 0))}`;
-            }
-            if(bestPnlEl){
-                bestPnlEl.textContent = money(bestCandidate.value);
-                if(bestChanged){
-                    flashElement(bestPnlEl, 'up');
-                }else if(previousBestPerformer.pnl !== null){
-                    const direction = bestCandidate.value > previousBestPerformer.pnl ? 'up' : bestCandidate.value < previousBestPerformer.pnl ? 'down' : null;
-                    flashElement(bestPnlEl, direction);
-                }
-            }
-            if(bestChangeEl){
-                const changeRaw = best.rangeChangePct ?? best.changePct ?? 0;
-                const changeVal = Number(changeRaw);
-                const hasChange = Number.isFinite(changeVal);
-                bestChangeEl.textContent = hasChange ? `${changeVal >= 0 ? '+' : ''}${changeVal.toFixed(2)}%` : '—';
-                if(bestChanged && hasChange){
-                    flashElement(bestChangeEl, changeVal >= 0 ? 'up' : 'down');
-                }else if(hasChange && previousBestPerformer.change !== null){
-                    const direction = changeVal > previousBestPerformer.change ? 'up' : changeVal < previousBestPerformer.change ? 'down' : null;
-                    flashElement(bestChangeEl, direction);
-                }
-                previousBestPerformer.change = hasChange ? changeVal : null;
-            }
-            previousBestPerformer.id = best.id;
-            previousBestPerformer.pnl = bestCandidate.value;
-        }else{
-            if(bestNameEl) bestNameEl.textContent = '—';
-            if(bestPnlEl) bestPnlEl.textContent = '—';
-            if(bestChangeEl) bestChangeEl.textContent = '—';
-            if(bestMetaEl) bestMetaEl.textContent = 'Awaiting data…';
-            previousBestPerformer.id = null;
-            previousBestPerformer.pnl = null;
-            previousBestPerformer.change = null;
         }
     }
 
@@ -5066,6 +5502,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
     ensureTransactionModalElements();
     ensureNetWorthDetailModalElements();
     initializePnlRangeTabs();
+    initializeBestInfoTriggers();
     document.addEventListener('keydown', event => {
         if(event.key === 'Escape'){
             let handled = false;
@@ -5075,6 +5512,10 @@ document.addEventListener('DOMContentLoaded', ()=>{
             }
             if(transactionModal && !transactionModal.classList.contains('hidden')){
                 closeTransactionModal();
+                handled = true;
+            }
+            if(bestInfoPopoverElements && bestInfoPopoverElements.popover && !bestInfoPopoverElements.popover.classList.contains('hidden')){
+                hideBestInfoPopover();
                 handled = true;
             }
             if(handled){

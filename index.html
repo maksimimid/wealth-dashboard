@@ -60,7 +60,7 @@
                 <button type="button" class="pnl-tab" data-pnl-range="1Y" role="tab" aria-selected="false" tabindex="-1">Yearly PNL</button>
                 <button type="button" class="pnl-tab" data-pnl-range="ALL" role="tab" aria-selected="false" tabindex="-1">All</button>
             </div>
-            <div class="big" id="total-pnl">$0.00</div>
+             <div class="big" id="total-pnl">$0.00</div>
             <div class="pnl-breakdown">
                 <div class="pnl-sub">
                     <span class="pnl-sub-label">Crypto</span>
@@ -74,17 +74,6 @@
                     <span class="pnl-sub-label">Real Estate</span>
                     <span class="pnl-sub-value" id="pnl-category-realestate">$0.00</span>
                 </div>
-            </div>
-            <div class="best-performer-inline" id="best-performer-card">
-                <div class="best-performer-header">
-                    <div class="label">Best Performer</div>
-                </div>
-                <div class="best-performer-name" id="best-performer-name">&mdash;</div>
-                <div class="best-performer-metrics">
-                    <span class="best-performer-pnl" id="best-performer-pnl">$0.00</span>
-                    <span class="best-performer-change" id="best-performer-change">&mdash;</span>
-                </div>
-                <small class="best-performer-meta" id="best-performer-meta">Awaiting data&hellip;</small>
             </div>
         </div>
         <div class="kpi" id="net-worth-card">
@@ -114,6 +103,10 @@
     </div>
 
     <div class="card full realestate-card">
+         <button type="button" class="card-info-button info-button" data-best-info-trigger="realEstate" aria-haspopup="dialog" aria-expanded="false">
+             <span class="info-icon" aria-hidden="true">i</span>
+             <span class="sr-only">Show real estate best performer</span>
+         </button>
         <div class="card-header-with-icon">
             <div class="card-heading">
                 <span class="card-icon">
@@ -153,6 +146,10 @@
     </div>
 
     <div class="card full analytics-card crypto-card">
+         <button type="button" class="card-info-button info-button" data-best-info-trigger="crypto" aria-haspopup="dialog" aria-expanded="false">
+             <span class="info-icon" aria-hidden="true">i</span>
+             <span class="sr-only">Show crypto best performer</span>
+         </button>
         <div class="analytics-header">
             <div>
                 <strong>Crypto Portfolio Analytics</strong>
@@ -190,6 +187,10 @@
     </div>
 
     <div class="card full analytics-card stock-card">
+         <button type="button" class="card-info-button info-button" data-best-info-trigger="stock" aria-haspopup="dialog" aria-expanded="false">
+             <span class="info-icon" aria-hidden="true">i</span>
+             <span class="sr-only">Show stock best performer</span>
+         </button>
         <div class="analytics-header">
             <div>
                 <strong>Stocks Portfolio Analytics</strong>
@@ -267,6 +268,28 @@
         <div class="modal-lots hidden" id="transaction-lots"></div>
         <div class="modal-toolbar modal-toolbar-bottom">
             <button type="button" id="view-lots-btn" class="btn btn-secondary">View lots</button>
+        </div>
+    </div>
+</div>
+
+<div id="best-info-popover" class="best-info-popover hidden" role="dialog" aria-modal="false" aria-labelledby="best-info-title">
+    <div class="best-info-content">
+        <button type="button" class="best-info-close" aria-label="Close best performer details">&times;</button>
+        <div class="best-info-header">
+            <div class="best-info-title-group">
+                <span class="best-info-title" id="best-info-title">Best Performer</span>
+                <span class="best-info-range" id="best-info-range"></span>
+            </div>
+            <span class="best-info-category" id="best-info-category"></span>
+        </div>
+        <div class="best-info-body">
+            <div class="best-info-name" id="best-info-name">&mdash;</div>
+            <div class="best-info-metrics">
+                <span class="best-info-pnl" id="best-info-pnl">$0.00</span>
+                <span class="best-info-change" id="best-info-change">&mdash;</span>
+            </div>
+            <div class="best-info-meta" id="best-info-meta">Awaiting data&hellip;</div>
+            <div class="best-info-extra" id="best-info-extra"></div>
         </div>
     </div>
 </div>
