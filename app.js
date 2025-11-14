@@ -1606,6 +1606,8 @@ function transformOperations(records, progressCb){
         const isRentOp = (opTypeLower === 'profitloss' || opTypeLower.includes('rent')) && tagsNormalized.some(tag=>RENT_TAGS.includes(tag));
         const isReinvesting = tagsNormalized.includes('reinvesting');
 
+        const categoryKey = typeof category === 'string' ? category.toLowerCase() : '';
+        const trackLots = categoryKey === 'stock' || categoryKey === 'crypto';
         if(!map.has(asset)){
             const finnhubOverride = fields['Finnhub Symbol'] || fields['Finnhub symbol'] || fields['finnhubSymbol'] || fields['FINNHUB_SYMBOL'];
             const finnhubSymbol = mapFinnhubSymbol(finnhubOverride || asset, category, Boolean(finnhubOverride));
@@ -1627,7 +1629,8 @@ function transformOperations(records, progressCb){
                 cashflow: 0,
                 lastKnownPrice: 0,
                 lastPurchasePrice: 0,
-                operations: []
+                operations: [],
+                lots: trackLots ? [] : null
             });
         }
 
@@ -1647,26 +1650,68 @@ function transformOperations(records, progressCb){
         });
 
         if(opType === 'PurchaseSell'){
+            const useLots = Array.isArray(entry.lots);
             if(amount > 0){
-                entry.qty += amount;
-                entry.costBasis += spent;
-                if(spent > 0) entry.invested += spent;
-                const totalCost = spent !== 0 ? spent : (price * amount);
+                const totalCostRaw = spent !== 0 ? Math.abs(spent) : Math.abs(price * amount);
+                const totalCost = Number.isFinite(totalCostRaw) ? totalCostRaw : Math.abs(price * amount);
                 const unitPrice = amount !== 0 ? totalCost / amount : price;
-                if(unitPrice){
+                if(useLots){
+                    entry.lots.push({
+                        qty: amount,
+                        costPerUnit: Number.isFinite(unitPrice) ? unitPrice : 0,
+                        date
+                    });
+                    const qtySum = entry.lots.reduce((sum, lot)=> sum + lot.qty, 0);
+                    entry.qty = qtySum;
+                    entry.costBasis = entry.lots.reduce((sum, lot)=> sum + lot.qty * lot.costPerUnit, 0);
+                }else{
+                    entry.qty += amount;
+                    entry.costBasis += totalCost;
+                }
+                if(totalCost > 0){
+                    entry.invested += totalCost;
+                }
+                if(Number.isFinite(unitPrice) && unitPrice){
                     entry.lastPurchasePrice = unitPrice;
                     entry.lastKnownPrice = unitPrice;
                 }
             }else if(amount < 0){
                 const sellQty = Math.abs(amount);
-                const prevQty = entry.qty;
-                const prevCost = entry.costBasis;
-                const avgCost = prevQty > 0 ? prevCost / prevQty : entry.lastPurchasePrice || price || 0;
-                const costOut = avgCost * sellQty;
-                entry.qty = Math.max(0, prevQty + amount);
-                entry.costBasis = Math.max(0, prevCost - costOut);
-                const proceeds = spent < 0 ? Math.abs(spent) : sellQty * price;
-                entry.realized += proceeds - costOut;
+                const proceeds = spent < 0 ? Math.abs(spent) : Math.abs(price * sellQty);
+                if(useLots){
+                    let remaining = sellQty;
+                    let costOut = 0;
+                    while(remaining > 1e-9 && entry.lots.length){
+                        const lot = entry.lots[0];
+                        const matched = Math.min(lot.qty, remaining);
+                        costOut += matched * lot.costPerUnit;
+                        lot.qty -= matched;
+                        remaining -= matched;
+                        if(lot.qty <= 1e-9){
+                            entry.lots.shift();
+                        }
+                    }
+                    if(remaining > 1e-9){
+                        const fallbackUnit = entry.lastPurchasePrice || entry.avgPrice || price || 0;
+                        costOut += remaining * fallbackUnit;
+                        remaining = 0;
+                    }
+                    const qtySum = entry.lots.reduce((sum, lot)=> sum + lot.qty, 0);
+                    entry.qty = qtySum;
+                    entry.costBasis = entry.lots.reduce((sum, lot)=> sum + lot.qty * lot.costPerUnit, 0);
+                    entry.realized += proceeds - costOut;
+                }else{
+                    const prevQty = entry.qty;
+                    const prevCost = entry.costBasis;
+                    const avgCost = prevQty > 0 ? prevCost / prevQty : entry.lastPurchasePrice || price || 0;
+                    const costOut = avgCost * sellQty;
+                    entry.qty = Math.max(0, prevQty + amount);
+                    entry.costBasis = Math.max(0, prevCost - costOut);
+                    entry.realized += proceeds - costOut;
+                }
+                if(price){
+                    entry.lastKnownPrice = price;
+                }
             }
             entry.cashflow += spent;
     }else if(opType === 'ProfitLoss'){
@@ -1708,9 +1753,12 @@ function transformOperations(records, progressCb){
         entry.cashflow += spent;
     }
 
-        if(entry.qty <= 0){
+        if(entry.qty <= 1e-9){
             entry.qty = 0;
             entry.costBasis = 0;
+            if(Array.isArray(entry.lots)){
+                entry.lots = [];
+            }
         }
         if(!entry.lastKnownPrice && entry.lastPurchasePrice){
             entry.lastKnownPrice = entry.lastPurchasePrice;
@@ -1730,6 +1778,15 @@ function transformOperations(records, progressCb){
         if(p.rentRealized === undefined){
             p.rentRealized = 0;
         }
+        if(Array.isArray(p.lots)){
+            p.lots = p.lots.filter(lot=> Number.isFinite(lot.qty) && lot.qty > 1e-9);
+            const qtySum = p.lots.reduce((sum, lot)=> sum + lot.qty, 0);
+            const costSum = p.lots.reduce((sum, lot)=> sum + lot.qty * (Number(lot.costPerUnit) || 0), 0);
+            p.qty = qtySum;
+            p.costBasis = costSum;
+        }else{
+            p.lots = null;
+        }
         recomputePositionMetrics(p);
         ensurePositionDefaults(p);
         p.referencePrices = {};
@@ -1744,20 +1801,30 @@ function useFallbackPositions(){
         {Name:'Bitcoin',category:'Crypto',symbol:'BINANCE:BTCUSDT',qty:0.25,avgPrice:30000},
         {Name:'Cash Reserve',category:'Cash',symbol:null,qty:2500,avgPrice:1}
     ];
-    const map = fallback.map(f=>({
-        Name:f.Name,
-        displayName:f.Name,
-        Category:normalizeCategory(f.category, f.Name),
-        type:normalizeCategory(f.category, f.Name),
-        Symbol:f.symbol || f.Name,
-        finnhubSymbol:f.symbol,
-        qty:f.qty,
-        costBasis:f.qty * f.avgPrice,
-        invested: f.qty * f.avgPrice,
-        realized:0,
-        cashflow:0,
-        lastKnownPrice:f.avgPrice
-    }));
+    const map = fallback.map(f=>{
+        const normalizedCategory = normalizeCategory(f.category, f.Name);
+        const typeLower = normalizedCategory.toLowerCase();
+        const costBasis = f.qty * f.avgPrice;
+        const trackLots = typeLower === 'stock' || typeLower === 'crypto';
+        const lots = trackLots && f.qty > 0
+            ? [{ qty: f.qty, costPerUnit: f.avgPrice, date: null }]
+            : trackLots ? [] : null;
+        return {
+            Name: f.Name,
+            displayName: f.Name,
+            Category: normalizedCategory,
+            type: normalizedCategory,
+            Symbol: f.symbol || f.Name,
+            finnhubSymbol: f.symbol,
+            qty: f.qty,
+            costBasis,
+            invested: costBasis,
+            realized: 0,
+            cashflow: 0,
+            lastKnownPrice: f.avgPrice,
+            lots
+        };
+    });
     return map.map(p=>{
         recomputePositionMetrics(p);
         ensurePositionDefaults(p);
@@ -3752,7 +3819,8 @@ function createClosedPositionRow(position){
     }
     const statusEl = document.createElement('div');
     statusEl.className = 'muted';
-    statusEl.textContent = 'Position closed';
+    const stillOpen = Math.abs(Number(position.qty || 0)) > 1e-6;
+    statusEl.textContent = stillOpen ? 'Position partially closed' : 'Position closed';
     values.appendChild(pnlEl);
     values.appendChild(statusEl);
     row.appendChild(values);
@@ -5212,8 +5280,12 @@ function renderCategoryAnalytics(categoryKey, config){
     }
 
     const sorted = [...items].sort((a,b)=> (b.marketValue || 0) - (a.marketValue || 0));
-    const openPositions = sorted.filter(p=> Number(p.qty || 0) > 0 || Number(p.marketValue || 0) > 1e-6);
-    const closedPositions = sorted.filter(p=> !openPositions.includes(p));
+    const openPositions = sorted.filter(p=> Math.abs(Number(p.qty || 0)) > 1e-6);
+    const closedPositions = sorted.filter(p=>{
+        const realized = Number(p.realized || 0);
+        const isClosed = Math.abs(Number(p.qty || 0)) <= 1e-6;
+        return isClosed || Math.abs(realized) > 1e-2;
+    });
     const openMarketValue = openPositions.reduce((sum,p)=> sum + Number(p.marketValue || 0), 0);
     const closedRealizedValue = closedPositions.reduce((sum,p)=> sum + Number(p.realized || 0), 0);
 
