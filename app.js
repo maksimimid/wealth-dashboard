@@ -350,30 +350,33 @@ function preparePriceSeries(series, firstPurchaseTime, position){
     base.sort((a, b)=> a.time - b.time);
     let result = base.slice();
     if(Number.isFinite(firstPurchaseTime)){
-        let filtered = result.filter(point=> point.time >= firstPurchaseTime);
+        const minTimestamp = Math.max(0, firstPurchaseTime - PRICE_HISTORY_PRE_MARGIN_MS);
+        let filtered = result.filter(point=> point.time >= minTimestamp);
+        if(!filtered.length){
+            filtered = result.slice(-Math.min(result.length, 90));
+        }
         if(!filtered.length){
             const fallbackPrice = Number(position?.displayPrice || position?.currentPrice || position?.lastKnownPrice || position?.avgPrice || base[base.length - 1]?.price);
-            if(Number.isFinite(fallbackPrice)){
-                const fallbackPoint = createSeriesPoint(firstPurchaseTime, fallbackPrice);
-                if(fallbackPoint){
-                    filtered.push(fallbackPoint);
-                }
+            const fallbackPoint = createSeriesPoint(firstPurchaseTime, fallbackPrice);
+            if(fallbackPoint){
+                filtered = [fallbackPoint];
             }
         }else{
             const firstPoint = filtered[0];
-            if(firstPoint.time > firstPurchaseTime){
-                const adjusted = createSeriesPoint(firstPurchaseTime, firstPoint.price);
-                if(adjusted){
-                    filtered.unshift(adjusted);
-                }
-            }else if(firstPoint.time < firstPurchaseTime){
-                const adjusted = createSeriesPoint(firstPurchaseTime, firstPoint.price);
-                if(adjusted){
-                    filtered[0] = adjusted;
+            const anchor = createSeriesPoint(firstPurchaseTime, firstPoint.price);
+            if(anchor){
+                if(firstPoint.time > anchor.time){
+                    filtered.unshift(anchor);
+                }else if(firstPoint.time < anchor.time){
+                    filtered[0] = anchor;
+                }else{
+                    filtered[0] = anchor;
                 }
             }
         }
-        result = filtered;
+        if(filtered.length){
+            result = filtered;
+        }
     }
     const nowTs = Date.now();
     if(result.length){
@@ -439,6 +442,7 @@ const TRANSACTION_CHART_COLORS = {
     priceLine: 'rgba(59, 130, 246, 0.8)'
 };
 const TRANSACTION_HISTORY_LOOKBACK_DAYS = 180;
+const PRICE_HISTORY_PRE_MARGIN_MS = 30 * 24 * 3600 * 1000;
 const FLASH_DURATION = 1500;
 const RENT_TAGS = ['rent', 'rental', 'lease', 'tenant', 'tenancy', 'airbnb', 'booking'];
 const EXPENSE_TAGS = ['expense', 'expenses', 'maintenance', 'repair', 'repairs', 'tax', 'taxes', 'property tax', 'property-tax', 'insurance', 'mortgage', 'mortgagepayment', 'hoa', 'hoa fees', 'utility', 'utilities', 'water', 'electric', 'electricity', 'gas', 'cleaning', 'management', 'interest', 'service', 'fee', 'fees'];
@@ -3145,9 +3149,8 @@ async function fetchFinnhubSeries(position, rawSymbol, firstPurchaseTime){
             }
         }
         const nowSec = Math.floor(Date.now()/1000);
-        const marginMs = 30 * 24 * 3600 * 1000;
         let fromMs = Number.isFinite(firstPurchaseTime)
-            ? Math.max(0, firstPurchaseTime - marginMs)
+            ? Math.max(0, firstPurchaseTime - PRICE_HISTORY_PRE_MARGIN_MS)
             : Date.now() - TRANSACTION_HISTORY_LOOKBACK_DAYS * 24 * 3600 * 1000;
         const fromSec = Math.floor(fromMs / 1000);
         const endpoint = isCryptoFinnhubSymbol(rawSymbol, position.type) ? 'crypto/candle' : 'stock/candle';
@@ -3281,9 +3284,8 @@ function scheduleYahooFallback(position){
 
 async function fetchCoinGeckoSeries(coinId, firstPurchaseTime){
     try{
-        const marginMs = 30 * 24 * 3600 * 1000;
         let fromMs = Number.isFinite(firstPurchaseTime)
-            ? Math.max(0, firstPurchaseTime - marginMs)
+            ? Math.max(0, firstPurchaseTime - PRICE_HISTORY_PRE_MARGIN_MS)
             : Date.now() - TRANSACTION_HISTORY_LOOKBACK_DAYS * 24 * 3600 * 1000;
         const days = Math.max(30, Math.ceil((Date.now() - fromMs) / (24 * 3600 * 1000)));
         const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}/market_chart?vs_currency=usd&days=${days}`;
@@ -3295,7 +3297,7 @@ async function fetchCoinGeckoSeries(coinId, firstPurchaseTime){
             const close = Number(price);
             if(!Number.isFinite(close) || close <= 0) return null;
             if(Number.isFinite(firstPurchaseTime)){
-                const minTs = firstPurchaseTime - marginMs;
+                const minTs = Math.max(0, firstPurchaseTime - PRICE_HISTORY_PRE_MARGIN_MS);
                 if(timestamp < minTs) return null;
             }
             return { x: timestamp, y: close };
