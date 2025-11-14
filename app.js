@@ -1630,7 +1630,8 @@ function transformOperations(records, progressCb){
                 lastKnownPrice: 0,
                 lastPurchasePrice: 0,
                 operations: [],
-                lots: trackLots ? [] : null
+                lots: trackLots ? [] : null,
+                closedSales: trackLots ? [] : null
             });
         }
 
