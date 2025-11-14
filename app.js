@@ -3,7 +3,9 @@ const DEFAULT_CONFIG = {
     FINNHUB_KEY: '',
     AIRTABLE_API_KEY: '',
     AIRTABLE_BASE_ID: 'appSxixo1i122KyBS',
-    AIRTABLE_TABLE_NAME: 'Operations'
+    AIRTABLE_TABLE_NAME: 'Operations',
+    MASSIVE_API_KEY: '',
+    MASSIVE_API_BASE_URL: 'https://api.massive.com/v1'
 };
 
 const RUNTIME_CONFIG = (typeof window !== 'undefined' && window.DASHBOARD_CONFIG) ? window.DASHBOARD_CONFIG : {};
@@ -18,6 +20,9 @@ const AIRTABLE_API_KEY = RUNTIME_CONFIG.AIRTABLE_API_KEY || DEFAULT_CONFIG.AIRTA
 const AIRTABLE_BASE_ID = RUNTIME_CONFIG.AIRTABLE_BASE_ID || DEFAULT_CONFIG.AIRTABLE_BASE_ID;
 const AIRTABLE_TABLE_NAME = RUNTIME_CONFIG.AIRTABLE_TABLE_NAME || DEFAULT_CONFIG.AIRTABLE_TABLE_NAME;
 const AIRTABLE_URL = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${encodeURIComponent(AIRTABLE_TABLE_NAME)}`;
+
+const MASSIVE_API_KEY = RUNTIME_CONFIG.MASSIVE_API_KEY || DEFAULT_CONFIG.MASSIVE_API_KEY;
+const MASSIVE_API_BASE_URL = RUNTIME_CONFIG.MASSIVE_API_BASE_URL || DEFAULT_CONFIG.MASSIVE_API_BASE_URL;
 
 // ----------------- STATE --------------------
 let positions = [];
@@ -216,6 +221,13 @@ const CRYPTO_ICON_PROVIDERS = [
 ];
 const assetIconSourceCache = new Map();
 const transactionPriceCache = new Map();
+const localHistoricalCache = new Map();
+const LOCAL_HISTORIC_DIR = 'assets/historic';
+const LOCAL_HISTORIC_PREFIX = 'historic-';
+const LOCAL_HISTORIC_SUFFIX = '-usd.tsv';
+const DEFAULT_HISTORIC_HEADER = '"Time"\t"Close"';
+const HISTORIC_SYMBOL_SUFFIXES = ['USDT','USDC','USD'];
+const MS_IN_DAY = 24 * 60 * 60 * 1000;
 
 function sanitizePriceSeries(series){
     if(!Array.isArray(series)) return [];
@@ -257,6 +269,256 @@ function sanitizePriceSeries(series){
         time,
         price
     }));
+}
+
+function formatDateKey(value){
+    const normalized = toValidDate(value);
+    if(!normalized) return null;
+    return normalized.toISOString().slice(0, 10);
+}
+
+function addDays(value, days){
+    const normalized = toValidDate(value);
+    if(!normalized || !Number.isFinite(days)) return null;
+    return new Date(normalized.getTime() + days * MS_IN_DAY);
+}
+
+function getCryptoBaseTicker(position){
+    if(!position) return null;
+    let raw = position.Symbol || position.displayName || position.Name || position.id || '';
+    raw = String(raw).toUpperCase();
+    if(raw.includes(':')){
+        raw = raw.split(':').pop();
+    }
+    raw = raw.replace(/[^A-Z0-9]/g, '');
+    if(!raw){
+        return null;
+    }
+    const suffix = HISTORIC_SYMBOL_SUFFIXES.find(item => raw.endsWith(item));
+    if(suffix){
+        const trimmed = raw.slice(0, raw.length - suffix.length);
+        if(trimmed) raw = trimmed;
+    }
+    return raw || null;
+}
+
+function getLocalHistoricCacheKey(position){
+    const typeKey = String(position?.type || position?.Category || '').toLowerCase();
+    if(typeKey !== 'crypto') return null;
+    const base = getCryptoBaseTicker(position);
+    if(!base) return null;
+    return base.toLowerCase();
+}
+
+function buildHistoricFilePath(cacheKey){
+    if(!cacheKey) return null;
+    return `${LOCAL_HISTORIC_DIR}/${LOCAL_HISTORIC_PREFIX}${cacheKey}${LOCAL_HISTORIC_SUFFIX}`;
+}
+
+function buildHistoricHeader(position){
+    const base = getCryptoBaseTicker(position);
+    if(!base) return DEFAULT_HISTORIC_HEADER;
+    return `"Time"\t"${base.toUpperCase()} / USD Close"`;
+}
+
+function parseLocalHistoricalTsv(text){
+    if(typeof text !== 'string') return null;
+    const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    if(!lines.length) return null;
+    const header = lines.shift();
+    const series = [];
+    lines.forEach(line=>{
+        if(!line) return;
+        const parts = line.split(/\t/);
+        if(parts.length < 2) return;
+        const dateStr = parts[0].replace(/"/g, '').trim();
+        const priceStr = parts[1].replace(/"/g, '').replace(/,/g,'').trim();
+        const date = toValidDate(dateStr);
+        const price = Number(priceStr);
+        if(!date || !Number.isFinite(price)) return;
+        const point = createSeriesPoint(date.getTime(), price);
+        if(point){
+            series.push(point);
+        }
+    });
+    if(!series.length) return null;
+    series.sort((a,b)=> a.time - b.time);
+    const lastDate = new Date(series[series.length - 1].time);
+    return {
+        header: header || DEFAULT_HISTORIC_HEADER,
+        series,
+        lastDate
+    };
+}
+
+async function loadLocalHistoricalSeries(position){
+    const cacheKey = getLocalHistoricCacheKey(position);
+    if(!cacheKey) return null;
+    if(localHistoricalCache.has(cacheKey)){
+        return localHistoricalCache.get(cacheKey);
+    }
+    const relativePath = buildHistoricFilePath(cacheKey);
+    if(!relativePath) return null;
+    let text = null;
+    if(typeof window === 'undefined'){
+        try{
+            const fs = await import('fs/promises');
+            const pathModule = await import('path');
+            const absolutePath = pathModule.resolve(process.cwd(), relativePath);
+            text = await fs.readFile(absolutePath, 'utf8');
+        }catch(error){
+            localHistoricalCache.set(cacheKey, null);
+            return null;
+        }
+    }else{
+        try{
+            const response = await fetch(relativePath, { cache: 'no-cache' });
+            if(!response.ok){
+                localHistoricalCache.set(cacheKey, null);
+                return null;
+            }
+            text = await response.text();
+        }catch(error){
+            localHistoricalCache.set(cacheKey, null);
+            return null;
+        }
+    }
+    const parsed = parseLocalHistoricalTsv(text);
+    if(!parsed){
+        localHistoricalCache.set(cacheKey, null);
+        return null;
+    }
+    const info = {
+        cacheKey,
+        path: relativePath,
+        header: parsed.header,
+        series: parsed.series,
+        lastDate: parsed.lastDate,
+        lastChecked: null
+    };
+    localHistoricalCache.set(cacheKey, info);
+    return info;
+}
+
+function needsHistoricalUpdate(lastDate){
+    if(!(lastDate instanceof Date) || Number.isNaN(lastDate.getTime())) return true;
+    const todayKey = formatDateKey(new Date());
+    const lastKey = formatDateKey(lastDate);
+    if(!todayKey || !lastKey) return true;
+    return lastKey < todayKey;
+}
+
+function mergeHistoricalSeries(existingSeries, newSeries){
+    const merged = new Map();
+    const ingest = point=>{
+        if(!point) return;
+        let time = point.time ?? point.x ?? point.timestamp ?? null;
+        if(!Number.isFinite(time)){
+            const normalisedDate = toValidDate(point.date ?? point.Date ?? point.Time);
+            if(normalisedDate){
+                time = normalisedDate.getTime();
+            }
+        }
+        const priceCandidates = [
+            point.price,
+            point.y,
+            point.close,
+            point.c,
+            point.value,
+            point.Close,
+            point.close_price,
+            point.adjusted_close
+        ];
+        let price = null;
+        for(const candidate of priceCandidates){
+            const num = Number(candidate);
+            if(Number.isFinite(num)){
+                price = num;
+                break;
+            }
+        }
+        if(!Number.isFinite(time) || price === null) return;
+        const normalized = createSeriesPoint(time, price);
+        if(normalized){
+            merged.set(normalized.time, normalized);
+        }
+    };
+    (existingSeries || []).forEach(ingest);
+    (newSeries || []).forEach(ingest);
+    return Array.from(merged.values()).sort((a,b)=> a.time - b.time);
+}
+
+async function writeHistoricalSeriesFile(relativePath, header, series){
+    if(typeof window !== 'undefined') return false;
+    try{
+        const fs = await import('fs/promises');
+        const pathModule = await import('path');
+        const absolutePath = pathModule.resolve(process.cwd(), relativePath);
+        const lines = [header || DEFAULT_HISTORIC_HEADER];
+        (series || []).forEach(point=>{
+            const date = toValidDate(point.time ?? point.x ?? point.timestamp ?? point.date);
+            const price = Number(point.price ?? point.y ?? point.close ?? point.c ?? point.value);
+            if(!date || !Number.isFinite(price)) return;
+            const dateKey = formatDateKey(date);
+            if(!dateKey) return;
+            lines.push(`"${dateKey}"\t${price}`);
+        });
+        await fs.writeFile(absolutePath, lines.join('\n'), 'utf8');
+        return true;
+    }catch(error){
+        console.warn('Failed to persist historical TSV', relativePath, error);
+        return false;
+    }
+}
+
+function mapMassiveSymbol(position){
+    const base = getCryptoBaseTicker(position);
+    if(!base) return null;
+    return `${base.toUpperCase()}-USD`;
+}
+
+async function fetchMassiveHistoricalSeries(position, startDate, endDate){
+    if(!MASSIVE_API_KEY) return [];
+    const symbol = mapMassiveSymbol(position);
+    if(!symbol) return [];
+    const startKey = formatDateKey(startDate);
+    const endKey = formatDateKey(endDate);
+    if(!startKey || !endKey || startKey > endKey) return [];
+    try{
+        const baseUrl = (MASSIVE_API_BASE_URL || '').replace(/\/+$/,'');
+        const url = new URL(`${baseUrl || 'https://api.massive.com/v1'}/timeseries/eod`);
+        url.searchParams.set('ticker', symbol);
+        url.searchParams.set('start', startKey);
+        url.searchParams.set('end', endKey);
+        url.searchParams.set('interval', '1d');
+        const response = await fetch(url.toString(), {
+            headers: {
+                'Authorization': `Bearer ${MASSIVE_API_KEY}`,
+                'Accept': 'application/json'
+            }
+        });
+        if(!response.ok){
+            console.warn('Massive historical fetch failed', symbol, response.status);
+            return [];
+        }
+        const json = await response.json();
+        const rows = Array.isArray(json?.data) ? json.data
+            : Array.isArray(json?.results) ? json.results
+            : Array.isArray(json?.values) ? json.values
+            : Array.isArray(json) ? json
+            : [];
+        const points = rows.map(row=>{
+            const dateValue = row.date ?? row.Date ?? row.time ?? row.timestamp ?? row.period;
+            const closeValue = row.close ?? row.Close ?? row.c ?? row.close_price ?? row.adjusted_close ?? row.value;
+            const date = toValidDate(dateValue);
+            const price = Number(closeValue);
+            return createSeriesPoint(date ? date.getTime() : null, price);
+        }).filter(Boolean);
+        return points.sort((a,b)=> a.time - b.time);
+    }catch(error){
+        console.warn('Massive historical fetch exception', symbol, error);
+        return [];
+    }
 }
 
 function toValidDate(value){
@@ -3081,39 +3343,124 @@ async function fetchHistoricalPriceSeries(position){
     const yahooSymbol = mapYahooSymbol(position);
     const cacheKey = `${finnhubSymbol || ''}|${coinGeckoId || yahooSymbol || ''}|${typeKey}`;
     const firstPurchaseTime = getFirstPurchaseTime(position);
-    const applySeries = rawSeries=>{
-        const prepared = preparePriceSeries(rawSeries, firstPurchaseTime, position);
+    const finalizeSeries = rawSeries=>{
+        const sanitized = sanitizePriceSeries(rawSeries);
+        if(!sanitized.length){
+            transactionPriceCache.set(cacheKey, []);
+            position.priceHistory = [];
+            return [];
+        }
+        const prepared = preparePriceSeries(sanitized, firstPurchaseTime, position);
         transactionPriceCache.set(cacheKey, prepared);
         position.priceHistory = prepared;
         return prepared;
     };
+
     if(transactionPriceCache.has(cacheKey)){
         const cached = transactionPriceCache.get(cacheKey);
-        if(Array.isArray(cached)){
-            return applySeries(cached);
+        if(Array.isArray(cached) && cached.length){
+            position.priceHistory = cached;
+            return cached;
         }
-        return applySeries(sanitizePriceSeries(cached));
     }
 
-    let series = [];
+    if(typeKey === 'crypto'){
+        const localInfo = await loadLocalHistoricalSeries(position);
+        let localSeriesUsed = null;
+        if(localInfo && Array.isArray(localInfo.series) && localInfo.series.length){
+            let workingSeries = localInfo.series.slice();
+            localSeriesUsed = workingSeries;
+            let lastLocalDate = toValidDate(localInfo.lastDate);
+            const todayKey = formatDateKey(new Date());
+            const alreadyCheckedToday = localInfo.lastChecked && localInfo.lastChecked === todayKey;
+            const requiresUpdate = needsHistoricalUpdate(lastLocalDate);
+
+            if(!alreadyCheckedToday && requiresUpdate && MASSIVE_API_KEY){
+                let startDate = addDays(lastLocalDate, 1);
+                const endDate = new Date();
+                if(startDate && startDate <= endDate){
+                    const earliestAllowed = addDays(endDate, -730);
+                    if(earliestAllowed && startDate < earliestAllowed){
+                        startDate = earliestAllowed;
+                    }
+                    const updates = await fetchMassiveHistoricalSeries(position, startDate, endDate);
+                    if(Array.isArray(updates) && updates.length){
+                        workingSeries = mergeHistoricalSeries(workingSeries, updates);
+                        const mergedLastPoint = workingSeries[workingSeries.length - 1];
+                        lastLocalDate = mergedLastPoint ? toValidDate(mergedLastPoint.time) : lastLocalDate;
+                        if(typeof window === 'undefined'){
+                            await writeHistoricalSeriesFile(localInfo.path, localInfo.header, workingSeries);
+                        }
+                    }
+                }
+                localHistoricalCache.set(localInfo.cacheKey, {
+                    ...localInfo,
+                    series: workingSeries,
+                    lastDate: lastLocalDate,
+                    lastChecked: todayKey
+                });
+            }else if(!requiresUpdate && localInfo.lastChecked !== todayKey){
+                localHistoricalCache.set(localInfo.cacheKey, {
+                    ...localInfo,
+                    lastChecked: todayKey
+                });
+            }
+
+            const finalLocal = finalizeSeries(workingSeries);
+            if(finalLocal.length){
+                return finalLocal;
+            }
+        }
+
+        if(MASSIVE_API_KEY && (!localInfo || !localSeriesUsed || !localSeriesUsed.length)){
+            const endDate = new Date();
+            let startDate = firstPurchaseTime ? toValidDate(firstPurchaseTime) : null;
+            if(!startDate){
+                startDate = addDays(endDate, -730);
+            }
+            if(startDate && startDate <= endDate){
+                const updates = await fetchMassiveHistoricalSeries(position, startDate, endDate);
+                if(Array.isArray(updates) && updates.length){
+                    const merged = mergeHistoricalSeries([], updates);
+                    const cacheKeyLocal = getLocalHistoricCacheKey(position);
+                    const relativePath = buildHistoricFilePath(cacheKeyLocal);
+                    if(cacheKeyLocal && relativePath){
+                        if(typeof window === 'undefined'){
+                            await writeHistoricalSeriesFile(relativePath, buildHistoricHeader(position), merged);
+                        }
+                        localHistoricalCache.set(cacheKeyLocal, {
+                            cacheKey: cacheKeyLocal,
+                            path: relativePath,
+                            header: buildHistoricHeader(position),
+                            series: merged,
+                            lastDate: merged.length ? toValidDate(merged[merged.length - 1].time) : null,
+                            lastChecked: formatDateKey(new Date())
+                        });
+                    }
+                    return finalizeSeries(merged);
+                }
+            }
+        }
+    }
+
     if(finnhubSymbol && FINNHUB_KEY){
-        series = await fetchFinnhubSeries(position, finnhubSymbol, firstPurchaseTime);
+        const series = await fetchFinnhubSeries(position, finnhubSymbol, firstPurchaseTime);
         if(series.length){
-            return applySeries(series);
+            return finalizeSeries(series);
         }
     }
 
     if(coinGeckoId){
-        series = await fetchCoinGeckoSeries(coinGeckoId, firstPurchaseTime);
+        const series = await fetchCoinGeckoSeries(coinGeckoId, firstPurchaseTime);
         if(series.length){
-            return applySeries(series);
+            return finalizeSeries(series);
         }
     }
 
     if(yahooSymbol){
-        series = await fetchAlphaVantageSeries(yahooSymbol, typeKey, firstPurchaseTime);
+        const series = await fetchAlphaVantageSeries(yahooSymbol, typeKey, firstPurchaseTime);
         if(series.length){
-            return applySeries(series);
+            return finalizeSeries(series);
         }
     }
 
