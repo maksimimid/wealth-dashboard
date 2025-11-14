@@ -1976,19 +1976,34 @@ function transformOperations(records, progressCb){
 
 function useFallbackPositions(){
     const fallback = [
-        {Name:'Bitcoin',category:'Crypto',symbol:'BINANCE:BTCUSDT',qty:0.25,avgPrice:30000},
-        {Name:'Solana',category:'Crypto',symbol:'BINANCE:SOLUSDT',qty:12,avgPrice:85},
-        {Name:'XRP',category:'Crypto',symbol:'BINANCE:XRPUSDT',qty:1200,avgPrice:0.5},
-        {Name:'Cash Reserve',category:'Cash',symbol:null,qty:2500,avgPrice:1}
+        {Name:'Bitcoin',category:'Crypto',symbol:'BINANCE:BTCUSDT',qty:0.25,avgPrice:30000,lotDate:'2023-07-15T00:00:00Z'},
+        {Name:'Solana',category:'Crypto',symbol:'BINANCE:SOLUSDT',qty:12,avgPrice:85,lotDate:'2024-01-18T00:00:00Z'},
+        {Name:'XRP',category:'Crypto',symbol:'BINANCE:XRPUSDT',qty:1200,avgPrice:0.5,lotDate:'2023-11-03T00:00:00Z'},
+        {Name:'Cash Reserve',category:'Cash',symbol:null,qty:2500,avgPrice:1,lotDate:'2024-02-01T00:00:00Z'}
     ];
     const map = fallback.map(f=>{
         const normalizedCategory = normalizeCategory(f.category, f.Name);
         const typeLower = normalizedCategory.toLowerCase();
         const costBasis = f.qty * f.avgPrice;
         const trackLots = typeLower === 'stock' || typeLower === 'crypto';
+        const lotDate = f.lotDate ? new Date(f.lotDate) : new Date();
         const lots = trackLots && f.qty > 0
-            ? [{ qty: f.qty, costPerUnit: f.avgPrice, date: null }]
+            ? [{
+                qty: f.qty,
+                costPerUnit: f.avgPrice,
+                date: lotDate
+            }]
             : trackLots ? [] : null;
+        const operations = trackLots && f.qty > 0
+            ? [{
+                type: 'PurchaseSell',
+                amount: f.qty,
+                spent: f.qty * f.avgPrice,
+                price: f.avgPrice,
+                date: lotDate,
+                rawDate: lotDate
+            }]
+            : [];
         return {
             Name: f.Name,
             displayName: f.Name,
@@ -2003,7 +2018,8 @@ function useFallbackPositions(){
             cashflow: 0,
             lastKnownPrice: f.avgPrice,
             lots,
-            closedSales: []
+            closedSales: [],
+            operations
         };
     });
     return map.map(p=>{
