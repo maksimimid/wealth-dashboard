@@ -52,6 +52,13 @@ const RANGE_LABELS = PNL_RANGE_CONFIG.reduce((acc, item)=>{
     acc[item.key] = item.label;
     return acc;
 }, {});
+const PNL_CHART_TIME_CONFIG = {
+    '1D': { unit: 'hour', displayFormats: { hour: 'ha' }, maxTicks: 6 },
+    '1W': { unit: 'day', displayFormats: { day: 'MMM d' }, maxTicks: 7 },
+    '1M': { unit: 'day', displayFormats: { day: 'MMM d' }, maxTicks: 8 },
+    '1Y': { unit: 'month', displayFormats: { month: 'MMM' }, maxTicks: 6 },
+    'ALL': { unit: 'month', displayFormats: { month: 'MMM yyyy' }, maxTicks: 6 }
+};
 let pnlRange = 'ALL';
 let pnlRangeTabsContainer = null;
 const pnlRangeButtons = new Map();
@@ -119,6 +126,7 @@ const categorySectionState = {
     crypto: { open: true, closed: false },
     stock: { open: true, closed: false }
 };
+let pnlTrendChart = null;
 let marketStatusTimer = null;
 let marketStatusVisibilityBound = false;
 let netWorthSparklineChart = null;
@@ -474,6 +482,17 @@ function formatQty(qty){
     if(abs >= 100) return qty.toFixed(1);
     if(abs >= 10) return qty.toFixed(2);
     return qty.toFixed(4).replace(/0+$/,'').replace(/\.$/,'');
+}
+
+function startOfDay(value){
+    const date = value instanceof Date ? new Date(value) : new Date(value);
+    if(Number.isNaN(date.getTime())){
+        const fallback = new Date();
+        fallback.setHours(0, 0, 0, 0);
+        return fallback;
+    }
+    date.setHours(0, 0, 0, 0);
+    return date;
 }
 
 function formatCompactMoney(value){
@@ -1241,6 +1260,7 @@ async function setPnlRange(range){
     try{
         pnlRange = normalized;
         applyRangeButtons(pnlRange);
+        renderPnlTrendChart(pnlRange);
         if(pnlRange !== 'ALL'){
             const tasks = positions.map(position => ensureRangeReference(position, pnlRange));
             await Promise.all(tasks);
@@ -1630,8 +1650,8 @@ function transformOperations(records, progressCb){
                 lastKnownPrice: 0,
                 lastPurchasePrice: 0,
                 operations: [],
-                lots: trackLots ? [] : null,
-                closedSales: trackLots ? [] : null
+                lots: trackLots ? [] : [],
+                closedSales: []
             });
         }
 
@@ -1651,7 +1671,7 @@ function transformOperations(records, progressCb){
         });
 
         if(opType === 'PurchaseSell'){
-            const useLots = Array.isArray(entry.lots);
+            const useLots = trackLots;
             if(amount > 0){
                 const totalCostRaw = spent !== 0 ? Math.abs(spent) : Math.abs(price * amount);
                 const totalCost = Number.isFinite(totalCostRaw) ? totalCostRaw : Math.abs(price * amount);
@@ -1736,6 +1756,16 @@ function transformOperations(records, progressCb){
                     entry.qty = Math.max(0, prevQty + amount);
                     entry.costBasis = Math.max(0, prevCost - costOut);
                     entry.realized += proceeds - costOut;
+                    entry.closedSales.push({
+                        saleId,
+                        qty: sellQty,
+                        buyCostPerUnit: avgCost,
+                        buyDate: null,
+                        sellPricePerUnit: price,
+                        sellDate,
+                        totalCost: costOut,
+                        totalProceeds: proceeds
+                    });
                 }
                 if(price){
                     entry.lastKnownPrice = price;
@@ -1865,7 +1895,7 @@ function useFallbackPositions(){
             cashflow: 0,
             lastKnownPrice: f.avgPrice,
             lots,
-            closedSales: trackLots ? [] : null
+            closedSales: []
         };
     });
     return map.map(p=>{
@@ -5401,6 +5431,234 @@ function refreshActiveBestInfoPopover(){
     }
 }
 
+function buildPnlEvents(){
+    const events = [];
+    positions.forEach(position=>{
+        const category = (position.type || position.Category || 'other').toLowerCase() || 'other';
+        if(Array.isArray(position.closedSales)){
+            position.closedSales.forEach(chunk=>{
+                const rawDate = chunk.sellDate instanceof Date ? chunk.sellDate : (chunk.sellDate ? new Date(chunk.sellDate) : null);
+                if(!(rawDate instanceof Date) || Number.isNaN(rawDate.getTime())) return;
+                const proceeds = Number(chunk.totalProceeds || 0);
+                const cost = Number(chunk.totalCost || 0);
+                if(!Number.isFinite(proceeds) || !Number.isFinite(cost)) return;
+                const value = proceeds - cost;
+                if(Math.abs(value) <= 1e-6) return;
+                events.push({ date: new Date(rawDate), value, category });
+            });
+        }
+        if(Array.isArray(position.operations)){
+            position.operations.forEach(op=>{
+                if(op.isReinvesting) return;
+                const opType = String(op.type || '').toLowerCase();
+                if(opType !== 'profitloss') return;
+                const rawDate = op.date instanceof Date ? op.date : (op.rawDate ? new Date(op.rawDate) : null);
+                if(!(rawDate instanceof Date) || Number.isNaN(rawDate.getTime())) return;
+                const rawSpent = Number(op.spent || 0);
+                if(!Number.isFinite(rawSpent) || Math.abs(rawSpent) <= 1e-6) return;
+                const value = -rawSpent;
+                if(Math.abs(value) <= 1e-6) return;
+                const categoryKey = op.isRent ? 'real estate' : category;
+                events.push({ date: new Date(rawDate), value, category: categoryKey });
+            });
+        }
+    });
+    return events.sort((a, b)=> a.date - b.date);
+}
+
+function computePnlTrend(range){
+    const events = buildPnlEvents();
+    const now = new Date();
+    const nowTs = now.getTime();
+    let rangeStart = getRangeStartDate(range);
+    const hasEvents = events.length > 0;
+    if(!rangeStart){
+        rangeStart = hasEvents ? startOfDay(events[0].date) : startOfDay(new Date(nowTs - 30 * 24 * 60 * 60 * 1000));
+    }else{
+        rangeStart = startOfDay(rangeStart);
+    }
+    if(hasEvents){
+        const earliest = startOfDay(events[0].date);
+        if(rangeStart > now){
+            rangeStart = earliest;
+        }else if(rangeStart > earliest && range === 'ALL'){
+            rangeStart = earliest;
+        }
+    }
+    let baseline = 0;
+    const buckets = new Map();
+    events.forEach(event=>{
+        const dayKey = startOfDay(event.date).getTime();
+        if(dayKey < rangeStart.getTime()){
+            baseline += event.value;
+        }else{
+            buckets.set(dayKey, (buckets.get(dayKey) || 0) + event.value);
+        }
+    });
+    const points = [];
+    let cumulative = baseline;
+    points.push({ x: rangeStart, y: cumulative });
+    const sortedKeys = Array.from(buckets.keys()).sort((a, b)=> a - b);
+    sortedKeys.forEach(ts=>{
+        cumulative += buckets.get(ts);
+        points.push({ x: new Date(ts), y: cumulative });
+    });
+    if(points.length === 1){
+        points.push({ x: now, y: cumulative });
+    }else{
+        const lastPoint = points[points.length - 1];
+        if(Math.abs(nowTs - lastPoint.x.getTime()) > 60 * 1000){
+            points.push({ x: now, y: cumulative });
+        }else{
+            points[points.length - 1] = { x: now, y: cumulative };
+        }
+    }
+    return {
+        points,
+        hasData: sortedKeys.length > 0 || baseline !== 0
+    };
+}
+
+function renderPnlTrendChart(range){
+    if(typeof document === 'undefined') return;
+    const canvas = document.getElementById('pnl-trend-chart');
+    if(!canvas){
+        if(pnlTrendChart){
+            pnlTrendChart.destroy();
+            pnlTrendChart = null;
+        }
+        return;
+    }
+    const { points, hasData } = computePnlTrend(range);
+    if(!points || !points.length){
+        if(pnlTrendChart){
+            pnlTrendChart.destroy();
+            pnlTrendChart = null;
+        }
+        const ctx = canvas.getContext('2d');
+        if(ctx){
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+        return;
+    }
+    const timeConfig = PNL_CHART_TIME_CONFIG[range] || PNL_CHART_TIME_CONFIG.ALL;
+    const values = points.map(point=> Number(point.y || 0));
+    const minValue = Math.min(...values);
+    const maxValue = Math.max(...values);
+    let padding = (maxValue - minValue) * 0.15;
+    if(!Number.isFinite(padding) || padding <= 0){
+        padding = Math.max(5, Math.abs(maxValue || 0) * 0.15 + 5);
+    }
+    const suggestedMin = minValue === 0 && maxValue === 0 ? -10 : minValue - padding;
+    const suggestedMax = minValue === 0 && maxValue === 0 ? 10 : maxValue + padding;
+    const dataset = {
+        type: 'line',
+        data: points.map(point=> ({ x: point.x, y: Number(point.y) })),
+        parsing: false,
+        tension: 0.35,
+        borderWidth: 2,
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        pointHitRadius: 14,
+        segment: {
+            borderColor(ctx){
+                const current = ctx.p1?.parsed?.y ?? 0;
+                const previous = ctx.p0?.parsed?.y ?? 0;
+                return current >= previous ? 'rgba(56, 189, 248, 0.85)' : 'rgba(248, 113, 113, 0.75)';
+            }
+        },
+        borderColor: 'rgba(56, 189, 248, 0.85)',
+        fill: {
+            target: 'origin',
+            above: 'rgba(56, 189, 248, 0.15)',
+            below: 'rgba(248, 113, 113, 0.18)'
+        }
+    };
+    const options = {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 420, easing: 'easeOutCubic' },
+        plugins: {
+            legend: { display: false },
+            tooltip: {
+                mode: 'index',
+                intersect: false,
+                displayColors: false,
+                callbacks: {
+                    title(items){
+                        const item = items && items[0];
+                        if(!item) return '';
+                        const rawDate = item.raw?.x ?? item.parsed?.x;
+                        const date = rawDate instanceof Date ? rawDate : new Date(rawDate);
+                        if(!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+                        if(range === '1D'){
+                            const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                            return `${formatDateShort(date)} ${time}`;
+                        }
+                        return formatDateShort(date);
+                    },
+                    label(item){
+                        const value = Number(item.parsed?.y || 0);
+                        return `P&L ${money(value)}`;
+                    }
+                }
+            }
+        },
+        scales: {
+            x: {
+                type: 'time',
+                time: {
+                    unit: timeConfig.unit,
+                    displayFormats: timeConfig.displayFormats
+                },
+                grid: {
+                    display: true,
+                    color: 'rgba(148, 163, 184, 0.18)',
+                    borderDash: [4, 6]
+                },
+                ticks: {
+                    color: 'rgba(226, 232, 240, 0.65)',
+                    maxTicksLimit: timeConfig.maxTicks || 6,
+                    autoSkip: true,
+                    maxRotation: 0
+                }
+            },
+            y: {
+                grid: {
+                    display: true,
+                    color: 'rgba(148, 163, 184, 0.16)',
+                    borderDash: [4, 6]
+                },
+                ticks: {
+                    color: 'rgba(226, 232, 240, 0.65)',
+                    callback: value => money(value)
+                },
+                suggestedMin,
+                suggestedMax
+            }
+        },
+        interaction: {
+            intersect: false,
+            mode: 'index'
+        }
+    };
+    if(pnlTrendChart){
+        pnlTrendChart.data.datasets = [dataset];
+        pnlTrendChart.options = options;
+        pnlTrendChart.update('none');
+        return;
+    }
+    if(typeof Chart === 'undefined'){
+        return;
+    }
+    const ctx = canvas.getContext('2d');
+    pnlTrendChart = new Chart(ctx, {
+        type: 'line',
+        data: { datasets: [dataset] },
+        options
+    });
+}
+
 function renderCategoryAnalytics(categoryKey, config){
     const normalized = categoryKey.toLowerCase();
     const listEl = document.getElementById(config.listId);
@@ -5555,6 +5813,7 @@ function updateKpis(){
     setCategoryPnl('pnl-category-realestate', currentCategoryRangeTotals.realEstate || 0, 'pnlRealEstate');
     updateBestPerformerCache(lastRealEstateAnalytics);
     refreshActiveBestInfoPopover();
+    renderPnlTrendChart(pnlRange);
     if(netWorthInlineViewMode === 'bubble'){
         const snapshotHasData = netWorthBubbleSnapshot && Object.keys(netWorthBubbleSnapshot).length > 0;
         const currentHasData = lastNetWorthTotals && Object.keys(lastNetWorthTotals).length > 0;
@@ -5728,6 +5987,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
     ensureTransactionModalElements();
     ensureNetWorthDetailModalElements();
     initializePnlRangeTabs();
+    renderPnlTrendChart(pnlRange);
     initializeBestInfoTriggers();
     document.addEventListener('keydown', event => {
         if(event.key === 'Escape'){
