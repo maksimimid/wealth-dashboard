@@ -216,6 +216,113 @@ const CRYPTO_ICON_PROVIDERS = [
 ];
 const assetIconSourceCache = new Map();
 const transactionPriceCache = new Map();
+
+function sanitizePriceSeries(series){
+    if(!Array.isArray(series)) return [];
+    const byTime = new Map();
+    series.forEach(point=>{
+        if(!point) return;
+        let time = point.time ?? point.x ?? point.t ?? point.timestamp ?? null;
+        if(time instanceof Date){
+            time = time.getTime();
+        }else if(typeof time === 'string' && time){
+            const parsed = Date.parse(time);
+            time = Number.isNaN(parsed) ? Number(time) : parsed;
+        }else if(typeof time !== 'number'){
+            time = Number(time);
+        }
+        if(!Number.isFinite(time)) return;
+        const candidates = [
+            point.price,
+            point.y,
+            point.c,
+            point.close,
+            point.value
+        ];
+        let price = null;
+        for(const candidate of candidates){
+            const num = Number(candidate);
+            if(Number.isFinite(num) && num >= 0){
+                price = num;
+                break;
+            }
+        }
+        if(price === null) return;
+        byTime.set(time, price);
+    });
+    const entries = Array.from(byTime.entries()).sort((a, b)=> a[0] - b[0]);
+    return entries.map(([time, price])=> ({
+        x: time,
+        y: price,
+        time,
+        price
+    }));
+}
+
+function toValidDate(value){
+    if(!value && value !== 0) return null;
+    if(value instanceof Date){
+        return Number.isNaN(value.getTime()) ? null : value;
+    }
+    if(typeof value === 'number' && Number.isFinite(value)){
+        const dateFromNumber = new Date(value);
+        return Number.isNaN(dateFromNumber.getTime()) ? null : dateFromNumber;
+    }
+    if(typeof value === 'string'){
+        const parsedIso = Date.parse(value);
+        if(!Number.isNaN(parsedIso)){
+            const parsedDate = new Date(parsedIso);
+            return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+        }
+        const numeric = Number(value);
+        if(Number.isFinite(numeric)){
+            const dateFromNumeric = new Date(numeric);
+            return Number.isNaN(dateFromNumeric.getTime()) ? null : dateFromNumeric;
+        }
+    }
+    const fallback = new Date(value);
+    return Number.isNaN(fallback.getTime()) ? null : fallback;
+}
+
+function getOperationDate(operation){
+    if(!operation) return null;
+    const candidates = [
+        operation.date,
+        operation.rawDate,
+        operation.Date,
+        operation.timestamp
+    ];
+    for(const candidate of candidates){
+        const date = toValidDate(candidate);
+        if(date) return date;
+    }
+    return null;
+}
+
+function getPriceHistoryForPosition(position){
+    if(!position) return [];
+    if(Array.isArray(position.priceHistory) && position.priceHistory.length){
+        return position.priceHistory;
+    }
+    const typeKey = String(position.type || '').toLowerCase();
+    const finnhubSymbol = position.finnhubSymbol || mapFinnhubSymbol(position.Symbol || position.displayName || position.Name, position.type, false);
+    const coinGeckoId = typeKey === 'crypto' ? mapCoinGeckoId(position) : null;
+    const yahooSymbol = mapYahooSymbol(position);
+    const cacheKey = `${finnhubSymbol || ''}|${coinGeckoId || yahooSymbol || ''}|${typeKey}`;
+    if(transactionPriceCache.has(cacheKey)){
+        const cached = transactionPriceCache.get(cacheKey);
+        const hasTime = Array.isArray(cached) && cached.length && typeof cached[0]?.time === 'number';
+        const series = hasTime ? cached : sanitizePriceSeries(cached);
+        if(series.length){
+            position.priceHistory = series;
+            if(!hasTime){
+                transactionPriceCache.set(cacheKey, series);
+            }
+            return series;
+        }
+    }
+    return [];
+}
 let netContributionTotal = 0;
 let isRangeUpdateInFlight = false;
 const TRANSACTION_CHART_COLORS = {
@@ -1869,8 +1976,9 @@ function transformOperations(records, progressCb){
 
 function useFallbackPositions(){
     const fallback = [
-        {Name:'Apple',category:'Stock',symbol:'AAPL',qty:10,avgPrice:150},
         {Name:'Bitcoin',category:'Crypto',symbol:'BINANCE:BTCUSDT',qty:0.25,avgPrice:30000},
+        {Name:'Solana',category:'Crypto',symbol:'BINANCE:SOLUSDT',qty:12,avgPrice:85},
+        {Name:'XRP',category:'Crypto',symbol:'BINANCE:XRPUSDT',qty:1200,avgPrice:0.5},
         {Name:'Cash Reserve',category:'Cash',symbol:null,qty:2500,avgPrice:1}
     ];
     const map = fallback.map(f=>{
@@ -2863,7 +2971,13 @@ async function fetchHistoricalPriceSeries(position){
     const yahooSymbol = mapYahooSymbol(position);
     const cacheKey = `${finnhubSymbol || ''}|${coinGeckoId || yahooSymbol || ''}|${typeKey}`;
     if(transactionPriceCache.has(cacheKey)){
-        return transactionPriceCache.get(cacheKey);
+        const cached = transactionPriceCache.get(cacheKey);
+        if(Array.isArray(cached) && cached.length && typeof cached[0]?.time === 'number'){
+            return cached;
+        }
+        const sanitized = sanitizePriceSeries(cached);
+        transactionPriceCache.set(cacheKey, sanitized);
+        return sanitized;
     }
 
     const operations = Array.isArray(position.operations) ? position.operations : [];
@@ -2875,24 +2989,33 @@ async function fetchHistoricalPriceSeries(position){
     if(finnhubSymbol && FINNHUB_KEY){
         series = await fetchFinnhubSeries(position, finnhubSymbol, firstPurchaseTime);
         if(series.length){
-            transactionPriceCache.set(cacheKey, series);
-            return series;
+            const sanitized = sanitizePriceSeries(series);
+            if(sanitized.length){
+                transactionPriceCache.set(cacheKey, sanitized);
+                return sanitized;
+            }
         }
     }
 
     if(coinGeckoId){
         series = await fetchCoinGeckoSeries(coinGeckoId, firstPurchaseTime);
         if(series.length){
-            transactionPriceCache.set(cacheKey, series);
-            return series;
+            const sanitized = sanitizePriceSeries(series);
+            if(sanitized.length){
+                transactionPriceCache.set(cacheKey, sanitized);
+                return sanitized;
+            }
         }
     }
 
     if(yahooSymbol){
         series = await fetchAlphaVantageSeries(yahooSymbol, typeKey, firstPurchaseTime);
         if(series.length){
-            transactionPriceCache.set(cacheKey, series);
-            return series;
+            const sanitized = sanitizePriceSeries(series);
+            if(sanitized.length){
+                transactionPriceCache.set(cacheKey, sanitized);
+                return sanitized;
+            }
         }
     }
 
@@ -3797,6 +3920,7 @@ async function loadHistoricalPriceSeries(position){
             }
             return;
         }
+        position.priceHistory = series;
         if(transactionModalMeta){
             const existing = transactionModalMeta.querySelector('.price-history-note');
             if(existing) existing.remove();
@@ -3809,6 +3933,7 @@ async function loadHistoricalPriceSeries(position){
         const ctx = transactionModalCanvas.getContext('2d');
         transactionChart = new Chart(ctx, config);
         transactionChart.canvas.classList.remove('hidden');
+        renderPnlTrendChart(pnlRange);
     }catch(error){
         console.warn('Failed to load historical price series', error);
     }
@@ -5431,91 +5556,168 @@ function refreshActiveBestInfoPopover(){
     }
 }
 
-function buildPnlEvents(){
-    const events = [];
-    positions.forEach(position=>{
-        const category = (position.type || position.Category || 'other').toLowerCase() || 'other';
-        if(Array.isArray(position.closedSales)){
-            position.closedSales.forEach(chunk=>{
-                const rawDate = chunk.sellDate instanceof Date ? chunk.sellDate : (chunk.sellDate ? new Date(chunk.sellDate) : null);
-                if(!(rawDate instanceof Date) || Number.isNaN(rawDate.getTime())) return;
-                const proceeds = Number(chunk.totalProceeds || 0);
-                const cost = Number(chunk.totalCost || 0);
-                if(!Number.isFinite(proceeds) || !Number.isFinite(cost)) return;
-                const value = proceeds - cost;
-                if(Math.abs(value) <= 1e-6) return;
-                events.push({ date: new Date(rawDate), value, category });
-            });
-        }
-        if(Array.isArray(position.operations)){
-            position.operations.forEach(op=>{
-                if(op.isReinvesting) return;
-                const opType = String(op.type || '').toLowerCase();
-                if(opType !== 'profitloss') return;
-                const rawDate = op.date instanceof Date ? op.date : (op.rawDate ? new Date(op.rawDate) : null);
-                if(!(rawDate instanceof Date) || Number.isNaN(rawDate.getTime())) return;
-                const rawSpent = Number(op.spent || 0);
-                if(!Number.isFinite(rawSpent) || Math.abs(rawSpent) <= 1e-6) return;
-                const value = -rawSpent;
-                if(Math.abs(value) <= 1e-6) return;
-                const categoryKey = op.isRent ? 'real estate' : category;
-                events.push({ date: new Date(rawDate), value, category: categoryKey });
-            });
+function buildPnlAssetState(position, rangeStartTs){
+    const priceHistory = getPriceHistoryForPosition(position);
+    if(!Array.isArray(priceHistory) || !priceHistory.length){
+        return null;
+    }
+    const priceSeries = priceHistory.slice().map(point=>({
+        time: Number(point.time ?? point.x),
+        price: Number(point.price ?? point.y ?? point.value ?? point.c)
+    })).filter(point=> Number.isFinite(point.time) && Number.isFinite(point.price));
+    if(!priceSeries.length){
+        return null;
+    }
+    priceSeries.sort((a, b)=> a.time - b.time);
+    const earliestTime = priceSeries[0].time;
+    const latestTime = priceSeries[priceSeries.length - 1].time;
+    let startTs = Number.isFinite(rangeStartTs) ? Math.max(rangeStartTs, earliestTime) : earliestTime;
+    if(startTs > latestTime){
+        return null;
+    }
+    const operationsRaw = Array.isArray(position.operations) ? position.operations : [];
+    const operations = operationsRaw.map(op=>{
+        const date = getOperationDate(op);
+        if(!date) return null;
+        return {
+            type: String(op.type || '').toLowerCase(),
+            date,
+            amount: Number(op.amount || 0),
+            spent: Number(op.spent || 0)
+        };
+    }).filter(Boolean).sort((a, b)=> a.date - b.date);
+    let qty = 0;
+    let baselineSpent = 0;
+    const quantityOps = [];
+    const contributionOps = [];
+    operations.forEach(op=>{
+        const ts = op.date.getTime();
+        const hasAmount = Number.isFinite(op.amount) && Math.abs(op.amount) > 1e-9;
+        const hasSpent = Number.isFinite(op.spent) && Math.abs(op.spent) > 1e-6;
+        if(ts <= startTs){
+            if(op.type === 'purchasesell' && hasAmount){
+                qty += op.amount;
+            }
+            if(hasSpent){
+                baselineSpent += op.spent;
+            }
+        }else{
+            if(op.type === 'purchasesell' && hasAmount){
+                quantityOps.push({ date: op.date, amount: op.amount });
+            }
+            if(hasSpent){
+                contributionOps.push({ date: op.date, spent: op.spent });
+            }
         }
     });
-    return events.sort((a, b)=> a.date - b.date);
+    let priceIndex = 0;
+    let currentPrice = null;
+    while(priceIndex < priceSeries.length && priceSeries[priceIndex].time <= startTs){
+        currentPrice = priceSeries[priceIndex].price;
+        priceIndex++;
+    }
+    if(currentPrice === null){
+        currentPrice = priceSeries[0].price;
+        startTs = priceSeries[0].time;
+        priceIndex = priceSeries.length > 1 ? 1 : priceSeries.length;
+    }
+    quantityOps.sort((a, b)=> a.date - b.date);
+    contributionOps.sort((a, b)=> a.date - b.date);
+    return {
+        position,
+        priceSeries,
+        priceIndex,
+        currentPrice,
+        qty,
+        quantityOps,
+        quantityIndex: 0,
+        contributionOps,
+        baselineSpent,
+        startTs
+    };
 }
 
 function computePnlTrend(range){
-    const events = buildPnlEvents();
-    const now = new Date();
-    const nowTs = now.getTime();
-    let rangeStart = getRangeStartDate(range);
-    const hasEvents = events.length > 0;
-    if(!rangeStart){
-        rangeStart = hasEvents ? startOfDay(events[0].date) : startOfDay(new Date(nowTs - 30 * 24 * 60 * 60 * 1000));
-    }else{
-        rangeStart = startOfDay(rangeStart);
+    if(!Array.isArray(positions) || !positions.length){
+        return { points: [], hasData: false };
     }
-    if(hasEvents){
-        const earliest = startOfDay(events[0].date);
-        if(rangeStart > now){
-            rangeStart = earliest;
-        }else if(rangeStart > earliest && range === 'ALL'){
-            rangeStart = earliest;
+    const rangeStart = getRangeStartDate(range);
+    const rangeStartTs = rangeStart instanceof Date && !Number.isNaN(rangeStart.getTime())
+        ? rangeStart.getTime()
+        : null;
+    const assetStates = [];
+    let baselineSpentTotal = 0;
+    const timelineSet = new Set();
+    let globalStartTs = null;
+    positions.forEach(position=>{
+        const state = buildPnlAssetState(position, rangeStartTs);
+        if(!state) return;
+        assetStates.push(state);
+        baselineSpentTotal += state.baselineSpent;
+        if(globalStartTs === null || state.startTs < globalStartTs){
+            globalStartTs = state.startTs;
         }
-    }
-    let baseline = 0;
-    const buckets = new Map();
-    events.forEach(event=>{
-        const dayKey = startOfDay(event.date).getTime();
-        if(dayKey < rangeStart.getTime()){
-            baseline += event.value;
-        }else{
-            buckets.set(dayKey, (buckets.get(dayKey) || 0) + event.value);
-        }
+        timelineSet.add(state.startTs);
+        state.priceSeries.forEach(point=>{
+            if(point.time >= state.startTs){
+                timelineSet.add(point.time);
+            }
+        });
+        state.quantityOps.forEach(event=> timelineSet.add(event.date.getTime()));
+        state.contributionOps.forEach(event=> timelineSet.add(event.date.getTime()));
     });
+    if(!assetStates.length){
+        return { points: [], hasData: false };
+    }
+    const nowTs = Date.now();
+    timelineSet.add(nowTs);
+    if(globalStartTs !== null){
+        timelineSet.add(globalStartTs);
+    }
+    const sortedTimeline = Array.from(timelineSet).sort((a, b)=> a - b).filter(ts => globalStartTs === null ? true : ts >= globalStartTs);
+    const contributions = [];
+    assetStates.forEach(state=>{
+        state.contributionOps.forEach(event=>{
+            contributions.push({ ts: event.date.getTime(), spent: event.spent });
+        });
+    });
+    contributions.sort((a, b)=> a.ts - b.ts);
+    let contributionIndex = 0;
+    let cumulativeSpent = baselineSpentTotal;
     const points = [];
-    let cumulative = baseline;
-    points.push({ x: rangeStart, y: cumulative });
-    const sortedKeys = Array.from(buckets.keys()).sort((a, b)=> a - b);
-    sortedKeys.forEach(ts=>{
-        cumulative += buckets.get(ts);
-        points.push({ x: new Date(ts), y: cumulative });
-    });
-    if(points.length === 1){
-        points.push({ x: now, y: cumulative });
-    }else{
-        const lastPoint = points[points.length - 1];
-        if(Math.abs(nowTs - lastPoint.x.getTime()) > 60 * 1000){
-            points.push({ x: now, y: cumulative });
-        }else{
-            points[points.length - 1] = { x: now, y: cumulative };
+    sortedTimeline.forEach(ts=>{
+        while(contributionIndex < contributions.length && contributions[contributionIndex].ts <= ts){
+            cumulativeSpent += contributions[contributionIndex].spent;
+            contributionIndex++;
         }
+        let totalValue = 0;
+        assetStates.forEach(state=>{
+            while(state.priceIndex < state.priceSeries.length && state.priceSeries[state.priceIndex].time <= ts){
+                state.currentPrice = state.priceSeries[state.priceIndex].price;
+                state.priceIndex++;
+            }
+            while(state.quantityIndex < state.quantityOps.length && state.quantityOps[state.quantityIndex].date.getTime() <= ts){
+                state.qty += state.quantityOps[state.quantityIndex].amount;
+                state.quantityIndex++;
+            }
+            const price = Number(state.currentPrice);
+            if(!Number.isFinite(price)) return;
+            const qty = Number(state.qty || 0);
+            totalValue += qty * price;
+        });
+        points.push({ x: new Date(ts), y: totalValue - cumulativeSpent });
+    });
+    if(!points.length){
+        return { points: [], hasData: false };
     }
+    const baseline = Number(points[0].y) || 0;
+    const normalized = points.map(point=> ({
+        x: point.x,
+        y: Number(point.y) - baseline
+    }));
     return {
-        points,
-        hasData: sortedKeys.length > 0 || baseline !== 0
+        points: normalized,
+        hasData: normalized.length > 1 || normalized.some(point => Math.abs(point.y) > 1e-6)
     };
 }
 
