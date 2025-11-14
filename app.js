@@ -299,6 +299,105 @@ function getOperationDate(operation){
     return null;
 }
 
+function getFirstPurchaseTime(position){
+    if(!position) return null;
+    const operations = Array.isArray(position.operations) ? position.operations : [];
+    let earliest = null;
+    operations.forEach(op=>{
+        const type = String(op.type || '').toLowerCase();
+        if(type !== 'purchasesell') return;
+        const amount = Number(op.amount || 0);
+        if(!(amount > 0)) return;
+        const opDate = getOperationDate(op);
+        if(!opDate) return;
+        if(!earliest || opDate < earliest){
+            earliest = opDate;
+        }
+    });
+    if(!earliest && Array.isArray(position.lots)){
+        position.lots.forEach(lot=>{
+            const lotDate = toValidDate(lot?.date);
+            if(!lotDate) return;
+            if(!earliest || lotDate < earliest){
+                earliest = lotDate;
+            }
+        });
+    }
+    return earliest ? earliest.getTime() : null;
+}
+
+function createSeriesPoint(time, price){
+    const ts = Number(time);
+    const val = Number(price);
+    if(!Number.isFinite(ts) || !Number.isFinite(val)){
+        return null;
+    }
+    return { x: ts, y: val, time: ts, price: val };
+}
+
+function preparePriceSeries(series, firstPurchaseTime, position){
+    if(!Array.isArray(series) || !series.length){
+        return [];
+    }
+    const base = series.map(point=>{
+        const time = point?.time ?? point?.x ?? point?.t ?? point?.timestamp;
+        const price = point?.price ?? point?.y ?? point?.value ?? point?.c ?? point?.close;
+        return createSeriesPoint(time, price);
+    }).filter(Boolean);
+    if(!base.length){
+        return [];
+    }
+    base.sort((a, b)=> a.time - b.time);
+    let result = base.slice();
+    if(Number.isFinite(firstPurchaseTime)){
+        const firstIndex = result.findIndex(point => point.time >= firstPurchaseTime);
+        if(firstIndex === -1){
+            const fallbackPrice = Number(position?.displayPrice || position?.currentPrice || position?.lastKnownPrice || position?.avgPrice || result[result.length - 1].price);
+            if(Number.isFinite(fallbackPrice)){
+                result = [createSeriesPoint(firstPurchaseTime, fallbackPrice)];
+            }else{
+                result = [];
+            }
+        }else{
+            result = result.slice(firstIndex);
+            const firstPoint = result[0];
+            if(firstPoint){
+                if(firstPoint.time > firstPurchaseTime){
+                    result.unshift(createSeriesPoint(firstPurchaseTime, firstPoint.price));
+                }else if(firstPoint.time < firstPurchaseTime){
+                    result[0] = createSeriesPoint(firstPurchaseTime, firstPoint.price);
+                }
+            }
+        }
+    }
+    const nowTs = Date.now();
+    if(result.length){
+        const lastPoint = result[result.length - 1];
+        let nextPrice = Number(lastPoint?.price);
+        if(!Number.isFinite(nextPrice)){
+            nextPrice = Number(position?.displayPrice || position?.currentPrice || position?.lastKnownPrice || position?.avgPrice || lastPoint?.price);
+        }
+        if(Number.isFinite(nextPrice)){
+            if(nowTs > lastPoint.time){
+                if(nowTs - lastPoint.time > 30 * 60 * 1000){
+                    result.push(createSeriesPoint(nowTs, nextPrice));
+                }else{
+                    result[result.length - 1] = createSeriesPoint(nowTs, nextPrice);
+                }
+            }else if(nowTs === lastPoint.time && !Number.isFinite(lastPoint.price)){
+                result[result.length - 1] = createSeriesPoint(nowTs, nextPrice);
+            }
+        }
+    }
+    const dedup = new Map();
+    result.forEach(point=>{
+        if(point){
+            dedup.set(point.time, point);
+        }
+    });
+    return Array.from(dedup.values()).sort((a, b)=> a.time - b.time);
+}
+
 function getPriceHistoryForPosition(position){
     if(!position) return [];
     if(Array.isArray(position.priceHistory) && position.priceHistory.length){
@@ -309,16 +408,17 @@ function getPriceHistoryForPosition(position){
     const coinGeckoId = typeKey === 'crypto' ? mapCoinGeckoId(position) : null;
     const yahooSymbol = mapYahooSymbol(position);
     const cacheKey = `${finnhubSymbol || ''}|${coinGeckoId || yahooSymbol || ''}|${typeKey}`;
+    const firstPurchaseTime = getFirstPurchaseTime(position);
     if(transactionPriceCache.has(cacheKey)){
         const cached = transactionPriceCache.get(cacheKey);
-        const hasTime = Array.isArray(cached) && cached.length && typeof cached[0]?.time === 'number';
-        const series = hasTime ? cached : sanitizePriceSeries(cached);
-        if(series.length){
-            position.priceHistory = series;
-            if(!hasTime){
-                transactionPriceCache.set(cacheKey, series);
-            }
-            return series;
+        const baseSeries = Array.isArray(cached) && cached.length && typeof cached[0]?.time === 'number'
+            ? cached
+            : sanitizePriceSeries(cached);
+        const prepared = preparePriceSeries(baseSeries, firstPurchaseTime, position);
+        if(prepared.length){
+            position.priceHistory = prepared;
+            transactionPriceCache.set(cacheKey, prepared);
+            return prepared;
         }
     }
     return [];
@@ -2986,56 +3086,45 @@ async function fetchHistoricalPriceSeries(position){
     const coinGeckoId = typeKey === 'crypto' ? mapCoinGeckoId(position) : null;
     const yahooSymbol = mapYahooSymbol(position);
     const cacheKey = `${finnhubSymbol || ''}|${coinGeckoId || yahooSymbol || ''}|${typeKey}`;
+    const firstPurchaseTime = getFirstPurchaseTime(position);
+    const applySeries = rawSeries=>{
+        const prepared = preparePriceSeries(rawSeries, firstPurchaseTime, position);
+        transactionPriceCache.set(cacheKey, prepared);
+        position.priceHistory = prepared;
+        return prepared;
+    };
     if(transactionPriceCache.has(cacheKey)){
         const cached = transactionPriceCache.get(cacheKey);
-        if(Array.isArray(cached) && cached.length && typeof cached[0]?.time === 'number'){
-            return cached;
+        if(Array.isArray(cached)){
+            return applySeries(cached);
         }
-        const sanitized = sanitizePriceSeries(cached);
-        transactionPriceCache.set(cacheKey, sanitized);
-        return sanitized;
+        return applySeries(sanitizePriceSeries(cached));
     }
 
-    const operations = Array.isArray(position.operations) ? position.operations : [];
-    const firstPurchase = operations
-        .filter(op => String(op.type || '').toLowerCase() === 'purchasesell' && Number(op.amount || 0) > 0 && op.date instanceof Date)
-        .sort((a,b)=> a.date - b.date)[0];
-    const firstPurchaseTime = firstPurchase ? firstPurchase.date.getTime() : null;
     let series = [];
     if(finnhubSymbol && FINNHUB_KEY){
         series = await fetchFinnhubSeries(position, finnhubSymbol, firstPurchaseTime);
         if(series.length){
-            const sanitized = sanitizePriceSeries(series);
-            if(sanitized.length){
-                transactionPriceCache.set(cacheKey, sanitized);
-                return sanitized;
-            }
+            return applySeries(series);
         }
     }
 
     if(coinGeckoId){
         series = await fetchCoinGeckoSeries(coinGeckoId, firstPurchaseTime);
         if(series.length){
-            const sanitized = sanitizePriceSeries(series);
-            if(sanitized.length){
-                transactionPriceCache.set(cacheKey, sanitized);
-                return sanitized;
-            }
+            return applySeries(series);
         }
     }
 
     if(yahooSymbol){
         series = await fetchAlphaVantageSeries(yahooSymbol, typeKey, firstPurchaseTime);
         if(series.length){
-            const sanitized = sanitizePriceSeries(series);
-            if(sanitized.length){
-                transactionPriceCache.set(cacheKey, sanitized);
-                return sanitized;
-            }
+            return applySeries(series);
         }
     }
 
     transactionPriceCache.set(cacheKey, []);
+    position.priceHistory = [];
     return [];
 }
 
