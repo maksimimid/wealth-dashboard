@@ -3140,11 +3140,10 @@ async function fetchFinnhubSeries(position, rawSymbol, firstPurchaseTime){
             }
         }
         const nowSec = Math.floor(Date.now()/1000);
-        let fromMs = Date.now() - TRANSACTION_HISTORY_LOOKBACK_DAYS * 24 * 3600 * 1000;
-        if(firstPurchaseTime){
-            const marginMs = 30 * 24 * 3600 * 1000;
-            fromMs = Math.max(fromMs, firstPurchaseTime - marginMs);
-        }
+        const marginMs = 30 * 24 * 3600 * 1000;
+        let fromMs = Number.isFinite(firstPurchaseTime)
+            ? Math.max(0, firstPurchaseTime - marginMs)
+            : Date.now() - TRANSACTION_HISTORY_LOOKBACK_DAYS * 24 * 3600 * 1000;
         const fromSec = Math.floor(fromMs / 1000);
         const endpoint = isCryptoFinnhubSymbol(rawSymbol, position.type) ? 'crypto/candle' : 'stock/candle';
         const url = `${FINNHUB_REST}/${endpoint}?symbol=${encodeURIComponent(rawSymbol)}&resolution=D&from=${fromSec}&to=${nowSec}&token=${FINNHUB_KEY}`;
@@ -3277,11 +3276,10 @@ function scheduleYahooFallback(position){
 
 async function fetchCoinGeckoSeries(coinId, firstPurchaseTime){
     try{
-        let fromMs = Date.now() - TRANSACTION_HISTORY_LOOKBACK_DAYS * 24 * 3600 * 1000;
-        if(firstPurchaseTime){
-            const marginMs = 30 * 24 * 3600 * 1000;
-            fromMs = Math.max(fromMs, firstPurchaseTime - marginMs);
-        }
+        const marginMs = 30 * 24 * 3600 * 1000;
+        let fromMs = Number.isFinite(firstPurchaseTime)
+            ? Math.max(0, firstPurchaseTime - marginMs)
+            : Date.now() - TRANSACTION_HISTORY_LOOKBACK_DAYS * 24 * 3600 * 1000;
         const days = Math.max(30, Math.ceil((Date.now() - fromMs) / (24 * 3600 * 1000)));
         const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}/market_chart?vs_currency=usd&days=${days}`;
         const response = await fetch(url, { headers: { 'accept': 'application/json' } });
@@ -3291,9 +3289,9 @@ async function fetchCoinGeckoSeries(coinId, firstPurchaseTime){
         const series = json.prices.map(([timestamp, price])=>{
             const close = Number(price);
             if(!Number.isFinite(close) || close <= 0) return null;
-            if(firstPurchaseTime){
-                const marginMs = 30 * 24 * 3600 * 1000;
-                if(timestamp < firstPurchaseTime - marginMs) return null;
+            if(Number.isFinite(firstPurchaseTime)){
+                const minTs = firstPurchaseTime - marginMs;
+                if(timestamp < minTs) return null;
             }
             return { x: timestamp, y: close };
         }).filter(Boolean);
