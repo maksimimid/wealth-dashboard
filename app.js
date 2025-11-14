@@ -350,25 +350,30 @@ function preparePriceSeries(series, firstPurchaseTime, position){
     base.sort((a, b)=> a.time - b.time);
     let result = base.slice();
     if(Number.isFinite(firstPurchaseTime)){
-        const firstIndex = result.findIndex(point => point.time >= firstPurchaseTime);
-        if(firstIndex === -1){
-            const fallbackPrice = Number(position?.displayPrice || position?.currentPrice || position?.lastKnownPrice || position?.avgPrice || result[result.length - 1].price);
+        let filtered = result.filter(point=> point.time >= firstPurchaseTime);
+        if(!filtered.length){
+            const fallbackPrice = Number(position?.displayPrice || position?.currentPrice || position?.lastKnownPrice || position?.avgPrice || base[base.length - 1]?.price);
             if(Number.isFinite(fallbackPrice)){
-                result = [createSeriesPoint(firstPurchaseTime, fallbackPrice)];
-            }else{
-                result = [];
+                const fallbackPoint = createSeriesPoint(firstPurchaseTime, fallbackPrice);
+                if(fallbackPoint){
+                    filtered.push(fallbackPoint);
+                }
             }
         }else{
-            result = result.slice(firstIndex);
-            const firstPoint = result[0];
-            if(firstPoint){
-                if(firstPoint.time > firstPurchaseTime){
-                    result.unshift(createSeriesPoint(firstPurchaseTime, firstPoint.price));
-                }else if(firstPoint.time < firstPurchaseTime){
-                    result[0] = createSeriesPoint(firstPurchaseTime, firstPoint.price);
+            const firstPoint = filtered[0];
+            if(firstPoint.time > firstPurchaseTime){
+                const adjusted = createSeriesPoint(firstPurchaseTime, firstPoint.price);
+                if(adjusted){
+                    filtered.unshift(adjusted);
+                }
+            }else if(firstPoint.time < firstPurchaseTime){
+                const adjusted = createSeriesPoint(firstPurchaseTime, firstPoint.price);
+                if(adjusted){
+                    filtered[0] = adjusted;
                 }
             }
         }
+        result = filtered;
     }
     const nowTs = Date.now();
     if(result.length){
