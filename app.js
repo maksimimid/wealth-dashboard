@@ -1679,13 +1679,23 @@ function transformOperations(records, progressCb){
             }else if(amount < 0){
                 const sellQty = Math.abs(amount);
                 const proceeds = spent < 0 ? Math.abs(spent) : Math.abs(price * sellQty);
+                const saleId = op.id || `sale-${index}`;
+                const saleDate = date instanceof Date ? date : (date ? new Date(date) : null);
                 if(useLots){
                     let remaining = sellQty;
                     let costOut = 0;
+                    const saleChunks = [];
                     while(remaining > 1e-9 && entry.lots.length){
                         const lot = entry.lots[0];
                         const matched = Math.min(lot.qty, remaining);
-                        costOut += matched * lot.costPerUnit;
+                        const lotCostPerUnit = Number(lot.costPerUnit) || 0;
+                        const lotDate = lot.date instanceof Date ? lot.date : (lot.date ? new Date(lot.date) : null);
+                        saleChunks.push({
+                            qty: matched,
+                            buyCostPerUnit: lotCostPerUnit,
+                            buyDate: lotDate
+                        });
+                        costOut += matched * lotCostPerUnit;
                         lot.qty -= matched;
                         remaining -= matched;
                         if(lot.qty <= 1e-9){
@@ -1694,9 +1704,26 @@ function transformOperations(records, progressCb){
                     }
                     if(remaining > 1e-9){
                         const fallbackUnit = entry.lastPurchasePrice || entry.avgPrice || price || 0;
+                        saleChunks.push({
+                            qty: remaining,
+                            buyCostPerUnit: fallbackUnit,
+                            buyDate: null
+                        });
                         costOut += remaining * fallbackUnit;
                         remaining = 0;
                     }
+                    saleChunks.forEach(chunk=>{
+                        entry.closedSales.push({
+                            saleId,
+                            qty: chunk.qty,
+                            buyCostPerUnit: chunk.buyCostPerUnit,
+                            buyDate: chunk.buyDate,
+                            sellPricePerUnit: price,
+                            sellDate,
+                            totalCost: chunk.qty * chunk.buyCostPerUnit,
+                            totalProceeds: chunk.qty * price
+                        });
+                    });
                     const qtySum = entry.lots.reduce((sum, lot)=> sum + lot.qty, 0);
                     entry.qty = qtySum;
                     entry.costBasis = entry.lots.reduce((sum, lot)=> sum + lot.qty * lot.costPerUnit, 0);
@@ -1788,6 +1815,20 @@ function transformOperations(records, progressCb){
         }else{
             p.lots = null;
         }
+        if(Array.isArray(p.closedSales)){
+            p.closedSales = p.closedSales.map(chunk=>({
+                saleId: chunk.saleId,
+                qty: Number(chunk.qty) || 0,
+                buyCostPerUnit: Number(chunk.buyCostPerUnit) || 0,
+                buyDate: chunk.buyDate instanceof Date ? chunk.buyDate : (chunk.buyDate ? new Date(chunk.buyDate) : null),
+                sellPricePerUnit: Number(chunk.sellPricePerUnit) || 0,
+                sellDate: chunk.sellDate instanceof Date ? chunk.sellDate : (chunk.sellDate ? new Date(chunk.sellDate) : null),
+                totalCost: Number(chunk.totalCost) || 0,
+                totalProceeds: Number(chunk.totalProceeds) || 0
+            }));
+        }else{
+            p.closedSales = null;
+        }
         recomputePositionMetrics(p);
         ensurePositionDefaults(p);
         p.referencePrices = {};
@@ -1823,7 +1864,8 @@ function useFallbackPositions(){
             realized: 0,
             cashflow: 0,
             lastKnownPrice: f.avgPrice,
-            lots
+            lots,
+            closedSales: trackLots ? [] : null
         };
     });
     return map.map(p=>{
@@ -3371,53 +3413,175 @@ function renderTransactionLots(position, data){
     ensureTransactionLotsControls();
     const listElement = transactionLotsList || transactionLotsContainer;
     const operations = Array.isArray(position.operations) ? position.operations.slice() : [];
-    if(!operations.length){
+    const currentPrice = Number(position.displayPrice || position.currentPrice || position.lastKnownPrice || position.avgPrice || 0);
+    const processed = [];
+    let usingCustomLots = false;
+    const supportsLots = ['stock','crypto'].includes((position.type || '').toLowerCase());
+    const openLots = supportsLots && Array.isArray(position.lots) ? position.lots.filter(lot=> lot && Number(lot.qty) > 1e-9) : [];
+    const closedSegments = supportsLots && Array.isArray(position.closedSales) ? position.closedSales.slice() : [];
+    const hasOpenQty = Math.abs(Number(position.qty || 0)) > 1e-6;
+
+    if(supportsLots){
+        if(hasOpenQty && openLots.length){
+            usingCustomLots = true;
+            const sortedLots = openLots.slice().sort((a,b)=>{
+                const ad = a.date instanceof Date ? a.date.getTime() : -Infinity;
+                const bd = b.date instanceof Date ? b.date.getTime() : -Infinity;
+                return ad - bd;
+            });
+            sortedLots.forEach((lot, index)=>{
+                const lotDate = lot.date instanceof Date ? lot.date : (lot.date ? new Date(lot.date) : null);
+                const buyPrice = Number(lot.costPerUnit) || 0;
+                const qty = Number(lot.qty) || 0;
+                const baseAmount = qty * buyPrice;
+                const currentValue = qty * currentPrice;
+                const pnlValue = currentValue - baseAmount;
+                const pnlPct = baseAmount ? (pnlValue / baseAmount) * 100 : null;
+                processed.push({
+                    id: lot.id || `open-${index}`,
+                    date: lotDate,
+                    dateValue: lotDate instanceof Date && !Number.isNaN(lotDate.getTime()) ? lotDate.getTime() : -Infinity,
+                    dateLabel: lotDate instanceof Date && !Number.isNaN(lotDate.getTime()) ? formatDateShort(lotDate) : '—',
+                    typeLabel: 'Open lot',
+                    absQty: qty,
+                    price: buyPrice,
+                    baseAmount,
+                    amountLabel: 'Invested',
+                    pnlValue,
+                    pnlPct,
+                    pnlClass: pnlValue >= 0 ? 'lot-positive' : 'lot-negative'
+                });
+            });
+        }else if(!hasOpenQty && closedSegments.length){
+            usingCustomLots = true;
+            const groupMap = new Map();
+            closedSegments.forEach((chunk, idx)=>{
+                const key = chunk.saleId || `sale-${idx}`;
+                if(!groupMap.has(key)){
+                    groupMap.set(key, {
+                        saleId: key,
+                        sellDate: chunk.sellDate instanceof Date ? chunk.sellDate : (chunk.sellDate ? new Date(chunk.sellDate) : null),
+                        sellPricePerUnit: Number(chunk.sellPricePerUnit) || 0,
+                        chunks: [],
+                        totalProceeds: 0,
+                        totalCost: 0
+                    });
+                }
+                const group = groupMap.get(key);
+                const buyDate = chunk.buyDate instanceof Date ? chunk.buyDate : (chunk.buyDate ? new Date(chunk.buyDate) : null);
+                group.chunks.push({
+                    qty: Number(chunk.qty) || 0,
+                    buyCostPerUnit: Number(chunk.buyCostPerUnit) || 0,
+                    buyDate
+                });
+                group.totalProceeds += Number(chunk.totalProceeds) || 0;
+                group.totalCost += Number(chunk.totalCost) || 0;
+                if(!group.sellDate && chunk.sellDate){
+                    group.sellDate = chunk.sellDate instanceof Date ? chunk.sellDate : new Date(chunk.sellDate);
+                }
+                if(!group.sellPricePerUnit && Number.isFinite(chunk.sellPricePerUnit)){
+                    group.sellPricePerUnit = Number(chunk.sellPricePerUnit);
+                }
+            });
+            const groups = Array.from(groupMap.values()).sort((a,b)=>{
+                const ad = a.sellDate instanceof Date ? a.sellDate.getTime() : -Infinity;
+                const bd = b.sellDate instanceof Date ? b.sellDate.getTime() : -Infinity;
+                return ad - bd;
+            });
+            groups.forEach(group=>{
+                group.chunks.sort((a,b)=>{
+                    const ad = a.buyDate instanceof Date ? a.buyDate.getTime() : -Infinity;
+                    const bd = b.buyDate instanceof Date ? b.buyDate.getTime() : -Infinity;
+                    return ad - bd;
+                });
+                group.chunks.forEach((chunk, idx)=>{
+                    const cost = chunk.qty * chunk.buyCostPerUnit;
+                    processed.push({
+                        id: `buy-${group.saleId}-${idx}`,
+                        date: chunk.buyDate,
+                        dateValue: chunk.buyDate instanceof Date && !Number.isNaN(chunk.buyDate.getTime()) ? chunk.buyDate.getTime() : -Infinity,
+                        dateLabel: chunk.buyDate instanceof Date && !Number.isNaN(chunk.buyDate.getTime()) ? formatDateShort(chunk.buyDate) : '—',
+                        typeLabel: 'Buy lot',
+                        absQty: chunk.qty,
+                        price: chunk.buyCostPerUnit,
+                        baseAmount: cost,
+                        amountLabel: 'Invested',
+                        pnlValue: 0,
+                        pnlPct: null,
+                        pnlClass: 'lot-neutral',
+                        pnlDisplay: '—'
+                    });
+                });
+                const saleQty = group.chunks.reduce((sum, chunk)=> sum + chunk.qty, 0);
+                const saleDate = group.sellDate;
+                const pnlValue = group.totalProceeds - group.totalCost;
+                const pnlPct = group.totalCost ? (pnlValue / group.totalCost) * 100 : null;
+                processed.push({
+                    id: `sell-${group.saleId}`,
+                    date: saleDate,
+                    dateValue: saleDate instanceof Date && !Number.isNaN(saleDate.getTime()) ? saleDate.getTime() : -Infinity,
+                    dateLabel: saleDate instanceof Date && !Number.isNaN(saleDate.getTime()) ? formatDateShort(saleDate) : '—',
+                    typeLabel: 'Sell lot',
+                    absQty: saleQty,
+                    price: group.sellPricePerUnit,
+                    baseAmount: group.totalProceeds,
+                    amountLabel: 'Proceeds',
+                    pnlValue,
+                    pnlPct,
+                    pnlClass: pnlValue >= 0 ? 'lot-positive' : 'lot-negative'
+                });
+            });
+        }
+    }
+
+    if(!usingCustomLots && !operations.length){
         listElement.innerHTML = '<div class="pos">No transactions recorded yet.</div>';
         return;
     }
-    const currentPrice = Number(position.displayPrice || position.currentPrice || position.lastKnownPrice || position.avgPrice || 0);
-    const processed = [];
-    operations.forEach((op, index)=>{
-        if(op.skipInCharts || op.isReinvesting) return;
-        const qtySigned = Number(op.amount || 0);
-        if(!qtySigned) return;
-        const absQty = Math.abs(qtySigned);
-        const date = op.date instanceof Date ? op.date : (op.rawDate ? new Date(op.rawDate) : null);
-        const price = Number(op.price || currentPrice || 0) || 0;
-        const rawSpent = Number(op.spent);
-        let baseAmount = Number.isFinite(rawSpent) ? Math.abs(rawSpent) : Math.abs(price * absQty);
-        const typeLabel = qtySigned > 0 ? 'Buy' : 'Sell';
-        const amountLabel = qtySigned > 0 ? 'Invested' : 'Proceeds';
-        let pnlValue = 0;
-        if(qtySigned > 0){
-            if(!baseAmount) baseAmount = Math.abs(price * absQty);
-            const currentValue = currentPrice * absQty;
-            pnlValue = currentValue - baseAmount;
-        }else{
-            if(!baseAmount) baseAmount = Math.abs(price * absQty);
-            const estimatedCost = Math.abs(price * absQty);
-            pnlValue = baseAmount - estimatedCost;
-        }
-        const pnlPct = baseAmount ? (pnlValue / baseAmount) * 100 : 0;
-        const pnlClass = pnlValue >= 0 ? 'lot-positive' : 'lot-negative';
-        processed.push({
-            id: op.id || `lot-${index}`,
-            date,
-            dateValue: date instanceof Date && !Number.isNaN(date.getTime()) ? date.getTime() : -Infinity,
-            dateLabel: date instanceof Date && !Number.isNaN(date.getTime()) ? formatDateShort(date) : '—',
-            typeLabel,
-            absQty,
-            price,
-            baseAmount,
-            amountLabel,
-            pnlValue,
-            pnlPct,
-            pnlClass
+
+    if(!usingCustomLots){
+        operations.forEach((op, index)=>{
+            if(op.skipInCharts || op.isReinvesting) return;
+            const qtySigned = Number(op.amount || 0);
+            if(!qtySigned) return;
+            const absQty = Math.abs(qtySigned);
+            const date = op.date instanceof Date ? op.date : (op.rawDate ? new Date(op.rawDate) : null);
+            const price = Number(op.price || currentPrice || 0) || 0;
+            const rawSpent = Number(op.spent);
+            let baseAmount = Number.isFinite(rawSpent) ? Math.abs(rawSpent) : Math.abs(price * absQty);
+            const typeLabel = qtySigned > 0 ? 'Buy' : 'Sell';
+            const amountLabel = qtySigned > 0 ? 'Invested' : 'Proceeds';
+            let pnlValue = 0;
+            if(qtySigned > 0){
+                if(!baseAmount) baseAmount = Math.abs(price * absQty);
+                const currentValue = currentPrice * absQty;
+                pnlValue = currentValue - baseAmount;
+            }else{
+                if(!baseAmount) baseAmount = Math.abs(price * absQty);
+                const estimatedCost = Math.abs(price * absQty);
+                pnlValue = baseAmount - estimatedCost;
+            }
+            const pnlPct = baseAmount ? (pnlValue / baseAmount) * 100 : 0;
+            const pnlClass = pnlValue >= 0 ? 'lot-positive' : 'lot-negative';
+            processed.push({
+                id: op.id || `lot-${index}`,
+                date,
+                dateValue: date instanceof Date && !Number.isNaN(date.getTime()) ? date.getTime() : -Infinity,
+                dateLabel: date instanceof Date && !Number.isNaN(date.getTime()) ? formatDateShort(date) : '—',
+                typeLabel,
+                absQty,
+                price,
+                baseAmount,
+                amountLabel,
+                pnlValue,
+                pnlPct,
+                pnlClass
+            });
         });
-    });
+    }
 
     if(!processed.length){
-        listElement.innerHTML = '<div class="pos">No transactions recorded yet.</div>';
+        listElement.innerHTML = '<div class="pos">No lots to display yet.</div>';
         return;
     }
 
@@ -3501,6 +3665,10 @@ function renderTransactionLots(position, data){
         }
         group.items.forEach(item=>{
             const pnlPercentDisplay = Number.isFinite(item.pnlPct) ? formatPercent(item.pnlPct) : '—';
+            const pnlClass = item.pnlClass || (item.pnlValue >= 0 ? 'lot-positive' : 'lot-negative');
+            const pnlContent = item.pnlDisplay !== undefined
+                ? item.pnlDisplay
+                : `${money(item.pnlValue)} (${pnlPercentDisplay})`;
             const row = document.createElement('div');
             row.className = 'lot-row';
             row.innerHTML = `
@@ -3508,7 +3676,7 @@ function renderTransactionLots(position, data){
                 <div class="lot-cell lot-cell-type">${item.typeLabel} · ${formatQty(item.absQty)}</div>
                 <div class="lot-cell lot-cell-price">${money(item.price)}</div>
                 <div class="lot-cell lot-cell-amount">${item.amountLabel} ${money(item.baseAmount)}</div>
-                <div class="lot-cell lot-cell-pnl"><span class="lot-value ${item.pnlClass}">${money(item.pnlValue)} (${pnlPercentDisplay})</span></div>
+                <div class="lot-cell lot-cell-pnl"><span class="lot-value ${pnlClass}">${pnlContent}</span></div>
             `;
             listElement.appendChild(row);
         });
@@ -4999,11 +5167,12 @@ function ensureBestInfoPopoverElements(){
         return null;
     }
     const content = bestInfoPopover.querySelector('.best-info-content');
-    const closeButton = bestInfoPopover.querySelector('.best-info-close');
+    if(content && !content.hasAttribute('tabindex')){
+        content.setAttribute('tabindex', '-1');
+    }
     bestInfoPopoverElements = {
         popover: bestInfoPopover,
         content,
-        closeButton,
         title: document.getElementById('best-info-title'),
         range: document.getElementById('best-info-range'),
         category: document.getElementById('best-info-category'),
@@ -5013,9 +5182,6 @@ function ensureBestInfoPopoverElements(){
         meta: document.getElementById('best-info-meta'),
         extra: document.getElementById('best-info-extra')
     };
-    if(closeButton){
-        closeButton.addEventListener('click', hideBestInfoPopover);
-    }
     return bestInfoPopoverElements;
 }
 
@@ -5179,10 +5345,7 @@ function showBestInfoPopover(categoryKey, trigger){
     trigger.setAttribute('aria-expanded','true');
     positionBestInfoPopover(trigger);
     attachBestInfoListeners();
-    if(elements.closeButton){
-        elements.closeButton.focus({ preventScroll: true });
-    }else if(elements.content){
-        elements.content.setAttribute('tabindex','-1');
+    if(elements.content){
         elements.content.focus({ preventScroll: true });
     }
 }

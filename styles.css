@@ -531,6 +531,14 @@ body::before {
     color: #f87171;
 }
 
+.lot-neutral {
+    color: var(--muted);
+}
+
+body.light-theme .lot-neutral {
+    color: #64748b;
+}
+
 .lot-header + .lot-row {
     margin-top: 0;
 }
@@ -1193,37 +1201,42 @@ h1 {
 .card-info-button {
     flex-shrink: 0;
     align-self: flex-start;
+    margin-left: auto;
+}
+
+.card-header-right,
+.analytics-header-right {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-left: auto;
 }
 
 .card-header-right {
-    display: flex;
-    align-items: flex-start;
-    justify-content: flex-end;
-    gap: 16px;
     flex-wrap: wrap;
-    margin-left: auto;
+    justify-content: flex-end;
 }
 
 .analytics-header-right {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    justify-content: flex-start;
-    gap: 12px;
-    margin-left: auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
 }
 
 .card-header-right .analytics-summary,
 .analytics-header-right .analytics-summary {
     margin: 0;
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 .analytics-header-actions {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 12px;
     flex-wrap: wrap;
     justify-content: flex-end;
+    flex: 0 0 auto;
+    margin-left: auto;
 }
 
 .analytics-header-actions .market-status {
@@ -1253,29 +1266,7 @@ h1 {
     display: flex;
     flex-direction: column;
     gap: 14px;
-}
-
-.best-info-close {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    border: none;
-    background: transparent;
-    color: #cbd5f5;
-    font-size: 20px;
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    transition: background 0.2s ease, transform 0.2s ease;
-}
-
-.best-info-close:hover {
-    background: rgba(148, 163, 184, 0.2);
-    transform: scale(1.05);
+    outline: none;
 }
 
 .best-info-header {
@@ -2422,13 +2413,6 @@ body.light-theme .best-info-change {
     color: #0f172a;
 }
 
-body.light-theme .best-info-close {
-    color: #475569;
-}
-
-body.light-theme .best-info-close:hover {
-    background: rgba(148, 163, 184, 0.25);
-}
 body.light-theme .btn { background: rgba(255, 255, 255, 0.85); color: #1e293b; border-color: rgba(148, 163, 184, 0.4); }
 body.light-theme .btn.primary { background: linear-gradient(120deg, #4f46e5, #14b8a6); color: #f8fafc; }
 body.light-theme .pos { color: #64748b; }
