@@ -3773,11 +3773,7 @@ function createClosedPositionRow(position){
     const prioritizedPrice = priceCandidates.find(value => Math.abs(value) > 1e-9);
     const fallbackPrice = Number(position.displayPrice ?? position.currentPrice ?? position.lastKnownPrice ?? position.lastPurchasePrice ?? position.avgPrice ?? 0) || 0;
     const price = Number.isFinite(prioritizedPrice) ? prioritizedPrice : fallbackPrice;
-    const reinvestedQty = Math.max(0, Number(position.reinvested || 0));
-    const reinvestPrice = Math.abs(price) > 1e-9 ? price : fallbackPrice;
-    const hasReinvestValue = reinvestedQty > 1e-6 && Math.abs(reinvestPrice) > 1e-9;
-    const reinvestedValue = hasReinvestValue ? reinvestPrice * reinvestedQty : 0;
-    const displayRealized = realized + reinvestedValue;
+    const displayRealized = realized;
     const main = document.createElement('div');
     main.className = 'analytics-main';
     const iconEl = createAssetIconElement(position);
@@ -3811,12 +3807,6 @@ function createClosedPositionRow(position){
         ? (displayRealized / denominator) * 100
         : (Number.isFinite(realizedPercent) ? realizedPercent : null);
     pnlEl.textContent = formatMoneyWithPercent(displayRealized, Number.isFinite(effectivePercent) ? effectivePercent : null, 1);
-    if(showPnlPercentages && hasReinvestValue){
-        const reinvestSpan = document.createElement('span');
-        reinvestSpan.className = 'reinvested-note';
-        reinvestSpan.textContent = ` · Reinvested ${money(reinvestedValue)}`;
-        pnlEl.appendChild(reinvestSpan);
-    }
     const statusEl = document.createElement('div');
     statusEl.className = 'muted';
     const stillOpen = Math.abs(Number(position.qty || 0)) > 1e-6;
