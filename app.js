@@ -484,41 +484,92 @@ async function fetchMassiveHistoricalSeries(position, startDate, endDate){
     const startKey = formatDateKey(startDate);
     const endKey = formatDateKey(endDate);
     if(!startKey || !endKey || startKey > endKey) return [];
-    try{
-        const baseUrl = (MASSIVE_API_BASE_URL || '').replace(/\/+$/,'');
-        const url = new URL(`${baseUrl || 'https://api.massive.com/v1'}/timeseries/eod`);
-        url.searchParams.set('ticker', symbol);
-        url.searchParams.set('start', startKey);
-        url.searchParams.set('end', endKey);
-        url.searchParams.set('interval', '1d');
-        const response = await fetch(url.toString(), {
-            headers: {
-                'Authorization': `Bearer ${MASSIVE_API_KEY}`,
-                'Accept': 'application/json'
-            }
-        });
-        if(!response.ok){
-            console.warn('Massive historical fetch failed', symbol, response.status);
-            return [];
+    const baseRaw = (MASSIVE_API_BASE_URL || '').trim();
+    const baseUrl = baseRaw ? baseRaw.replace(/\/+$/,'') : 'https://api.massive.com/v1';
+    const hasPredefinedEndpoint = /\/(timeseries|time-series|ohlcv|markets|crypto)\b/i.test(baseUrl);
+    const baseCandidates = hasPredefinedEndpoint ? [''] : [
+        `/crypto/tickers/${symbol}/ohlcv`,
+        `/crypto/tickers/${symbol}/ohlcv/eod`,
+        `/crypto/tickers/${symbol}/ohlcv/history`,
+        `/ticks/${symbol}/ohlcv`,
+        `/markets/crypto/${symbol}/ohlcv`,
+        `/markets/timeseries/eod`,
+        `/timeseries/eod`,
+        `/time-series/eod`
+    ];
+    const attempted = [];
+    for(const suffix of baseCandidates){
+        const endpoint = hasPredefinedEndpoint ? baseUrl : `${baseUrl}${suffix}`;
+        let url;
+        try{
+            url = new URL(endpoint);
+        }catch(error){
+            continue;
         }
-        const json = await response.json();
-        const rows = Array.isArray(json?.data) ? json.data
-            : Array.isArray(json?.results) ? json.results
-            : Array.isArray(json?.values) ? json.values
-            : Array.isArray(json) ? json
-            : [];
-        const points = rows.map(row=>{
-            const dateValue = row.date ?? row.Date ?? row.time ?? row.timestamp ?? row.period;
-            const closeValue = row.close ?? row.Close ?? row.c ?? row.close_price ?? row.adjusted_close ?? row.value;
-            const date = toValidDate(dateValue);
-            const price = Number(closeValue);
-            return createSeriesPoint(date ? date.getTime() : null, price);
-        }).filter(Boolean);
-        return points.sort((a,b)=> a.time - b.time);
-    }catch(error){
-        console.warn('Massive historical fetch exception', symbol, error);
-        return [];
+        if(!hasPredefinedEndpoint){
+            if(suffix.includes(symbol)){
+                url.searchParams.set('interval', '1d');
+                url.searchParams.set('start', startKey);
+                url.searchParams.set('end', endKey);
+            }else{
+                url.searchParams.set('ticker', symbol);
+                url.searchParams.set('interval', '1d');
+                url.searchParams.set('start', startKey);
+                url.searchParams.set('end', endKey);
+            }
+        }else{
+            url.searchParams.set('ticker', symbol);
+            url.searchParams.set('interval', '1d');
+            url.searchParams.set('start', startKey);
+            url.searchParams.set('end', endKey);
+        }
+        try{
+            const response = await fetch(url.toString(), {
+                headers: {
+                    'Authorization': `Bearer ${MASSIVE_API_KEY}`,
+                    'Accept': 'application/json'
+                }
+            });
+            attempted.push({ status: response.status, url: url.toString() });
+            if(!response.ok){
+                if(response.status === 401 || response.status === 403){
+                    console.warn('Massive historical fetch unauthorized/forbidden', symbol, response.status, url.toString());
+                    return [];
+                }
+                if(response.status === 404 || response.status === 400){
+                    continue;
+                }
+                continue;
+            }
+            const json = await response.json();
+            const rows = Array.isArray(json?.data) ? json.data
+                : Array.isArray(json?.results) ? json.results
+                : Array.isArray(json?.values) ? json.values
+                : Array.isArray(json?.timeseries) ? json.timeseries
+                : Array.isArray(json) ? json
+                : [];
+            if(!rows.length){
+                continue;
+            }
+            const points = rows.map(row=>{
+                const dateValue = row.date ?? row.Date ?? row.time ?? row.timestamp ?? row.period ?? row.start;
+                const closeValue = row.close ?? row.Close ?? row.c ?? row.close_price ?? row.adjusted_close ?? row.value ?? row.end_price;
+                const date = toValidDate(dateValue);
+                const price = Number(closeValue);
+                return createSeriesPoint(date ? date.getTime() : null, price);
+            }).filter(Boolean);
+            if(points.length){
+                return points.sort((a,b)=> a.time - b.time);
+            }
+        }catch(error){
+            console.warn('Massive historical fetch exception', symbol, error, url?.toString());
+        }
     }
+    if(attempted.length){
+        const last = attempted[attempted.length - 1];
+        console.warn('Massive historical fetch failed', symbol, last.status, last.url);
+    }
+    return [];
 }
 
 function toValidDate(value){
