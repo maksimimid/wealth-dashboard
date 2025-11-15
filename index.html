@@ -60,7 +60,7 @@
                 <button type="button" class="pnl-tab" data-pnl-range="1Y" role="tab" aria-selected="false" tabindex="-1">Yearly PNL</button>
                 <button type="button" class="pnl-tab" data-pnl-range="ALL" role="tab" aria-selected="false" tabindex="-1">All</button>
             </div>
-            <div class="big" id="total-pnl">$0.00</div>
+             <div class="big" id="total-pnl">$0.00</div>
             <div class="pnl-breakdown">
                 <div class="pnl-sub">
                     <span class="pnl-sub-label">Crypto</span>
@@ -75,16 +75,8 @@
                     <span class="pnl-sub-value" id="pnl-category-realestate">$0.00</span>
                 </div>
             </div>
-            <div class="best-performer-inline" id="best-performer-card">
-                <div class="best-performer-header">
-                    <div class="label">Best Performer</div>
-                </div>
-                <div class="best-performer-name" id="best-performer-name">&mdash;</div>
-                <div class="best-performer-metrics">
-                    <span class="best-performer-pnl" id="best-performer-pnl">$0.00</span>
-                    <span class="best-performer-change" id="best-performer-change">&mdash;</span>
-                </div>
-                <small class="best-performer-meta" id="best-performer-meta">Awaiting data&hellip;</small>
+            <div class="pnl-chart">
+                <canvas id="pnl-trend-chart" aria-label="P&L trend chart" role="img"></canvas>
             </div>
         </div>
         <div class="kpi" id="net-worth-card">
@@ -124,15 +116,21 @@
                     <div class="pos" style="margin-top:4px">Real estate and vehicle assets with recurring cashflow performance insight.</div>
                 </div>
             </div>
-            <div class="analytics-summary">
-                <div class="metric">
-                        <span class="label">Value (projected)</span>
-                    <span class="value" id="realestate-value">$0.00</span>
+            <div class="card-header-right">
+                <div class="analytics-summary">
+                    <div class="metric">
+                            <span class="label">Value (projected)</span>
+                        <span class="value" id="realestate-value">$0.00</span>
+                    </div>
+                    <div class="metric">
+                        <span class="label">Allocation</span>
+                        <span class="value" id="realestate-allocation">&mdash;</span>
+                    </div>
                 </div>
-                <div class="metric">
-                    <span class="label">Allocation</span>
-                    <span class="value" id="realestate-allocation">&mdash;</span>
-                </div>
+                <button type="button" class="card-info-button info-button" data-best-info-trigger="realEstate" aria-haspopup="dialog" aria-expanded="false">
+                    <span class="info-icon" aria-hidden="true">i</span>
+                    <span class="sr-only">Show real estate best performer</span>
+                </button>
             </div>
         </div>
         <details class="analytics-section chart-section" id="realestate-history" data-chart="realestateRentChart">
@@ -158,19 +156,25 @@
                 <strong>Crypto Portfolio Analytics</strong>
                 <div class="pos" style="margin-top:4px">Live exposure, performance, and allocation across digital assets.</div>
             </div>
-            <div class="analytics-summary">
-                <div class="metric">
-                    <span class="label">Market Value</span>
-                    <span class="value" id="crypto-market-value">$0.00</span>
+            <div class="analytics-header-right">
+                <div class="analytics-summary">
+                    <div class="metric">
+                        <span class="label">Market Value</span>
+                        <span class="value" id="crypto-market-value">$0.00</span>
+                    </div>
+                    <div class="metric">
+                        <span class="label">Unrealized P&amp;L</span>
+                        <span class="value" id="crypto-pnl">$0.00</span>
+                    </div>
+                    <div class="metric">
+                        <span class="label">Portfolio Share</span>
+                        <span class="value" id="crypto-allocation">?</span>
+                    </div>
                 </div>
-                <div class="metric">
-                    <span class="label">Unrealized P&amp;L</span>
-                    <span class="value" id="crypto-pnl">$0.00</span>
-                </div>
-                <div class="metric">
-                    <span class="label">Portfolio Share</span>
-                    <span class="value" id="crypto-allocation">?</span>
-                </div>
+                <button type="button" class="card-info-button info-button" data-best-info-trigger="crypto" aria-haspopup="dialog" aria-expanded="false">
+                    <span class="info-icon" aria-hidden="true">i</span>
+                    <span class="sr-only">Show crypto best performer</span>
+                </button>
             </div>
         </div>
         <details class="analytics-section chart-section" data-chart="cryptoPortfolioChart">
@@ -195,31 +199,39 @@
                 <strong>Stocks Portfolio Analytics</strong>
                 <div class="pos" style="margin-top:4px">Equity allocations, gains, and concentration across public markets.</div>
             </div>
-            <div class="analytics-summary">
-                <div class="metric">
-                    <span class="label">Market Value</span>
-                    <span class="value" id="stock-market-value">$0.00</span>
+            <div class="analytics-header-right">
+                <div class="analytics-summary">
+                    <div class="metric">
+                        <span class="label">Market Value</span>
+                        <span class="value" id="stock-market-value">$0.00</span>
+                    </div>
+                    <div class="metric">
+                        <span class="label">Unrealized P&amp;L</span>
+                        <span class="value" id="stock-pnl">$0.00</span>
+                    </div>
+                    <div class="metric">
+                        <span class="label">Portfolio Share</span>
+                        <span class="value" id="stock-allocation">?</span>
+                    </div>
                 </div>
-                <div class="metric">
-                    <span class="label">Unrealized P&amp;L</span>
-                    <span class="value" id="stock-pnl">$0.00</span>
-                </div>
-                <div class="metric">
-                    <span class="label">Portfolio Share</span>
-                    <span class="value" id="stock-allocation">?</span>
+                <div class="analytics-header-actions">
+                    <div class="market-status" id="market-status">
+                        <span class="market-dot" id="market-status-dot"></span>
+                        <div class="market-status-text">
+                            <span id="market-status-text">Checking market hours…</span>
+                            <div class="market-hours">
+                                <span id="market-hours-us"></span>
+                                <span id="market-hours-local"></span>
+                                <span id="market-next-open"></span>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="button" class="card-info-button info-button" data-best-info-trigger="stock" aria-haspopup="dialog" aria-expanded="false">
+                        <span class="info-icon" aria-hidden="true">i</span>
+                        <span class="sr-only">Show stock best performer</span>
+                    </button>
                 </div>
             </div>
-          <div class="market-status" id="market-status">
-              <span class="market-dot" id="market-status-dot"></span>
-              <div class="market-status-text">
-                  <span id="market-status-text">Checking market hours…</span>
-                  <div class="market-hours">
-                      <span id="market-hours-us"></span>
-                      <span id="market-hours-local"></span>
-                      <span id="market-next-open"></span>
-                  </div>
-              </div>
-          </div>
         </div>
         <details class="analytics-section chart-section" data-chart="stockPortfolioChart">
             <summary>
@@ -267,6 +279,27 @@
         <div class="modal-lots hidden" id="transaction-lots"></div>
         <div class="modal-toolbar modal-toolbar-bottom">
             <button type="button" id="view-lots-btn" class="btn btn-secondary">View lots</button>
+        </div>
+    </div>
+</div>
+
+<div id="best-info-popover" class="best-info-popover hidden" role="dialog" aria-modal="false" aria-labelledby="best-info-title">
+    <div class="best-info-content" tabindex="-1">
+        <div class="best-info-header">
+            <div class="best-info-title-group">
+                <span class="best-info-title" id="best-info-title">Best Performer</span>
+                <span class="best-info-range" id="best-info-range"></span>
+            </div>
+            <span class="best-info-category" id="best-info-category"></span>
+        </div>
+        <div class="best-info-body">
+            <div class="best-info-name" id="best-info-name">&mdash;</div>
+            <div class="best-info-metrics">
+                <span class="best-info-pnl" id="best-info-pnl">$0.00</span>
+                <span class="best-info-change" id="best-info-change">&mdash;</span>
+            </div>
+            <div class="best-info-meta" id="best-info-meta">Awaiting data&hellip;</div>
+            <div class="best-info-extra" id="best-info-extra"></div>
         </div>
     </div>
 </div>
