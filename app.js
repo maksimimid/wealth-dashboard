@@ -3,7 +3,9 @@ const DEFAULT_CONFIG = {
     FINNHUB_KEY: '',
     AIRTABLE_API_KEY: '',
     AIRTABLE_BASE_ID: 'appSxixo1i122KyBS',
-    AIRTABLE_TABLE_NAME: 'Operations'
+    AIRTABLE_TABLE_NAME: 'Operations',
+    MASSIVE_API_KEY: '',
+    MASSIVE_API_BASE_URL: 'https://api.massive.com/v1'
 };
 
 const RUNTIME_CONFIG = (typeof window !== 'undefined' && window.DASHBOARD_CONFIG) ? window.DASHBOARD_CONFIG : {};
@@ -18,6 +20,9 @@ const AIRTABLE_API_KEY = RUNTIME_CONFIG.AIRTABLE_API_KEY || DEFAULT_CONFIG.AIRTA
 const AIRTABLE_BASE_ID = RUNTIME_CONFIG.AIRTABLE_BASE_ID || DEFAULT_CONFIG.AIRTABLE_BASE_ID;
 const AIRTABLE_TABLE_NAME = RUNTIME_CONFIG.AIRTABLE_TABLE_NAME || DEFAULT_CONFIG.AIRTABLE_TABLE_NAME;
 const AIRTABLE_URL = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${encodeURIComponent(AIRTABLE_TABLE_NAME)}`;
+
+const MASSIVE_API_KEY = RUNTIME_CONFIG.MASSIVE_API_KEY || DEFAULT_CONFIG.MASSIVE_API_KEY;
+const MASSIVE_API_BASE_URL = RUNTIME_CONFIG.MASSIVE_API_BASE_URL || DEFAULT_CONFIG.MASSIVE_API_BASE_URL;
 
 // ----------------- STATE --------------------
 let positions = [];
@@ -52,6 +57,13 @@ const RANGE_LABELS = PNL_RANGE_CONFIG.reduce((acc, item)=>{
     acc[item.key] = item.label;
     return acc;
 }, {});
+const PNL_CHART_TIME_CONFIG = {
+    '1D': { unit: 'hour', displayFormats: { hour: 'ha' }, maxTicks: 6 },
+    '1W': { unit: 'day', displayFormats: { day: 'MMM d' }, maxTicks: 7 },
+    '1M': { unit: 'day', displayFormats: { day: 'MMM d' }, maxTicks: 8 },
+    '1Y': { unit: 'month', displayFormats: { month: 'MMM' }, maxTicks: 6 },
+    'ALL': { unit: 'month', displayFormats: { month: 'MMM yyyy' }, maxTicks: 6 }
+};
 let pnlRange = 'ALL';
 let pnlRangeTabsContainer = null;
 const pnlRangeButtons = new Map();
@@ -59,12 +71,18 @@ let pnlCardLabelElement = null;
 let pnlCardLabelBase = 'Total P&L';
 const yahooQuoteCache = new Map();
 const previousKpiValues = { totalPnl: null, netWorth: null, netContribution: null, cashAvailable: null, pnlCrypto: null, pnlStock: null, pnlRealEstate: null };
-const previousBestPerformer = { id: null, pnl: null, change: null };
+const bestPerformerCache = { crypto: null, stock: null, realEstate: null };
+let bestInfoPopover = null;
+let bestInfoPopoverElements = null;
+let activeBestInfoCategory = null;
+let activeBestInfoTrigger = null;
+let bestInfoListenersAttached = false;
 let assetYearSeries = { labels: [], datasets: [] };
 let assetYearSeriesDirty = true;
 const assetColorCache = new Map();
 let realEstateRentSeries = { labels: [], datasets: [] };
 let realEstateRentSeriesDirty = true;
+let lastRealEstateAnalytics = null;
 const realEstateRentFilters = new Map();
 const realEstateGroupState = { active: true, passive: false };
 let transactionModal = null;
@@ -113,6 +131,7 @@ const categorySectionState = {
     crypto: { open: true, closed: false },
     stock: { open: true, closed: false }
 };
+let pnlTrendChart = null;
 let marketStatusTimer = null;
 let marketStatusVisibilityBound = false;
 let netWorthSparklineChart = null;
@@ -202,6 +221,515 @@ const CRYPTO_ICON_PROVIDERS = [
 ];
 const assetIconSourceCache = new Map();
 const transactionPriceCache = new Map();
+const localHistoricalCache = new Map();
+const LOCAL_HISTORIC_DIR = 'assets/historic';
+const LOCAL_HISTORIC_PREFIX = 'historic-';
+const LOCAL_HISTORIC_SUFFIX = '-usd.tsv';
+const DEFAULT_HISTORIC_HEADER = '"Time"\t"Close"';
+const HISTORIC_SYMBOL_SUFFIXES = ['USDT','USDC','USD'];
+const MS_IN_DAY = 24 * 60 * 60 * 1000;
+
+function sanitizePriceSeries(series){
+    if(!Array.isArray(series)) return [];
+    const byTime = new Map();
+    series.forEach(point=>{
+        if(!point) return;
+        let time = point.time ?? point.x ?? point.t ?? point.timestamp ?? null;
+        if(time instanceof Date){
+            time = time.getTime();
+        }else if(typeof time === 'string' && time){
+            const parsed = Date.parse(time);
+            time = Number.isNaN(parsed) ? Number(time) : parsed;
+        }else if(typeof time !== 'number'){
+            time = Number(time);
+        }
+        if(!Number.isFinite(time)) return;
+        const candidates = [
+            point.price,
+            point.y,
+            point.c,
+            point.close,
+            point.value
+        ];
+        let price = null;
+        for(const candidate of candidates){
+            const num = Number(candidate);
+            if(Number.isFinite(num) && num >= 0){
+                price = num;
+                break;
+            }
+        }
+        if(price === null) return;
+        byTime.set(time, price);
+    });
+    const entries = Array.from(byTime.entries()).sort((a, b)=> a[0] - b[0]);
+    return entries.map(([time, price])=> ({
+        x: time,
+        y: price,
+        time,
+        price
+    }));
+}
+
+function formatDateKey(value){
+    const normalized = toValidDate(value);
+    if(!normalized) return null;
+    return normalized.toISOString().slice(0, 10);
+}
+
+function addDays(value, days){
+    const normalized = toValidDate(value);
+    if(!normalized || !Number.isFinite(days)) return null;
+    return new Date(normalized.getTime() + days * MS_IN_DAY);
+}
+
+function getCryptoBaseTicker(position){
+    if(!position) return null;
+    let raw = position.Symbol || position.displayName || position.Name || position.id || '';
+    raw = String(raw).toUpperCase();
+    if(raw.includes(':')){
+        raw = raw.split(':').pop();
+    }
+    raw = raw.replace(/[^A-Z0-9]/g, '');
+    if(!raw){
+        return null;
+    }
+    const suffix = HISTORIC_SYMBOL_SUFFIXES.find(item => raw.endsWith(item));
+    if(suffix){
+        const trimmed = raw.slice(0, raw.length - suffix.length);
+        if(trimmed) raw = trimmed;
+    }
+    return raw || null;
+}
+
+function getLocalHistoricCacheKey(position){
+    const typeKey = String(position?.type || position?.Category || '').toLowerCase();
+    if(typeKey !== 'crypto') return null;
+    const base = getCryptoBaseTicker(position);
+    if(!base) return null;
+    return base.toLowerCase();
+}
+
+function buildHistoricFilePath(cacheKey){
+    if(!cacheKey) return null;
+    return `${LOCAL_HISTORIC_DIR}/${LOCAL_HISTORIC_PREFIX}${cacheKey}${LOCAL_HISTORIC_SUFFIX}`;
+}
+
+function buildHistoricHeader(position){
+    const base = getCryptoBaseTicker(position);
+    if(!base) return DEFAULT_HISTORIC_HEADER;
+    return `"Time"\t"${base.toUpperCase()} / USD Close"`;
+}
+
+function parseLocalHistoricalTsv(text){
+    if(typeof text !== 'string') return null;
+    const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    if(!lines.length) return null;
+    const header = lines.shift();
+    const series = [];
+    lines.forEach(line=>{
+        if(!line) return;
+        const parts = line.split(/\t/);
+        if(parts.length < 2) return;
+        const dateStr = parts[0].replace(/"/g, '').trim();
+        const priceStr = parts[1].replace(/"/g, '').replace(/,/g,'').trim();
+        const date = toValidDate(dateStr);
+        const price = Number(priceStr);
+        if(!date || !Number.isFinite(price)) return;
+        const point = createSeriesPoint(date.getTime(), price);
+        if(point){
+            series.push(point);
+        }
+    });
+    if(!series.length) return null;
+    series.sort((a,b)=> a.time - b.time);
+    const lastDate = new Date(series[series.length - 1].time);
+    return {
+        header: header || DEFAULT_HISTORIC_HEADER,
+        series,
+        lastDate
+    };
+}
+
+async function loadLocalHistoricalSeries(position){
+    const cacheKey = getLocalHistoricCacheKey(position);
+    if(!cacheKey) return null;
+    if(localHistoricalCache.has(cacheKey)){
+        return localHistoricalCache.get(cacheKey);
+    }
+    const relativePath = buildHistoricFilePath(cacheKey);
+    if(!relativePath) return null;
+    let text = null;
+    if(typeof window === 'undefined'){
+        try{
+            const fs = await import('fs/promises');
+            const pathModule = await import('path');
+            const absolutePath = pathModule.resolve(process.cwd(), relativePath);
+            text = await fs.readFile(absolutePath, 'utf8');
+        }catch(error){
+            localHistoricalCache.set(cacheKey, null);
+            return null;
+        }
+    }else{
+        try{
+            const response = await fetch(relativePath, { cache: 'no-cache' });
+            if(!response.ok){
+                localHistoricalCache.set(cacheKey, null);
+                return null;
+            }
+            text = await response.text();
+        }catch(error){
+            localHistoricalCache.set(cacheKey, null);
+            return null;
+        }
+    }
+    const parsed = parseLocalHistoricalTsv(text);
+    if(!parsed){
+        localHistoricalCache.set(cacheKey, null);
+        return null;
+    }
+    const info = {
+        cacheKey,
+        path: relativePath,
+        header: parsed.header,
+        series: parsed.series,
+        lastDate: parsed.lastDate,
+        lastChecked: null
+    };
+    localHistoricalCache.set(cacheKey, info);
+    return info;
+}
+
+function needsHistoricalUpdate(lastDate){
+    if(!(lastDate instanceof Date) || Number.isNaN(lastDate.getTime())) return true;
+    const todayKey = formatDateKey(new Date());
+    const lastKey = formatDateKey(lastDate);
+    if(!todayKey || !lastKey) return true;
+    return lastKey < todayKey;
+}
+
+function mergeHistoricalSeries(existingSeries, newSeries){
+    const merged = new Map();
+    const ingest = point=>{
+        if(!point) return;
+        let time = point.time ?? point.x ?? point.timestamp ?? null;
+        if(!Number.isFinite(time)){
+            const normalisedDate = toValidDate(point.date ?? point.Date ?? point.Time);
+            if(normalisedDate){
+                time = normalisedDate.getTime();
+            }
+        }
+        const priceCandidates = [
+            point.price,
+            point.y,
+            point.close,
+            point.c,
+            point.value,
+            point.Close,
+            point.close_price,
+            point.adjusted_close
+        ];
+        let price = null;
+        for(const candidate of priceCandidates){
+            const num = Number(candidate);
+            if(Number.isFinite(num)){
+                price = num;
+                break;
+            }
+        }
+        if(!Number.isFinite(time) || price === null) return;
+        const normalized = createSeriesPoint(time, price);
+        if(normalized){
+            merged.set(normalized.time, normalized);
+        }
+    };
+    (existingSeries || []).forEach(ingest);
+    (newSeries || []).forEach(ingest);
+    return Array.from(merged.values()).sort((a,b)=> a.time - b.time);
+}
+
+async function writeHistoricalSeriesFile(relativePath, header, series){
+    if(typeof window !== 'undefined') return false;
+    try{
+        const fs = await import('fs/promises');
+        const pathModule = await import('path');
+        const absolutePath = pathModule.resolve(process.cwd(), relativePath);
+        const lines = [header || DEFAULT_HISTORIC_HEADER];
+        (series || []).forEach(point=>{
+            const date = toValidDate(point.time ?? point.x ?? point.timestamp ?? point.date);
+            const price = Number(point.price ?? point.y ?? point.close ?? point.c ?? point.value);
+            if(!date || !Number.isFinite(price)) return;
+            const dateKey = formatDateKey(date);
+            if(!dateKey) return;
+            lines.push(`"${dateKey}"\t${price}`);
+        });
+        await fs.writeFile(absolutePath, lines.join('\n'), 'utf8');
+        return true;
+    }catch(error){
+        console.warn('Failed to persist historical TSV', relativePath, error);
+        return false;
+    }
+}
+
+function mapMassiveSymbol(position){
+    const base = getCryptoBaseTicker(position);
+    if(!base) return null;
+    return `${base.toUpperCase()}-USD`;
+}
+
+async function fetchMassiveHistoricalSeries(position, startDate, endDate){
+    if(!MASSIVE_API_KEY) return [];
+    const symbol = mapMassiveSymbol(position);
+    if(!symbol) return [];
+    const startKey = formatDateKey(startDate);
+    const endKey = formatDateKey(endDate);
+    if(!startKey || !endKey || startKey > endKey) return [];
+    const baseRaw = (MASSIVE_API_BASE_URL || '').trim();
+    const baseUrl = baseRaw ? baseRaw.replace(/\/+$/,'') : 'https://api.massive.com/v1';
+    const hasPredefinedEndpoint = /\/(timeseries|time-series|ohlcv|markets|crypto)\b/i.test(baseUrl);
+    const baseCandidates = hasPredefinedEndpoint ? [''] : [
+        `/crypto/tickers/${symbol}/ohlcv`,
+        `/crypto/tickers/${symbol}/ohlcv/eod`,
+        `/crypto/tickers/${symbol}/ohlcv/history`,
+        `/ticks/${symbol}/ohlcv`,
+        `/markets/crypto/${symbol}/ohlcv`,
+        `/markets/timeseries/eod`,
+        `/timeseries/eod`,
+        `/time-series/eod`
+    ];
+    const attempted = [];
+    for(const suffix of baseCandidates){
+        const endpoint = hasPredefinedEndpoint ? baseUrl : `${baseUrl}${suffix}`;
+        let url;
+        try{
+            url = new URL(endpoint);
+        }catch(error){
+            continue;
+        }
+        if(!hasPredefinedEndpoint){
+            if(suffix.includes(symbol)){
+                url.searchParams.set('interval', '1d');
+                url.searchParams.set('start', startKey);
+                url.searchParams.set('end', endKey);
+            }else{
+                url.searchParams.set('ticker', symbol);
+                url.searchParams.set('interval', '1d');
+                url.searchParams.set('start', startKey);
+                url.searchParams.set('end', endKey);
+            }
+        }else{
+            url.searchParams.set('ticker', symbol);
+            url.searchParams.set('interval', '1d');
+            url.searchParams.set('start', startKey);
+            url.searchParams.set('end', endKey);
+        }
+        try{
+            const response = await fetch(url.toString(), {
+                headers: {
+                    'Authorization': `Bearer ${MASSIVE_API_KEY}`,
+                    'Accept': 'application/json'
+                }
+            });
+            attempted.push({ status: response.status, url: url.toString() });
+            if(!response.ok){
+                if(response.status === 401 || response.status === 403){
+                    console.warn('Massive historical fetch unauthorized/forbidden', symbol, response.status, url.toString());
+                    return [];
+                }
+                if(response.status === 404 || response.status === 400){
+                    continue;
+                }
+                continue;
+            }
+            const json = await response.json();
+            const rows = Array.isArray(json?.data) ? json.data
+                : Array.isArray(json?.results) ? json.results
+                : Array.isArray(json?.values) ? json.values
+                : Array.isArray(json?.timeseries) ? json.timeseries
+                : Array.isArray(json) ? json
+                : [];
+            if(!rows.length){
+                continue;
+            }
+            const points = rows.map(row=>{
+                const dateValue = row.date ?? row.Date ?? row.time ?? row.timestamp ?? row.period ?? row.start;
+                const closeValue = row.close ?? row.Close ?? row.c ?? row.close_price ?? row.adjusted_close ?? row.value ?? row.end_price;
+                const date = toValidDate(dateValue);
+                const price = Number(closeValue);
+                return createSeriesPoint(date ? date.getTime() : null, price);
+            }).filter(Boolean);
+            if(points.length){
+                return points.sort((a,b)=> a.time - b.time);
+            }
+        }catch(error){
+            console.warn('Massive historical fetch exception', symbol, error, url?.toString());
+        }
+    }
+    if(attempted.length){
+        const last = attempted[attempted.length - 1];
+        console.warn('Massive historical fetch failed', symbol, last.status, last.url);
+    }
+    return [];
+}
+
+function toValidDate(value){
+    if(!value && value !== 0) return null;
+    if(value instanceof Date){
+        return Number.isNaN(value.getTime()) ? null : value;
+    }
+    if(typeof value === 'number' && Number.isFinite(value)){
+        const dateFromNumber = new Date(value);
+        return Number.isNaN(dateFromNumber.getTime()) ? null : dateFromNumber;
+    }
+    if(typeof value === 'string'){
+        const parsedIso = Date.parse(value);
+        if(!Number.isNaN(parsedIso)){
+            const parsedDate = new Date(parsedIso);
+            return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+        }
+        const numeric = Number(value);
+        if(Number.isFinite(numeric)){
+            const dateFromNumeric = new Date(numeric);
+            return Number.isNaN(dateFromNumeric.getTime()) ? null : dateFromNumeric;
+        }
+    }
+    const fallback = new Date(value);
+    return Number.isNaN(fallback.getTime()) ? null : fallback;
+}
+
+function getOperationDate(operation){
+    if(!operation) return null;
+    const candidates = [
+        operation.date,
+        operation.rawDate,
+        operation.Date,
+        operation.timestamp
+    ];
+    for(const candidate of candidates){
+        const date = toValidDate(candidate);
+        if(date) return date;
+    }
+    return null;
+}
+
+function getFirstPurchaseTime(position){
+    if(!position) return null;
+    const operations = Array.isArray(position.operations) ? position.operations : [];
+    let earliest = null;
+    operations.forEach(op=>{
+        const type = String(op.type || '').toLowerCase();
+        if(type !== 'purchasesell') return;
+        const amount = Number(op.amount || 0);
+        if(!(amount > 0)) return;
+        const opDate = getOperationDate(op);
+        if(!opDate) return;
+        if(!earliest || opDate < earliest){
+            earliest = opDate;
+        }
+    });
+    if(!earliest && Array.isArray(position.lots)){
+        position.lots.forEach(lot=>{
+            const lotDate = toValidDate(lot?.date);
+            if(!lotDate) return;
+            if(!earliest || lotDate < earliest){
+                earliest = lotDate;
+            }
+        });
+    }
+    return earliest ? earliest.getTime() : null;
+}
+
+function createSeriesPoint(time, price){
+    const ts = Number(time);
+    const val = Number(price);
+    if(!Number.isFinite(ts) || !Number.isFinite(val)){
+        return null;
+    }
+    return { x: ts, y: val, time: ts, price: val };
+}
+
+function preparePriceSeries(series, firstPurchaseTime, position){
+    if(!Array.isArray(series) || !series.length){
+        return [];
+    }
+    const base = series.map(point=>{
+        const time = point?.time ?? point?.x ?? point?.t ?? point?.timestamp;
+        const price = point?.price ?? point?.y ?? point?.value ?? point?.c ?? point?.close;
+        return createSeriesPoint(time, price);
+    }).filter(Boolean);
+    if(!base.length){
+        return [];
+    }
+    base.sort((a, b)=> a.time - b.time);
+    let result = base.slice();
+    if(Number.isFinite(firstPurchaseTime)){
+        const firstIndex = result.findIndex(point => point.time >= firstPurchaseTime);
+        if(firstIndex === -1){
+            const fallbackPrice = Number(position?.displayPrice || position?.currentPrice || position?.lastKnownPrice || position?.avgPrice || result[result.length - 1].price);
+            if(Number.isFinite(fallbackPrice)){
+                result.push(createSeriesPoint(firstPurchaseTime, fallbackPrice));
+                result.sort((a, b)=> a.time - b.time);
+            }
+        }else{
+            result = result.slice(firstIndex);
+            const firstPoint = result[0];
+            if(firstPoint){
+                if(firstPoint.time > firstPurchaseTime){
+                    result.unshift(createSeriesPoint(firstPurchaseTime, firstPoint.price));
+                }else if(firstPoint.time < firstPurchaseTime){
+                    result[0] = createSeriesPoint(firstPurchaseTime, firstPoint.price);
+                }
+            }
+        }
+    }
+    const nowTs = Date.now();
+    if(result.length){
+        const lastPoint = result[result.length - 1];
+        const fallbackPrice = Number(position?.displayPrice || position?.currentPrice || position?.lastKnownPrice || position?.avgPrice || lastPoint.price);
+        if(Number.isFinite(fallbackPrice)){
+            if(nowTs - lastPoint.time > 30 * 60 * 1000){
+                result.push(createSeriesPoint(nowTs, fallbackPrice));
+            }else if(nowTs > lastPoint.time){
+                result[result.length - 1] = createSeriesPoint(nowTs, fallbackPrice);
+            }else if(Math.abs(nowTs - lastPoint.time) <= 30 * 60 * 1000 && !Number.isFinite(lastPoint.price)){
+                result[result.length - 1] = createSeriesPoint(nowTs, fallbackPrice);
+            }
+        }
+    }
+    const dedup = new Map();
+    result.forEach(point=>{
+        if(point){
+            dedup.set(point.time, point);
+        }
+    });
+    return Array.from(dedup.values()).sort((a, b)=> a.time - b.time);
+}
+
+function getPriceHistoryForPosition(position){
+    if(!position) return [];
+    if(Array.isArray(position.priceHistory) && position.priceHistory.length){
+        return position.priceHistory;
+    }
+    const typeKey = String(position.type || '').toLowerCase();
+    const finnhubSymbol = position.finnhubSymbol || mapFinnhubSymbol(position.Symbol || position.displayName || position.Name, position.type, false);
+    const coinGeckoId = typeKey === 'crypto' ? mapCoinGeckoId(position) : null;
+    const yahooSymbol = mapYahooSymbol(position);
+    const cacheKey = `${finnhubSymbol || ''}|${coinGeckoId || yahooSymbol || ''}|${typeKey}`;
+    const firstPurchaseTime = getFirstPurchaseTime(position);
+    if(transactionPriceCache.has(cacheKey)){
+        const cached = transactionPriceCache.get(cacheKey);
+        const baseSeries = Array.isArray(cached) && cached.length && typeof cached[0]?.time === 'number'
+            ? cached
+            : sanitizePriceSeries(cached);
+        const prepared = preparePriceSeries(baseSeries, firstPurchaseTime, position);
+        if(prepared.length){
+            position.priceHistory = prepared;
+            transactionPriceCache.set(cacheKey, prepared);
+            return prepared;
+        }
+    }
+    return [];
+}
 let netContributionTotal = 0;
 let isRangeUpdateInFlight = false;
 const TRANSACTION_CHART_COLORS = {
@@ -470,6 +998,17 @@ function formatQty(qty){
     return qty.toFixed(4).replace(/0+$/,'').replace(/\.$/,'');
 }
 
+function startOfDay(value){
+    const date = value instanceof Date ? new Date(value) : new Date(value);
+    if(Number.isNaN(date.getTime())){
+        const fallback = new Date();
+        fallback.setHours(0, 0, 0, 0);
+        return fallback;
+    }
+    date.setHours(0, 0, 0, 0);
+    return date;
+}
+
 function formatCompactMoney(value){
     if(value === null || value === undefined || !Number.isFinite(value)){
         return '$0';
@@ -485,6 +1024,238 @@ function formatCompactMoney(value){
     if(abs >= 1e6) return format(abs / 1e6, 'm');
     if(abs >= 1e3) return format(abs / 1e3, 'k');
     return `${sign}$${Math.round(abs).toString()}`;
+}
+
+function getRangeStartDate(range){
+    if(range === 'ALL') return null;
+    const now = new Date();
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    switch(range){
+        case '1D':
+            start.setDate(start.getDate() - 1);
+            break;
+        case '1W':
+            start.setDate(start.getDate() - 7);
+            break;
+        case '1M':
+            start.setMonth(start.getMonth() - 1);
+            break;
+        case '1Y':
+            start.setFullYear(start.getFullYear() - 1);
+            break;
+        default:
+            return null;
+    }
+    return start;
+}
+
+function getCategoryDisplayName(categoryKey){
+    switch(categoryKey){
+        case 'crypto':
+            return 'Crypto';
+        case 'stock':
+            return 'Stocks';
+        case 'realEstate':
+            return 'Real Estate';
+        default:
+            if(!categoryKey) return 'Assets';
+            const spaced = String(categoryKey)
+                .replace(/([A-Z])/g, ' $1')
+                .replace(/[_-]+/g, ' ')
+                .trim();
+            return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : 'Assets';
+    }
+}
+
+function getRealEstateRangePnl(position, range){
+    if(!position) return 0;
+    if(range === 'ALL'){
+        if(!position.rentRangeTotals){
+            position.rentRangeTotals = {};
+        }
+        const total = Number(position.rentRealized || 0) || 0;
+        position.rentRangeTotals.ALL = total;
+        return total;
+    }
+    if(!position.rentRangeTotals){
+        position.rentRangeTotals = {};
+    }
+    if(position.rentRangeTotals[range] !== undefined){
+        return position.rentRangeTotals[range];
+    }
+    const rangeStart = getRangeStartDate(range);
+    if(!(rangeStart instanceof Date)){
+        const total = Number(position.rentRealized || 0) || 0;
+        position.rentRangeTotals[range] = total;
+        return total;
+    }
+    const operations = Array.isArray(position.operations) ? position.operations : [];
+    const total = operations.reduce((sum, op)=>{
+        if(!op || !op.isRent) return sum;
+        const opDate = op.date instanceof Date ? op.date : (op.rawDate ? new Date(op.rawDate) : null);
+        if(!(opDate instanceof Date) || Number.isNaN(opDate.getTime())) return sum;
+        if(opDate < rangeStart) return sum;
+        const amount = Number(op.spent || 0);
+        if(!Number.isFinite(amount)) return sum;
+        return sum + (amount < 0 ? -amount : amount);
+    }, 0);
+    position.rentRangeTotals[range] = total;
+    return total;
+}
+
+function computeCategoryBest(categoryKey, context = {}){
+    const label = getCategoryDisplayName(categoryKey);
+    const normalizedKey = categoryKey === 'realEstate' ? 'real estate' : categoryKey;
+    const eligiblePositions = positions.filter(position=>{
+        if(!position) return false;
+        const type = (position.type || '').toLowerCase();
+        if(categoryKey === 'realEstate'){
+            return type === 'real estate';
+        }
+        return type === normalizedKey;
+    }).filter(position=>{
+        if(categoryKey === 'realEstate'){
+            return true;
+        }
+        const qty = Number(position.qty || 0);
+        const marketValue = Number(position.marketValue || 0);
+        return Math.abs(qty) > 1e-6 || Math.abs(marketValue) > 1e-2;
+    });
+    if(!eligiblePositions.length){
+        return null;
+    }
+    let best = null;
+    eligiblePositions.forEach(position=>{
+        let pnlValue;
+        if(categoryKey === 'realEstate'){
+            pnlValue = getRealEstateRangePnl(position, pnlRange);
+        }else{
+            const raw = position.rangePnl ?? position.pnl;
+            pnlValue = Number(raw);
+        }
+        if(!Number.isFinite(pnlValue)) return;
+        if(best === null || pnlValue > best.pnl){
+            best = { position, pnl: pnlValue };
+        }
+    });
+    if(!best){
+        return null;
+    }
+    const position = best.position;
+    const displayName = position.displayName || position.Symbol || position.Name || position.id || '—';
+    const priceCandidates = [
+        position.displayPrice,
+        position.currentPrice,
+        position.lastKnownPrice,
+        position.lastPurchasePrice,
+        position.avgPrice
+    ].map(value=> Number(value)).filter(value=> Number.isFinite(value));
+    const prioritizedPrice = priceCandidates.find(value => Math.abs(value) > 1e-9);
+    const fallbackPrice = Number(position.displayPrice ?? position.currentPrice ?? position.lastKnownPrice ?? position.avgPrice ?? position.lastPurchasePrice ?? 0) || 0;
+    const price = Number.isFinite(prioritizedPrice) ? prioritizedPrice : fallbackPrice;
+    const qty = Number(position.qty || 0);
+    const marketValue = Number(position.marketValue || 0);
+    let changePct = Number(position.rangeChangePct);
+    if(!Number.isFinite(changePct)){
+        changePct = Number(position.changePct);
+    }
+    const rangeLabel = RANGE_LABELS[pnlRange] || pnlRange;
+    const rangeStart = getRangeStartDate(pnlRange);
+    const result = {
+        id: position.id,
+        label,
+        position,
+        displayName,
+        pnl: best.pnl,
+        changePct: Number.isFinite(changePct) ? changePct : null,
+        rangeLabel,
+        rangeStart,
+        meta: '',
+        extraItems: []
+    };
+    if(categoryKey === 'realEstate'){
+        const analytics = context.realEstateAnalytics;
+        const stat = analytics && Array.isArray(analytics.rows)
+            ? analytics.rows.find(row => row.positionRef === position)
+            : null;
+        const rentTotal = stat ? Number(stat.rentCollected || 0) : Number(position.rentRealized || 0);
+        const metaParts = [];
+        const utilization = stat && Number.isFinite(stat.utilization)
+            ? Math.max(0, Math.min(Number(stat.utilization), 100))
+            : null;
+        if(stat && stat.category){
+            metaParts.push(`Category ${stat.category}`);
+        }else if(position.type){
+            metaParts.push(position.type);
+        }
+        if(utilization !== null){
+            metaParts.push(`Utilization ${utilization.toFixed(1)}%`);
+        }
+        if(metaParts.length){
+            result.meta = metaParts.join(' · ');
+        }else{
+            result.meta = `Rent total ${money(rentTotal)}`;
+        }
+        const extraItems = [];
+        extraItems.push({ label: 'Rent total', value: money(rentTotal) });
+        if(stat){
+            extraItems.push({ label: 'Rent YTD', value: money(stat.rentYtd) });
+            if(Number.isFinite(stat.avgMonthlyRent)){
+                extraItems.push({ label: 'Avg rent/mo', value: money(stat.avgMonthlyRent) });
+            }
+            extraItems.push({ label: 'Projected value', value: money(stat.projectedValue) });
+            if(Number.isFinite(stat.netOutstanding)){
+                extraItems.push({ label: 'Outstanding', value: money(stat.netOutstanding) });
+            }
+            if(Number.isFinite(stat.payoffMonths)){
+                extraItems.push({ label: 'Payoff ETA', value: formatDurationFromMonths(stat.payoffMonths) });
+            }
+        }else{
+            extraItems.push({ label: 'Rent realized', value: money(position.rentRealized || 0) });
+        }
+        const totalMarketValue = Number(context.categoryTotal || 0);
+        if(Number.isFinite(totalMarketValue) && totalMarketValue > 0 && Number.isFinite(marketValue) && marketValue > 0){
+            const share = (marketValue / totalMarketValue) * 100;
+            extraItems.push({ label: 'Category share', value: `${share.toFixed(1)}%` });
+        }
+        result.extraItems = extraItems;
+        return result;
+    }
+    const metaParts = [`Qty ${formatQty(qty)}`, `Price ${money(price)}`];
+    result.meta = metaParts.join(' · ');
+    const extraItems = [
+        { label: 'Market value', value: money(marketValue) }
+    ];
+    const totalCategoryValue = Number(context.categoryTotal || 0);
+    if(Number.isFinite(totalCategoryValue) && totalCategoryValue > 0 && Number.isFinite(marketValue) && marketValue > 0){
+        const share = (marketValue / totalCategoryValue) * 100;
+        extraItems.push({ label: 'Category share', value: `${share.toFixed(1)}%` });
+    }
+    const realized = Number(position.realized || 0);
+    if(Number.isFinite(realized) && Math.abs(realized) > 1e-2){
+        extraItems.push({ label: 'Realized P&L', value: money(realized) });
+    }
+    const reinvestedValue = Number(position.reinvestedValue || 0);
+    if(Number.isFinite(reinvestedValue) && Math.abs(reinvestedValue) > 1e-2){
+        extraItems.push({ label: 'Reinvested', value: money(reinvestedValue) });
+    }
+    result.extraItems = extraItems;
+    return result;
+}
+
+function updateBestPerformerCache(realEstateAnalytics){
+    const totals = {
+        crypto: positions.filter(p => (p.type || '').toLowerCase() === 'crypto').reduce((sum, p)=> sum + Number(p.marketValue || 0), 0),
+        stock: positions.filter(p => (p.type || '').toLowerCase() === 'stock').reduce((sum, p)=> sum + Number(p.marketValue || 0), 0),
+        realEstate: positions.filter(p => (p.type || '').toLowerCase() === 'real estate').reduce((sum, p)=> sum + Number(p.marketValue || 0), 0)
+    };
+    bestPerformerCache.crypto = computeCategoryBest('crypto', { categoryTotal: totals.crypto });
+    bestPerformerCache.stock = computeCategoryBest('stock', { categoryTotal: totals.stock });
+    bestPerformerCache.realEstate = computeCategoryBest('realEstate', {
+        categoryTotal: totals.realEstate,
+        realEstateAnalytics
+    });
 }
 
 function deriveCryptoIconKey(position){
@@ -962,7 +1733,7 @@ function recomputeRangeMetrics(range){
         let pnl = unrealized + realized + reinvestedValue;
         const typeKey = (position.type || '').toLowerCase();
         if(typeKey === 'real estate'){
-            const rentPnl = position.rentRealized || 0;
+            const rentPnl = getRealEstateRangePnl(position, range);
             pnl = rentPnl;
             categoryTotals.realEstate += rentPnl;
             position.rangeReinvestedValue = 0;
@@ -1003,6 +1774,7 @@ async function setPnlRange(range){
     try{
         pnlRange = normalized;
         applyRangeButtons(pnlRange);
+        renderPnlTrendChart(pnlRange);
         if(pnlRange !== 'ALL'){
             const tasks = positions.map(position => ensureRangeReference(position, pnlRange));
             await Promise.all(tasks);
@@ -1368,6 +2140,8 @@ function transformOperations(records, progressCb){
         const isRentOp = (opTypeLower === 'profitloss' || opTypeLower.includes('rent')) && tagsNormalized.some(tag=>RENT_TAGS.includes(tag));
         const isReinvesting = tagsNormalized.includes('reinvesting');
 
+        const categoryKey = typeof category === 'string' ? category.toLowerCase() : '';
+        const trackLots = categoryKey === 'stock' || categoryKey === 'crypto';
         if(!map.has(asset)){
             const finnhubOverride = fields['Finnhub Symbol'] || fields['Finnhub symbol'] || fields['finnhubSymbol'] || fields['FINNHUB_SYMBOL'];
             const finnhubSymbol = mapFinnhubSymbol(finnhubOverride || asset, category, Boolean(finnhubOverride));
@@ -1389,7 +2163,9 @@ function transformOperations(records, progressCb){
                 cashflow: 0,
                 lastKnownPrice: 0,
                 lastPurchasePrice: 0,
-                operations: []
+                operations: [],
+                lots: trackLots ? [] : [],
+                closedSales: []
             });
         }
 
@@ -1404,30 +2180,110 @@ function transformOperations(records, progressCb){
             spent,
             tags: tagsNormalized,
             isReinvesting,
+            isRent: Boolean(isRentOp),
             skipInCharts: Boolean(isReinvesting)
         });
 
         if(opType === 'PurchaseSell'){
+            const useLots = trackLots;
             if(amount > 0){
-                entry.qty += amount;
-                entry.costBasis += spent;
-                if(spent > 0) entry.invested += spent;
-                const totalCost = spent !== 0 ? spent : (price * amount);
+                const totalCostRaw = spent !== 0 ? Math.abs(spent) : Math.abs(price * amount);
+                const totalCost = Number.isFinite(totalCostRaw) ? totalCostRaw : Math.abs(price * amount);
                 const unitPrice = amount !== 0 ? totalCost / amount : price;
-                if(unitPrice){
+                if(useLots){
+                    entry.lots.push({
+                        qty: amount,
+                        costPerUnit: Number.isFinite(unitPrice) ? unitPrice : 0,
+                        date
+                    });
+                    const qtySum = entry.lots.reduce((sum, lot)=> sum + lot.qty, 0);
+                    entry.qty = qtySum;
+                    entry.costBasis = entry.lots.reduce((sum, lot)=> sum + lot.qty * lot.costPerUnit, 0);
+                }else{
+                    entry.qty += amount;
+                    entry.costBasis += totalCost;
+                }
+                if(totalCost > 0){
+                    entry.invested += totalCost;
+                }
+                if(Number.isFinite(unitPrice) && unitPrice){
                     entry.lastPurchasePrice = unitPrice;
                     entry.lastKnownPrice = unitPrice;
                 }
             }else if(amount < 0){
                 const sellQty = Math.abs(amount);
-                const prevQty = entry.qty;
-                const prevCost = entry.costBasis;
-                const avgCost = prevQty > 0 ? prevCost / prevQty : entry.lastPurchasePrice || price || 0;
-                const costOut = avgCost * sellQty;
-                entry.qty = Math.max(0, prevQty + amount);
-                entry.costBasis = Math.max(0, prevCost - costOut);
-                const proceeds = spent < 0 ? Math.abs(spent) : sellQty * price;
-                entry.realized += proceeds - costOut;
+                const proceeds = spent < 0 ? Math.abs(spent) : Math.abs(price * sellQty);
+                const saleId = op.id || `sale-${index}`;
+                const saleDate = date instanceof Date ? date : (date ? new Date(date) : null);
+                if(useLots){
+                    let remaining = sellQty;
+                    let costOut = 0;
+                    const saleChunks = [];
+                    while(remaining > 1e-9 && entry.lots.length){
+                        const lot = entry.lots[0];
+                        const matched = Math.min(lot.qty, remaining);
+                        const lotCostPerUnit = Number(lot.costPerUnit) || 0;
+                        const lotDate = lot.date instanceof Date ? lot.date : (lot.date ? new Date(lot.date) : null);
+                        saleChunks.push({
+                            qty: matched,
+                            buyCostPerUnit: lotCostPerUnit,
+                            buyDate: lotDate
+                        });
+                        costOut += matched * lotCostPerUnit;
+                        lot.qty -= matched;
+                        remaining -= matched;
+                        if(lot.qty <= 1e-9){
+                            entry.lots.shift();
+                        }
+                    }
+                    if(remaining > 1e-9){
+                        const fallbackUnit = entry.lastPurchasePrice || entry.avgPrice || price || 0;
+                        saleChunks.push({
+                            qty: remaining,
+                            buyCostPerUnit: fallbackUnit,
+                            buyDate: null
+                        });
+                        costOut += remaining * fallbackUnit;
+                        remaining = 0;
+                    }
+                    saleChunks.forEach(chunk=>{
+                        entry.closedSales.push({
+                            saleId,
+                            qty: chunk.qty,
+                            buyCostPerUnit: chunk.buyCostPerUnit,
+                            buyDate: chunk.buyDate,
+                            sellPricePerUnit: price,
+                            sellDate,
+                            totalCost: chunk.qty * chunk.buyCostPerUnit,
+                            totalProceeds: chunk.qty * price
+                        });
+                    });
+                    const qtySum = entry.lots.reduce((sum, lot)=> sum + lot.qty, 0);
+                    entry.qty = qtySum;
+                    entry.costBasis = entry.lots.reduce((sum, lot)=> sum + lot.qty * lot.costPerUnit, 0);
+                    entry.realized += proceeds - costOut;
+                }else{
+                    const prevQty = entry.qty;
+                    const prevCost = entry.costBasis;
+                    const avgCost = prevQty > 0 ? prevCost / prevQty : entry.lastPurchasePrice || price || 0;
+                    const costOut = avgCost * sellQty;
+                    entry.qty = Math.max(0, prevQty + amount);
+                    entry.costBasis = Math.max(0, prevCost - costOut);
+                    entry.realized += proceeds - costOut;
+                    entry.closedSales.push({
+                        saleId,
+                        qty: sellQty,
+                        buyCostPerUnit: avgCost,
+                        buyDate: null,
+                        sellPricePerUnit: price,
+                        sellDate,
+                        totalCost: costOut,
+                        totalProceeds: proceeds
+                    });
+                }
+                if(price){
+                    entry.lastKnownPrice = price;
+                }
             }
             entry.cashflow += spent;
     }else if(opType === 'ProfitLoss'){
@@ -1469,9 +2325,12 @@ function transformOperations(records, progressCb){
         entry.cashflow += spent;
     }
 
-        if(entry.qty <= 0){
+        if(entry.qty <= 1e-9){
             entry.qty = 0;
             entry.costBasis = 0;
+            if(Array.isArray(entry.lots)){
+                entry.lots = [];
+            }
         }
         if(!entry.lastKnownPrice && entry.lastPurchasePrice){
             entry.lastKnownPrice = entry.lastPurchasePrice;
@@ -1491,39 +2350,92 @@ function transformOperations(records, progressCb){
         if(p.rentRealized === undefined){
             p.rentRealized = 0;
         }
+        if(Array.isArray(p.lots)){
+            p.lots = p.lots.filter(lot=> Number.isFinite(lot.qty) && lot.qty > 1e-9);
+            const qtySum = p.lots.reduce((sum, lot)=> sum + lot.qty, 0);
+            const costSum = p.lots.reduce((sum, lot)=> sum + lot.qty * (Number(lot.costPerUnit) || 0), 0);
+            p.qty = qtySum;
+            p.costBasis = costSum;
+        }else{
+            p.lots = null;
+        }
+        if(Array.isArray(p.closedSales)){
+            p.closedSales = p.closedSales.map(chunk=>({
+                saleId: chunk.saleId,
+                qty: Number(chunk.qty) || 0,
+                buyCostPerUnit: Number(chunk.buyCostPerUnit) || 0,
+                buyDate: chunk.buyDate instanceof Date ? chunk.buyDate : (chunk.buyDate ? new Date(chunk.buyDate) : null),
+                sellPricePerUnit: Number(chunk.sellPricePerUnit) || 0,
+                sellDate: chunk.sellDate instanceof Date ? chunk.sellDate : (chunk.sellDate ? new Date(chunk.sellDate) : null),
+                totalCost: Number(chunk.totalCost) || 0,
+                totalProceeds: Number(chunk.totalProceeds) || 0
+            }));
+        }else{
+            p.closedSales = null;
+        }
         recomputePositionMetrics(p);
         ensurePositionDefaults(p);
         p.referencePrices = {};
+        p.rentRangeTotals = {};
         return p;
     });
 }
 
 function useFallbackPositions(){
     const fallback = [
-        {Name:'Apple',category:'Stock',symbol:'AAPL',qty:10,avgPrice:150},
-        {Name:'Bitcoin',category:'Crypto',symbol:'BINANCE:BTCUSDT',qty:0.25,avgPrice:30000},
-        {Name:'Cash Reserve',category:'Cash',symbol:null,qty:2500,avgPrice:1}
+        {Name:'Bitcoin',category:'Crypto',symbol:'BINANCE:BTCUSDT',qty:0.25,avgPrice:30000,lotDate:'2023-07-15T00:00:00Z'},
+        {Name:'Solana',category:'Crypto',symbol:'BINANCE:SOLUSDT',qty:12,avgPrice:85,lotDate:'2024-01-18T00:00:00Z'},
+        {Name:'XRP',category:'Crypto',symbol:'BINANCE:XRPUSDT',qty:1200,avgPrice:0.5,lotDate:'2023-11-03T00:00:00Z'},
+        {Name:'Cash Reserve',category:'Cash',symbol:null,qty:2500,avgPrice:1,lotDate:'2024-02-01T00:00:00Z'}
     ];
-    const map = fallback.map(f=>({
-        Name:f.Name,
-        displayName:f.Name,
-        Category:normalizeCategory(f.category, f.Name),
-        type:normalizeCategory(f.category, f.Name),
-        Symbol:f.symbol || f.Name,
-        finnhubSymbol:f.symbol,
-        qty:f.qty,
-        costBasis:f.qty * f.avgPrice,
-        invested: f.qty * f.avgPrice,
-        realized:0,
-        cashflow:0,
-        lastKnownPrice:f.avgPrice
-    }));
+    const map = fallback.map(f=>{
+        const normalizedCategory = normalizeCategory(f.category, f.Name);
+        const typeLower = normalizedCategory.toLowerCase();
+        const costBasis = f.qty * f.avgPrice;
+        const trackLots = typeLower === 'stock' || typeLower === 'crypto';
+        const lotDate = f.lotDate ? new Date(f.lotDate) : new Date();
+        const lots = trackLots && f.qty > 0
+            ? [{
+                qty: f.qty,
+                costPerUnit: f.avgPrice,
+                date: lotDate
+            }]
+            : trackLots ? [] : null;
+        const operations = trackLots && f.qty > 0
+            ? [{
+                type: 'PurchaseSell',
+                amount: f.qty,
+                spent: f.qty * f.avgPrice,
+                price: f.avgPrice,
+                date: lotDate,
+                rawDate: lotDate
+            }]
+            : [];
+        return {
+            Name: f.Name,
+            displayName: f.Name,
+            Category: normalizedCategory,
+            type: normalizedCategory,
+            Symbol: f.symbol || f.Name,
+            finnhubSymbol: f.symbol,
+            qty: f.qty,
+            costBasis,
+            invested: costBasis,
+            realized: 0,
+            cashflow: 0,
+            lastKnownPrice: f.avgPrice,
+            lots,
+            closedSales: [],
+            operations
+        };
+    });
     return map.map(p=>{
         recomputePositionMetrics(p);
         ensurePositionDefaults(p);
         p.referencePrices = {};
         p.finnhubOverride = false;
         p.rentRealized = 0;
+        p.rentRangeTotals = {};
         return p;
     });
 }
@@ -2481,41 +3393,130 @@ async function fetchHistoricalPriceSeries(position){
     const coinGeckoId = typeKey === 'crypto' ? mapCoinGeckoId(position) : null;
     const yahooSymbol = mapYahooSymbol(position);
     const cacheKey = `${finnhubSymbol || ''}|${coinGeckoId || yahooSymbol || ''}|${typeKey}`;
+    const firstPurchaseTime = getFirstPurchaseTime(position);
+    const finalizeSeries = rawSeries=>{
+        const sanitized = sanitizePriceSeries(rawSeries);
+        if(!sanitized.length){
+            transactionPriceCache.set(cacheKey, []);
+            position.priceHistory = [];
+            return [];
+        }
+        const prepared = preparePriceSeries(sanitized, firstPurchaseTime, position);
+        transactionPriceCache.set(cacheKey, prepared);
+        position.priceHistory = prepared;
+        return prepared;
+    };
+
     if(transactionPriceCache.has(cacheKey)){
-        return transactionPriceCache.get(cacheKey);
+        const cached = transactionPriceCache.get(cacheKey);
+        if(Array.isArray(cached) && cached.length){
+            position.priceHistory = cached;
+            return cached;
+        }
     }
 
-    const operations = Array.isArray(position.operations) ? position.operations : [];
-    const firstPurchase = operations
-        .filter(op => String(op.type || '').toLowerCase() === 'purchasesell' && Number(op.amount || 0) > 0 && op.date instanceof Date)
-        .sort((a,b)=> a.date - b.date)[0];
-    const firstPurchaseTime = firstPurchase ? firstPurchase.date.getTime() : null;
-    let series = [];
+    if(typeKey === 'crypto'){
+        const localInfo = await loadLocalHistoricalSeries(position);
+        let localSeriesUsed = null;
+        if(localInfo && Array.isArray(localInfo.series) && localInfo.series.length){
+            let workingSeries = localInfo.series.slice();
+            localSeriesUsed = workingSeries;
+            let lastLocalDate = toValidDate(localInfo.lastDate);
+            const todayKey = formatDateKey(new Date());
+            const alreadyCheckedToday = localInfo.lastChecked && localInfo.lastChecked === todayKey;
+            const requiresUpdate = needsHistoricalUpdate(lastLocalDate);
+
+            if(!alreadyCheckedToday && requiresUpdate && MASSIVE_API_KEY){
+                let startDate = addDays(lastLocalDate, 1);
+                const endDate = new Date();
+                if(startDate && startDate <= endDate){
+                    const earliestAllowed = addDays(endDate, -730);
+                    if(earliestAllowed && startDate < earliestAllowed){
+                        startDate = earliestAllowed;
+                    }
+                    const updates = await fetchMassiveHistoricalSeries(position, startDate, endDate);
+                    if(Array.isArray(updates) && updates.length){
+                        workingSeries = mergeHistoricalSeries(workingSeries, updates);
+                        const mergedLastPoint = workingSeries[workingSeries.length - 1];
+                        lastLocalDate = mergedLastPoint ? toValidDate(mergedLastPoint.time) : lastLocalDate;
+                        if(typeof window === 'undefined'){
+                            await writeHistoricalSeriesFile(localInfo.path, localInfo.header, workingSeries);
+                        }
+                    }
+                }
+                localHistoricalCache.set(localInfo.cacheKey, {
+                    ...localInfo,
+                    series: workingSeries,
+                    lastDate: lastLocalDate,
+                    lastChecked: todayKey
+                });
+            }else if(!requiresUpdate && localInfo.lastChecked !== todayKey){
+                localHistoricalCache.set(localInfo.cacheKey, {
+                    ...localInfo,
+                    lastChecked: todayKey
+                });
+            }
+
+            const finalLocal = finalizeSeries(workingSeries);
+            if(finalLocal.length){
+                return finalLocal;
+            }
+        }
+
+        if(MASSIVE_API_KEY && (!localInfo || !localSeriesUsed || !localSeriesUsed.length)){
+            const endDate = new Date();
+            let startDate = firstPurchaseTime ? toValidDate(firstPurchaseTime) : null;
+            if(!startDate){
+                startDate = addDays(endDate, -730);
+            }
+            if(startDate && startDate <= endDate){
+                const updates = await fetchMassiveHistoricalSeries(position, startDate, endDate);
+                if(Array.isArray(updates) && updates.length){
+                    const merged = mergeHistoricalSeries([], updates);
+                    const cacheKeyLocal = getLocalHistoricCacheKey(position);
+                    const relativePath = buildHistoricFilePath(cacheKeyLocal);
+                    if(cacheKeyLocal && relativePath){
+                        if(typeof window === 'undefined'){
+                            await writeHistoricalSeriesFile(relativePath, buildHistoricHeader(position), merged);
+                        }
+                        localHistoricalCache.set(cacheKeyLocal, {
+                            cacheKey: cacheKeyLocal,
+                            path: relativePath,
+                            header: buildHistoricHeader(position),
+                            series: merged,
+                            lastDate: merged.length ? toValidDate(merged[merged.length - 1].time) : null,
+                            lastChecked: formatDateKey(new Date())
+                        });
+                    }
+                    return finalizeSeries(merged);
+                }
+            }
+        }
+    }
+
     if(finnhubSymbol && FINNHUB_KEY){
-        series = await fetchFinnhubSeries(position, finnhubSymbol, firstPurchaseTime);
+        const series = await fetchFinnhubSeries(position, finnhubSymbol, firstPurchaseTime);
         if(series.length){
-            transactionPriceCache.set(cacheKey, series);
-            return series;
+            return finalizeSeries(series);
         }
     }
 
     if(coinGeckoId){
-        series = await fetchCoinGeckoSeries(coinGeckoId, firstPurchaseTime);
+        const series = await fetchCoinGeckoSeries(coinGeckoId, firstPurchaseTime);
         if(series.length){
-            transactionPriceCache.set(cacheKey, series);
-            return series;
+            return finalizeSeries(series);
         }
     }
 
     if(yahooSymbol){
-        series = await fetchAlphaVantageSeries(yahooSymbol, typeKey, firstPurchaseTime);
+        const series = await fetchAlphaVantageSeries(yahooSymbol, typeKey, firstPurchaseTime);
         if(series.length){
-            transactionPriceCache.set(cacheKey, series);
-            return series;
+            return finalizeSeries(series);
         }
     }
 
     transactionPriceCache.set(cacheKey, []);
+    position.priceHistory = [];
     return [];
 }
 
@@ -3062,53 +4063,175 @@ function renderTransactionLots(position, data){
     ensureTransactionLotsControls();
     const listElement = transactionLotsList || transactionLotsContainer;
     const operations = Array.isArray(position.operations) ? position.operations.slice() : [];
-    if(!operations.length){
+    const currentPrice = Number(position.displayPrice || position.currentPrice || position.lastKnownPrice || position.avgPrice || 0);
+    const processed = [];
+    let usingCustomLots = false;
+    const supportsLots = ['stock','crypto'].includes((position.type || '').toLowerCase());
+    const openLots = supportsLots && Array.isArray(position.lots) ? position.lots.filter(lot=> lot && Number(lot.qty) > 1e-9) : [];
+    const closedSegments = supportsLots && Array.isArray(position.closedSales) ? position.closedSales.slice() : [];
+    const hasOpenQty = Math.abs(Number(position.qty || 0)) > 1e-6;
+
+    if(supportsLots){
+        if(hasOpenQty && openLots.length){
+            usingCustomLots = true;
+            const sortedLots = openLots.slice().sort((a,b)=>{
+                const ad = a.date instanceof Date ? a.date.getTime() : -Infinity;
+                const bd = b.date instanceof Date ? b.date.getTime() : -Infinity;
+                return ad - bd;
+            });
+            sortedLots.forEach((lot, index)=>{
+                const lotDate = lot.date instanceof Date ? lot.date : (lot.date ? new Date(lot.date) : null);
+                const buyPrice = Number(lot.costPerUnit) || 0;
+                const qty = Number(lot.qty) || 0;
+                const baseAmount = qty * buyPrice;
+                const currentValue = qty * currentPrice;
+                const pnlValue = currentValue - baseAmount;
+                const pnlPct = baseAmount ? (pnlValue / baseAmount) * 100 : null;
+                processed.push({
+                    id: lot.id || `open-${index}`,
+                    date: lotDate,
+                    dateValue: lotDate instanceof Date && !Number.isNaN(lotDate.getTime()) ? lotDate.getTime() : -Infinity,
+                    dateLabel: lotDate instanceof Date && !Number.isNaN(lotDate.getTime()) ? formatDateShort(lotDate) : '—',
+                    typeLabel: 'Open lot',
+                    absQty: qty,
+                    price: buyPrice,
+                    baseAmount,
+                    amountLabel: 'Invested',
+                    pnlValue,
+                    pnlPct,
+                    pnlClass: pnlValue >= 0 ? 'lot-positive' : 'lot-negative'
+                });
+            });
+        }else if(!hasOpenQty && closedSegments.length){
+            usingCustomLots = true;
+            const groupMap = new Map();
+            closedSegments.forEach((chunk, idx)=>{
+                const key = chunk.saleId || `sale-${idx}`;
+                if(!groupMap.has(key)){
+                    groupMap.set(key, {
+                        saleId: key,
+                        sellDate: chunk.sellDate instanceof Date ? chunk.sellDate : (chunk.sellDate ? new Date(chunk.sellDate) : null),
+                        sellPricePerUnit: Number(chunk.sellPricePerUnit) || 0,
+                        chunks: [],
+                        totalProceeds: 0,
+                        totalCost: 0
+                    });
+                }
+                const group = groupMap.get(key);
+                const buyDate = chunk.buyDate instanceof Date ? chunk.buyDate : (chunk.buyDate ? new Date(chunk.buyDate) : null);
+                group.chunks.push({
+                    qty: Number(chunk.qty) || 0,
+                    buyCostPerUnit: Number(chunk.buyCostPerUnit) || 0,
+                    buyDate
+                });
+                group.totalProceeds += Number(chunk.totalProceeds) || 0;
+                group.totalCost += Number(chunk.totalCost) || 0;
+                if(!group.sellDate && chunk.sellDate){
+                    group.sellDate = chunk.sellDate instanceof Date ? chunk.sellDate : new Date(chunk.sellDate);
+                }
+                if(!group.sellPricePerUnit && Number.isFinite(chunk.sellPricePerUnit)){
+                    group.sellPricePerUnit = Number(chunk.sellPricePerUnit);
+                }
+            });
+            const groups = Array.from(groupMap.values()).sort((a,b)=>{
+                const ad = a.sellDate instanceof Date ? a.sellDate.getTime() : -Infinity;
+                const bd = b.sellDate instanceof Date ? b.sellDate.getTime() : -Infinity;
+                return ad - bd;
+            });
+            groups.forEach(group=>{
+                group.chunks.sort((a,b)=>{
+                    const ad = a.buyDate instanceof Date ? a.buyDate.getTime() : -Infinity;
+                    const bd = b.buyDate instanceof Date ? b.buyDate.getTime() : -Infinity;
+                    return ad - bd;
+                });
+                group.chunks.forEach((chunk, idx)=>{
+                    const cost = chunk.qty * chunk.buyCostPerUnit;
+                    processed.push({
+                        id: `buy-${group.saleId}-${idx}`,
+                        date: chunk.buyDate,
+                        dateValue: chunk.buyDate instanceof Date && !Number.isNaN(chunk.buyDate.getTime()) ? chunk.buyDate.getTime() : -Infinity,
+                        dateLabel: chunk.buyDate instanceof Date && !Number.isNaN(chunk.buyDate.getTime()) ? formatDateShort(chunk.buyDate) : '—',
+                        typeLabel: 'Buy lot',
+                        absQty: chunk.qty,
+                        price: chunk.buyCostPerUnit,
+                        baseAmount: cost,
+                        amountLabel: 'Invested',
+                        pnlValue: 0,
+                        pnlPct: null,
+                        pnlClass: 'lot-neutral',
+                        pnlDisplay: '—'
+                    });
+                });
+                const saleQty = group.chunks.reduce((sum, chunk)=> sum + chunk.qty, 0);
+                const saleDate = group.sellDate;
+                const pnlValue = group.totalProceeds - group.totalCost;
+                const pnlPct = group.totalCost ? (pnlValue / group.totalCost) * 100 : null;
+                processed.push({
+                    id: `sell-${group.saleId}`,
+                    date: saleDate,
+                    dateValue: saleDate instanceof Date && !Number.isNaN(saleDate.getTime()) ? saleDate.getTime() : -Infinity,
+                    dateLabel: saleDate instanceof Date && !Number.isNaN(saleDate.getTime()) ? formatDateShort(saleDate) : '—',
+                    typeLabel: 'Sell lot',
+                    absQty: saleQty,
+                    price: group.sellPricePerUnit,
+                    baseAmount: group.totalProceeds,
+                    amountLabel: 'Proceeds',
+                    pnlValue,
+                    pnlPct,
+                    pnlClass: pnlValue >= 0 ? 'lot-positive' : 'lot-negative'
+                });
+            });
+        }
+    }
+
+    if(!usingCustomLots && !operations.length){
         listElement.innerHTML = '<div class="pos">No transactions recorded yet.</div>';
         return;
     }
-    const currentPrice = Number(position.displayPrice || position.currentPrice || position.lastKnownPrice || position.avgPrice || 0);
-    const processed = [];
-    operations.forEach((op, index)=>{
-        if(op.skipInCharts || op.isReinvesting) return;
-        const qtySigned = Number(op.amount || 0);
-        if(!qtySigned) return;
-        const absQty = Math.abs(qtySigned);
-        const date = op.date instanceof Date ? op.date : (op.rawDate ? new Date(op.rawDate) : null);
-        const price = Number(op.price || currentPrice || 0) || 0;
-        const rawSpent = Number(op.spent);
-        let baseAmount = Number.isFinite(rawSpent) ? Math.abs(rawSpent) : Math.abs(price * absQty);
-        const typeLabel = qtySigned > 0 ? 'Buy' : 'Sell';
-        const amountLabel = qtySigned > 0 ? 'Invested' : 'Proceeds';
-        let pnlValue = 0;
-        if(qtySigned > 0){
-            if(!baseAmount) baseAmount = Math.abs(price * absQty);
-            const currentValue = currentPrice * absQty;
-            pnlValue = currentValue - baseAmount;
-        }else{
-            if(!baseAmount) baseAmount = Math.abs(price * absQty);
-            const estimatedCost = Math.abs(price * absQty);
-            pnlValue = baseAmount - estimatedCost;
-        }
-        const pnlPct = baseAmount ? (pnlValue / baseAmount) * 100 : 0;
-        const pnlClass = pnlValue >= 0 ? 'lot-positive' : 'lot-negative';
-        processed.push({
-            id: op.id || `lot-${index}`,
-            date,
-            dateValue: date instanceof Date && !Number.isNaN(date.getTime()) ? date.getTime() : -Infinity,
-            dateLabel: date instanceof Date && !Number.isNaN(date.getTime()) ? formatDateShort(date) : '—',
-            typeLabel,
-            absQty,
-            price,
-            baseAmount,
-            amountLabel,
-            pnlValue,
-            pnlPct,
-            pnlClass
+
+    if(!usingCustomLots){
+        operations.forEach((op, index)=>{
+            if(op.skipInCharts || op.isReinvesting) return;
+            const qtySigned = Number(op.amount || 0);
+            if(!qtySigned) return;
+            const absQty = Math.abs(qtySigned);
+            const date = op.date instanceof Date ? op.date : (op.rawDate ? new Date(op.rawDate) : null);
+            const price = Number(op.price || currentPrice || 0) || 0;
+            const rawSpent = Number(op.spent);
+            let baseAmount = Number.isFinite(rawSpent) ? Math.abs(rawSpent) : Math.abs(price * absQty);
+            const typeLabel = qtySigned > 0 ? 'Buy' : 'Sell';
+            const amountLabel = qtySigned > 0 ? 'Invested' : 'Proceeds';
+            let pnlValue = 0;
+            if(qtySigned > 0){
+                if(!baseAmount) baseAmount = Math.abs(price * absQty);
+                const currentValue = currentPrice * absQty;
+                pnlValue = currentValue - baseAmount;
+            }else{
+                if(!baseAmount) baseAmount = Math.abs(price * absQty);
+                const estimatedCost = Math.abs(price * absQty);
+                pnlValue = baseAmount - estimatedCost;
+            }
+            const pnlPct = baseAmount ? (pnlValue / baseAmount) * 100 : 0;
+            const pnlClass = pnlValue >= 0 ? 'lot-positive' : 'lot-negative';
+            processed.push({
+                id: op.id || `lot-${index}`,
+                date,
+                dateValue: date instanceof Date && !Number.isNaN(date.getTime()) ? date.getTime() : -Infinity,
+                dateLabel: date instanceof Date && !Number.isNaN(date.getTime()) ? formatDateShort(date) : '—',
+                typeLabel,
+                absQty,
+                price,
+                baseAmount,
+                amountLabel,
+                pnlValue,
+                pnlPct,
+                pnlClass
+            });
         });
-    });
+    }
 
     if(!processed.length){
-        listElement.innerHTML = '<div class="pos">No transactions recorded yet.</div>';
+        listElement.innerHTML = '<div class="pos">No lots to display yet.</div>';
         return;
     }
 
@@ -3192,6 +4315,10 @@ function renderTransactionLots(position, data){
         }
         group.items.forEach(item=>{
             const pnlPercentDisplay = Number.isFinite(item.pnlPct) ? formatPercent(item.pnlPct) : '—';
+            const pnlClass = item.pnlClass || (item.pnlValue >= 0 ? 'lot-positive' : 'lot-negative');
+            const pnlContent = item.pnlDisplay !== undefined
+                ? item.pnlDisplay
+                : `${money(item.pnlValue)} (${pnlPercentDisplay})`;
             const row = document.createElement('div');
             row.className = 'lot-row';
             row.innerHTML = `
@@ -3199,7 +4326,7 @@ function renderTransactionLots(position, data){
                 <div class="lot-cell lot-cell-type">${item.typeLabel} · ${formatQty(item.absQty)}</div>
                 <div class="lot-cell lot-cell-price">${money(item.price)}</div>
                 <div class="lot-cell lot-cell-amount">${item.amountLabel} ${money(item.baseAmount)}</div>
-                <div class="lot-cell lot-cell-pnl"><span class="lot-value ${item.pnlClass}">${money(item.pnlValue)} (${pnlPercentDisplay})</span></div>
+                <div class="lot-cell lot-cell-pnl"><span class="lot-value ${pnlClass}">${pnlContent}</span></div>
             `;
             listElement.appendChild(row);
         });
@@ -3290,6 +4417,7 @@ async function loadHistoricalPriceSeries(position){
             }
             return;
         }
+        position.priceHistory = series;
         if(transactionModalMeta){
             const existing = transactionModalMeta.querySelector('.price-history-note');
             if(existing) existing.remove();
@@ -3302,6 +4430,7 @@ async function loadHistoricalPriceSeries(position){
         const ctx = transactionModalCanvas.getContext('2d');
         transactionChart = new Chart(ctx, config);
         transactionChart.canvas.classList.remove('hidden');
+        renderPnlTrendChart(pnlRange);
     }catch(error){
         console.warn('Failed to load historical price series', error);
     }
@@ -3465,11 +4594,7 @@ function createClosedPositionRow(position){
     const prioritizedPrice = priceCandidates.find(value => Math.abs(value) > 1e-9);
     const fallbackPrice = Number(position.displayPrice ?? position.currentPrice ?? position.lastKnownPrice ?? position.lastPurchasePrice ?? position.avgPrice ?? 0) || 0;
     const price = Number.isFinite(prioritizedPrice) ? prioritizedPrice : fallbackPrice;
-    const reinvestedQty = Math.max(0, Number(position.reinvested || 0));
-    const reinvestPrice = Math.abs(price) > 1e-9 ? price : fallbackPrice;
-    const hasReinvestValue = reinvestedQty > 1e-6 && Math.abs(reinvestPrice) > 1e-9;
-    const reinvestedValue = hasReinvestValue ? reinvestPrice * reinvestedQty : 0;
-    const displayRealized = realized + reinvestedValue;
+    const displayRealized = realized;
     const main = document.createElement('div');
     main.className = 'analytics-main';
     const iconEl = createAssetIconElement(position);
@@ -3503,15 +4628,10 @@ function createClosedPositionRow(position){
         ? (displayRealized / denominator) * 100
         : (Number.isFinite(realizedPercent) ? realizedPercent : null);
     pnlEl.textContent = formatMoneyWithPercent(displayRealized, Number.isFinite(effectivePercent) ? effectivePercent : null, 1);
-    if(showPnlPercentages && hasReinvestValue){
-        const reinvestSpan = document.createElement('span');
-        reinvestSpan.className = 'reinvested-note';
-        reinvestSpan.textContent = ` · Reinvested ${money(reinvestedValue)}`;
-        pnlEl.appendChild(reinvestSpan);
-    }
     const statusEl = document.createElement('div');
     statusEl.className = 'muted';
-    statusEl.textContent = 'Position closed';
+    const stillOpen = Math.abs(Number(position.qty || 0)) > 1e-6;
+    statusEl.textContent = stillOpen ? 'Position partially closed' : 'Position closed';
     values.appendChild(pnlEl);
     values.appendChild(statusEl);
     row.appendChild(values);
@@ -4678,6 +5798,566 @@ function setCategoryMetric(categoryKey, metricKey, value, elementId, formatter){
     store[metricKey] = (value === null || value === undefined || Number.isNaN(value)) ? null : value;
 }
 
+function applyDeltaClass(element, value){
+    if(!element) return;
+    element.classList.remove('delta-positive','delta-negative');
+    if(!Number.isFinite(value)) return;
+    if(value > 0){
+        element.classList.add('delta-positive');
+    }else if(value < 0){
+        element.classList.add('delta-negative');
+    }
+}
+
+function ensureBestInfoPopoverElements(){
+    if(typeof document === 'undefined') return null;
+    if(bestInfoPopoverElements){
+        return bestInfoPopoverElements;
+    }
+    bestInfoPopover = document.getElementById('best-info-popover');
+    if(!bestInfoPopover){
+        return null;
+    }
+    const content = bestInfoPopover.querySelector('.best-info-content');
+    if(content && !content.hasAttribute('tabindex')){
+        content.setAttribute('tabindex', '-1');
+    }
+    bestInfoPopoverElements = {
+        popover: bestInfoPopover,
+        content,
+        title: document.getElementById('best-info-title'),
+        range: document.getElementById('best-info-range'),
+        category: document.getElementById('best-info-category'),
+        name: document.getElementById('best-info-name'),
+        pnl: document.getElementById('best-info-pnl'),
+        change: document.getElementById('best-info-change'),
+        meta: document.getElementById('best-info-meta'),
+        extra: document.getElementById('best-info-extra')
+    };
+    return bestInfoPopoverElements;
+}
+
+function positionBestInfoPopover(trigger){
+    const elements = ensureBestInfoPopoverElements();
+    if(!elements || !elements.popover || !trigger) return;
+    const popover = elements.popover;
+    const previousVisibility = popover.style.visibility;
+    popover.style.visibility = 'hidden';
+    popover.classList.remove('hidden');
+    const triggerRect = trigger.getBoundingClientRect();
+    const popRect = popover.getBoundingClientRect();
+    const viewportWidth = document.documentElement.clientWidth || window.innerWidth || 0;
+    const viewportHeight = document.documentElement.clientHeight || window.innerHeight || 0;
+    const padding = 16;
+    let top = triggerRect.bottom + window.scrollY + 12;
+    let left = triggerRect.right + window.scrollX - popRect.width;
+    if(left + popRect.width > window.scrollX + viewportWidth - padding){
+        left = window.scrollX + viewportWidth - popRect.width - padding;
+    }
+    if(left < window.scrollX + padding){
+        left = window.scrollX + padding;
+    }
+    const maxTop = window.scrollY + viewportHeight - popRect.height - padding;
+    if(top > maxTop){
+        top = Math.max(triggerRect.top + window.scrollY - popRect.height - 12, window.scrollY + padding);
+    }
+    popover.style.left = `${Math.max(window.scrollX + padding, left)}px`;
+    popover.style.top = `${Math.max(window.scrollY + padding, top)}px`;
+    popover.style.visibility = previousVisibility || '';
+}
+
+function renderBestInfoPopover(entry, categoryKey){
+    const elements = ensureBestInfoPopoverElements();
+    if(!elements || !elements.popover) return;
+    const categoryLabel = entry?.label || getCategoryDisplayName(categoryKey);
+    if(elements.category){
+        elements.category.textContent = categoryLabel;
+    }
+    if(elements.range){
+        elements.range.textContent = entry?.rangeLabel || (RANGE_LABELS[pnlRange] || pnlRange);
+    }
+    elements.popover.dataset.category = categoryKey || '';
+    elements.popover.setAttribute('data-has-data', entry ? 'true' : 'false');
+    if(!entry){
+        if(elements.name) elements.name.textContent = 'No data available';
+        if(elements.pnl) elements.pnl.textContent = '—';
+        if(elements.change) elements.change.textContent = '—';
+        applyDeltaClass(elements.pnl, null);
+        applyDeltaClass(elements.change, null);
+        if(elements.meta){
+            elements.meta.textContent = 'No holdings available for this asset group in the selected range.';
+        }
+        if(elements.extra){
+            elements.extra.innerHTML = '';
+            const empty = document.createElement('div');
+            empty.className = 'best-info-extra-empty';
+            empty.textContent = 'No additional metrics for this range.';
+            elements.extra.appendChild(empty);
+        }
+        return;
+    }
+    if(elements.name){
+        elements.name.textContent = entry.displayName || '—';
+    }
+    if(elements.pnl){
+        elements.pnl.textContent = money(entry.pnl);
+        applyDeltaClass(elements.pnl, entry.pnl);
+    }
+    if(elements.change){
+        if(Number.isFinite(entry.changePct)){
+            elements.change.textContent = `${entry.changePct >= 0 ? '+' : ''}${entry.changePct.toFixed(2)}%`;
+        }else{
+            elements.change.textContent = '—';
+        }
+        applyDeltaClass(elements.change, Number.isFinite(entry.changePct) ? entry.changePct : null);
+    }
+    if(elements.meta){
+        elements.meta.textContent = entry.meta || '—';
+    }
+    if(elements.extra){
+        elements.extra.innerHTML = '';
+        const rows = [];
+        if(entry.rangeStart instanceof Date && !Number.isNaN(entry.rangeStart.getTime()) && pnlRange !== 'ALL'){
+            rows.push({
+                label: 'Window start',
+                value: entry.rangeStart.toLocaleDateString(undefined,{ year:'numeric', month:'short', day:'numeric' })
+            });
+        }
+        if(Array.isArray(entry.extraItems)){
+            entry.extraItems.forEach(item=>{
+                if(item && item.label){
+                    rows.push({ label: item.label, value: item.value });
+                }
+            });
+        }
+        if(rows.length){
+            rows.forEach(item=>{
+                const row = document.createElement('div');
+                row.className = 'best-info-extra-row';
+                const labelEl = document.createElement('span');
+                labelEl.className = 'label';
+                labelEl.textContent = item.label;
+                const valueEl = document.createElement('span');
+                valueEl.className = 'value';
+                valueEl.textContent = item.value;
+                row.appendChild(labelEl);
+                row.appendChild(valueEl);
+                elements.extra.appendChild(row);
+            });
+        }else{
+            const empty = document.createElement('div');
+            empty.className = 'best-info-extra-empty';
+            empty.textContent = 'No additional metrics for this range.';
+            elements.extra.appendChild(empty);
+        }
+    }
+}
+
+function handleBestInfoOutsideClick(event){
+    const elements = bestInfoPopoverElements;
+    if(!elements || !elements.popover || elements.popover.classList.contains('hidden')) return;
+    if(elements.popover.contains(event.target)) return;
+    if(activeBestInfoTrigger && activeBestInfoTrigger.contains(event.target)){
+        return;
+    }
+    hideBestInfoPopover();
+}
+
+function handleBestInfoWindowChange(){
+    if(!activeBestInfoTrigger) return;
+    const elements = bestInfoPopoverElements;
+    if(!elements || !elements.popover || elements.popover.classList.contains('hidden')) return;
+    positionBestInfoPopover(activeBestInfoTrigger);
+}
+
+function attachBestInfoListeners(){
+    if(bestInfoListenersAttached) return;
+    document.addEventListener('pointerdown', handleBestInfoOutsideClick, true);
+    window.addEventListener('scroll', handleBestInfoWindowChange, true);
+    window.addEventListener('resize', handleBestInfoWindowChange, true);
+    bestInfoListenersAttached = true;
+}
+
+function detachBestInfoListeners(){
+    if(!bestInfoListenersAttached) return;
+    document.removeEventListener('pointerdown', handleBestInfoOutsideClick, true);
+    window.removeEventListener('scroll', handleBestInfoWindowChange, true);
+    window.removeEventListener('resize', handleBestInfoWindowChange, true);
+    bestInfoListenersAttached = false;
+}
+
+function showBestInfoPopover(categoryKey, trigger){
+    const elements = ensureBestInfoPopoverElements();
+    if(!elements || !elements.popover || !trigger) return;
+    activeBestInfoCategory = categoryKey;
+    activeBestInfoTrigger = trigger;
+    renderBestInfoPopover(bestPerformerCache[categoryKey] || null, categoryKey);
+    elements.popover.classList.remove('hidden');
+    elements.popover.setAttribute('aria-hidden','false');
+    trigger.setAttribute('aria-expanded','true');
+    positionBestInfoPopover(trigger);
+    attachBestInfoListeners();
+    if(elements.content){
+        elements.content.focus({ preventScroll: true });
+    }
+}
+
+function hideBestInfoPopover(){
+    const elements = ensureBestInfoPopoverElements();
+    if(!elements || !elements.popover || elements.popover.classList.contains('hidden')) return;
+    elements.popover.classList.add('hidden');
+    elements.popover.setAttribute('aria-hidden','true');
+    detachBestInfoListeners();
+    if(activeBestInfoTrigger){
+        activeBestInfoTrigger.setAttribute('aria-expanded','false');
+        if(typeof activeBestInfoTrigger.focus === 'function'){
+            activeBestInfoTrigger.focus({ preventScroll: true });
+        }
+    }
+    activeBestInfoCategory = null;
+    activeBestInfoTrigger = null;
+}
+
+function initializeBestInfoTriggers(){
+    if(typeof document === 'undefined') return;
+    const buttons = document.querySelectorAll('[data-best-info-trigger]');
+    if(!buttons.length) return;
+    buttons.forEach(button=>{
+        button.setAttribute('aria-controls', 'best-info-popover');
+        button.addEventListener('click', event=>{
+            event.preventDefault();
+            const categoryKey = button.dataset.bestInfoTrigger;
+            if(!categoryKey) return;
+            const elements = bestInfoPopoverElements;
+            const isActive = activeBestInfoCategory === categoryKey
+                && elements
+                && elements.popover
+                && !elements.popover.classList.contains('hidden');
+            if(isActive){
+                hideBestInfoPopover();
+                return;
+            }
+            showBestInfoPopover(categoryKey, button);
+        });
+    });
+    ensureBestInfoPopoverElements();
+}
+
+function refreshActiveBestInfoPopover(){
+    if(!activeBestInfoCategory) return;
+    const elements = ensureBestInfoPopoverElements();
+    if(!elements || !elements.popover || elements.popover.classList.contains('hidden')) return;
+    renderBestInfoPopover(bestPerformerCache[activeBestInfoCategory] || null, activeBestInfoCategory);
+    if(activeBestInfoTrigger){
+        positionBestInfoPopover(activeBestInfoTrigger);
+    }
+}
+
+function buildPnlAssetState(position, rangeStartTs){
+    const priceHistory = getPriceHistoryForPosition(position);
+    if(!Array.isArray(priceHistory) || !priceHistory.length){
+        return null;
+    }
+    const priceSeries = priceHistory.slice().map(point=>({
+        time: Number(point.time ?? point.x),
+        price: Number(point.price ?? point.y ?? point.value ?? point.c)
+    })).filter(point=> Number.isFinite(point.time) && Number.isFinite(point.price));
+    if(!priceSeries.length){
+        return null;
+    }
+    priceSeries.sort((a, b)=> a.time - b.time);
+    const earliestTime = priceSeries[0].time;
+    const latestTime = priceSeries[priceSeries.length - 1].time;
+    let startTs = Number.isFinite(rangeStartTs) ? Math.max(rangeStartTs, earliestTime) : earliestTime;
+    if(startTs > latestTime){
+        return null;
+    }
+    const operationsRaw = Array.isArray(position.operations) ? position.operations : [];
+    const operations = operationsRaw.map(op=>{
+        const date = getOperationDate(op);
+        if(!date) return null;
+        return {
+            type: String(op.type || '').toLowerCase(),
+            date,
+            amount: Number(op.amount || 0),
+            spent: Number(op.spent || 0)
+        };
+    }).filter(Boolean).sort((a, b)=> a.date - b.date);
+    let qty = 0;
+    let baselineSpent = 0;
+    const quantityOps = [];
+    const contributionOps = [];
+    operations.forEach(op=>{
+        const ts = op.date.getTime();
+        const hasAmount = Number.isFinite(op.amount) && Math.abs(op.amount) > 1e-9;
+        const hasSpent = Number.isFinite(op.spent) && Math.abs(op.spent) > 1e-6;
+        if(ts <= startTs){
+            if(op.type === 'purchasesell' && hasAmount){
+                qty += op.amount;
+            }
+            if(hasSpent){
+                baselineSpent += op.spent;
+            }
+        }else{
+            if(op.type === 'purchasesell' && hasAmount){
+                quantityOps.push({ date: op.date, amount: op.amount });
+            }
+            if(hasSpent){
+                contributionOps.push({ date: op.date, spent: op.spent });
+            }
+        }
+    });
+    let priceIndex = 0;
+    let currentPrice = null;
+    while(priceIndex < priceSeries.length && priceSeries[priceIndex].time <= startTs){
+        currentPrice = priceSeries[priceIndex].price;
+        priceIndex++;
+    }
+    if(currentPrice === null){
+        currentPrice = priceSeries[0].price;
+        startTs = priceSeries[0].time;
+        priceIndex = priceSeries.length > 1 ? 1 : priceSeries.length;
+    }
+    quantityOps.sort((a, b)=> a.date - b.date);
+    contributionOps.sort((a, b)=> a.date - b.date);
+    return {
+        position,
+        priceSeries,
+        priceIndex,
+        currentPrice,
+        qty,
+        quantityOps,
+        quantityIndex: 0,
+        contributionOps,
+        baselineSpent,
+        startTs
+    };
+}
+
+function computePnlTrend(range){
+    if(!Array.isArray(positions) || !positions.length){
+        return { points: [], hasData: false };
+    }
+    const rangeStart = getRangeStartDate(range);
+    const rangeStartTs = rangeStart instanceof Date && !Number.isNaN(rangeStart.getTime())
+        ? rangeStart.getTime()
+        : null;
+    const assetStates = [];
+    let baselineSpentTotal = 0;
+    const timelineSet = new Set();
+    let globalStartTs = null;
+    positions.forEach(position=>{
+        const state = buildPnlAssetState(position, rangeStartTs);
+        if(!state) return;
+        assetStates.push(state);
+        baselineSpentTotal += state.baselineSpent;
+        if(globalStartTs === null || state.startTs < globalStartTs){
+            globalStartTs = state.startTs;
+        }
+        timelineSet.add(state.startTs);
+        state.priceSeries.forEach(point=>{
+            if(point.time >= state.startTs){
+                timelineSet.add(point.time);
+            }
+        });
+        state.quantityOps.forEach(event=> timelineSet.add(event.date.getTime()));
+        state.contributionOps.forEach(event=> timelineSet.add(event.date.getTime()));
+    });
+    if(!assetStates.length){
+        return { points: [], hasData: false };
+    }
+    const nowTs = Date.now();
+    timelineSet.add(nowTs);
+    if(globalStartTs !== null){
+        timelineSet.add(globalStartTs);
+    }
+    const sortedTimeline = Array.from(timelineSet).sort((a, b)=> a - b).filter(ts => globalStartTs === null ? true : ts >= globalStartTs);
+    const contributions = [];
+    assetStates.forEach(state=>{
+        state.contributionOps.forEach(event=>{
+            contributions.push({ ts: event.date.getTime(), spent: event.spent });
+        });
+    });
+    contributions.sort((a, b)=> a.ts - b.ts);
+    let contributionIndex = 0;
+    let cumulativeSpent = baselineSpentTotal;
+    const points = [];
+    sortedTimeline.forEach(ts=>{
+        while(contributionIndex < contributions.length && contributions[contributionIndex].ts <= ts){
+            cumulativeSpent += contributions[contributionIndex].spent;
+            contributionIndex++;
+        }
+        let totalValue = 0;
+        assetStates.forEach(state=>{
+            while(state.priceIndex < state.priceSeries.length && state.priceSeries[state.priceIndex].time <= ts){
+                state.currentPrice = state.priceSeries[state.priceIndex].price;
+                state.priceIndex++;
+            }
+            while(state.quantityIndex < state.quantityOps.length && state.quantityOps[state.quantityIndex].date.getTime() <= ts){
+                state.qty += state.quantityOps[state.quantityIndex].amount;
+                state.quantityIndex++;
+            }
+            const price = Number(state.currentPrice);
+            if(!Number.isFinite(price)) return;
+            const qty = Number(state.qty || 0);
+            totalValue += qty * price;
+        });
+        points.push({ x: new Date(ts), y: totalValue - cumulativeSpent });
+    });
+    if(!points.length){
+        return { points: [], hasData: false };
+    }
+    const baseline = Number(points[0].y) || 0;
+    const normalized = points.map(point=> ({
+        x: point.x,
+        y: Number(point.y) - baseline
+    }));
+    return {
+        points: normalized,
+        hasData: normalized.length > 1 || normalized.some(point => Math.abs(point.y) > 1e-6)
+    };
+}
+
+function renderPnlTrendChart(range){
+    if(typeof document === 'undefined') return;
+    const canvas = document.getElementById('pnl-trend-chart');
+    if(!canvas){
+        if(pnlTrendChart){
+            pnlTrendChart.destroy();
+            pnlTrendChart = null;
+        }
+        return;
+    }
+    const { points, hasData } = computePnlTrend(range);
+    if(!points || !points.length){
+        if(pnlTrendChart){
+            pnlTrendChart.destroy();
+            pnlTrendChart = null;
+        }
+        const ctx = canvas.getContext('2d');
+        if(ctx){
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+        return;
+    }
+    const timeConfig = PNL_CHART_TIME_CONFIG[range] || PNL_CHART_TIME_CONFIG.ALL;
+    const values = points.map(point=> Number(point.y || 0));
+    const minValue = Math.min(...values);
+    const maxValue = Math.max(...values);
+    let padding = (maxValue - minValue) * 0.15;
+    if(!Number.isFinite(padding) || padding <= 0){
+        padding = Math.max(5, Math.abs(maxValue || 0) * 0.15 + 5);
+    }
+    const suggestedMin = minValue === 0 && maxValue === 0 ? -10 : minValue - padding;
+    const suggestedMax = minValue === 0 && maxValue === 0 ? 10 : maxValue + padding;
+    const dataset = {
+        type: 'line',
+        data: points.map(point=> ({ x: point.x, y: Number(point.y) })),
+        parsing: false,
+        tension: 0.35,
+        borderWidth: 2,
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        pointHitRadius: 14,
+        segment: {
+            borderColor(ctx){
+                const current = ctx.p1?.parsed?.y ?? 0;
+                const previous = ctx.p0?.parsed?.y ?? 0;
+                return current >= previous ? 'rgba(56, 189, 248, 0.85)' : 'rgba(248, 113, 113, 0.75)';
+            }
+        },
+        borderColor: 'rgba(56, 189, 248, 0.85)',
+        fill: {
+            target: 'origin',
+            above: 'rgba(56, 189, 248, 0.15)',
+            below: 'rgba(248, 113, 113, 0.18)'
+        }
+    };
+    const options = {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 420, easing: 'easeOutCubic' },
+        plugins: {
+            legend: { display: false },
+            tooltip: {
+                mode: 'index',
+                intersect: false,
+                displayColors: false,
+                callbacks: {
+                    title(items){
+                        const item = items && items[0];
+                        if(!item) return '';
+                        const rawDate = item.raw?.x ?? item.parsed?.x;
+                        const date = rawDate instanceof Date ? rawDate : new Date(rawDate);
+                        if(!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+                        if(range === '1D'){
+                            const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                            return `${formatDateShort(date)} ${time}`;
+                        }
+                        return formatDateShort(date);
+                    },
+                    label(item){
+                        const value = Number(item.parsed?.y || 0);
+                        return `P&L ${money(value)}`;
+                    }
+                }
+            }
+        },
+        scales: {
+            x: {
+                type: 'time',
+                time: {
+                    unit: timeConfig.unit,
+                    displayFormats: timeConfig.displayFormats
+                },
+                grid: {
+                    display: true,
+                    color: 'rgba(148, 163, 184, 0.18)',
+                    borderDash: [4, 6]
+                },
+                ticks: {
+                    color: 'rgba(226, 232, 240, 0.65)',
+                    maxTicksLimit: timeConfig.maxTicks || 6,
+                    autoSkip: true,
+                    maxRotation: 0
+                }
+            },
+            y: {
+                grid: {
+                    display: true,
+                    color: 'rgba(148, 163, 184, 0.16)',
+                    borderDash: [4, 6]
+                },
+                ticks: {
+                    color: 'rgba(226, 232, 240, 0.65)',
+                    callback: value => money(value)
+                },
+                suggestedMin,
+                suggestedMax
+            }
+        },
+        interaction: {
+            intersect: false,
+            mode: 'index'
+        }
+    };
+    if(pnlTrendChart){
+        pnlTrendChart.data.datasets = [dataset];
+        pnlTrendChart.options = options;
+        pnlTrendChart.update('none');
+        return;
+    }
+    if(typeof Chart === 'undefined'){
+        return;
+    }
+    const ctx = canvas.getContext('2d');
+    pnlTrendChart = new Chart(ctx, {
+        type: 'line',
+        data: { datasets: [dataset] },
+        options
+    });
+}
+
 function renderCategoryAnalytics(categoryKey, config){
     const normalized = categoryKey.toLowerCase();
     const listEl = document.getElementById(config.listId);
@@ -4711,8 +6391,12 @@ function renderCategoryAnalytics(categoryKey, config){
     }
 
     const sorted = [...items].sort((a,b)=> (b.marketValue || 0) - (a.marketValue || 0));
-    const openPositions = sorted.filter(p=> Number(p.qty || 0) > 0 || Number(p.marketValue || 0) > 1e-6);
-    const closedPositions = sorted.filter(p=> !openPositions.includes(p));
+    const openPositions = sorted.filter(p=> Math.abs(Number(p.qty || 0)) > 1e-6);
+    const closedPositions = sorted.filter(p=>{
+        const realized = Number(p.realized || 0);
+        const isClosed = Math.abs(Number(p.qty || 0)) <= 1e-6;
+        return isClosed || Math.abs(realized) > 1e-2;
+    });
     const openMarketValue = openPositions.reduce((sum,p)=> sum + Number(p.marketValue || 0), 0);
     const closedRealizedValue = closedPositions.reduce((sum,p)=> sum + Number(p.realized || 0), 0);
 
@@ -4784,8 +6468,9 @@ function updateKpis(){
         acc[key] = (acc[key] || 0) + value;
         return acc;
     }, {});
+    let realEstateAnalytics = null;
     try{
-        const realEstateAnalytics = computeRealEstateAnalytics();
+        realEstateAnalytics = computeRealEstateAnalytics();
         if(realEstateAnalytics && Array.isArray(realEstateAnalytics.rows) && realEstateAnalytics.rows.length){
             const projectedByCategory = realEstateAnalytics.rows.reduce((acc, stat)=>{
                 const value = Number(stat.projectedValue || 0);
@@ -4803,6 +6488,7 @@ function updateKpis(){
     }catch(error){
         console.warn('Failed to compute real estate projected totals for net worth', error);
     }
+    lastRealEstateAnalytics = realEstateAnalytics;
 
     const totalMarketValue = Object.values(netWorthTotals).reduce((sum, value)=> sum + Number(value || 0), 0);
 
@@ -4824,6 +6510,9 @@ function updateKpis(){
     setCategoryPnl('pnl-category-crypto', currentCategoryRangeTotals.crypto || 0, 'pnlCrypto');
     setCategoryPnl('pnl-category-stock', currentCategoryRangeTotals.stock || 0, 'pnlStock');
     setCategoryPnl('pnl-category-realestate', currentCategoryRangeTotals.realEstate || 0, 'pnlRealEstate');
+    updateBestPerformerCache(lastRealEstateAnalytics);
+    refreshActiveBestInfoPopover();
+    renderPnlTrendChart(pnlRange);
     if(netWorthInlineViewMode === 'bubble'){
         const snapshotHasData = netWorthBubbleSnapshot && Object.keys(netWorthBubbleSnapshot).length > 0;
         const currentHasData = lastNetWorthTotals && Object.keys(lastNetWorthTotals).length > 0;
@@ -4839,75 +6528,6 @@ function updateKpis(){
         const result = renderNetWorthMindmap(sourceTotals, sourceTotalValue);
         if(result){
             netWorthBubbleNeedsRender = false;
-        }
-    }
-
-    const bestNameEl = document.getElementById('best-performer-name');
-    const bestPnlEl = document.getElementById('best-performer-pnl');
-    const bestChangeEl = document.getElementById('best-performer-change');
-    const bestMetaEl = document.getElementById('best-performer-meta');
-    if(bestNameEl || bestPnlEl || bestChangeEl || bestMetaEl){
-        const eligible = positions.filter(position=>{
-            const type = (position.type || '').toLowerCase();
-            if(type === 'real estate') return false;
-            const qty = Number(position.qty || 0);
-            const mv = Number(position.marketValue || 0);
-            if(Math.abs(qty) <= 1e-6 && Math.abs(mv) <= 1e-6) return false;
-            return true;
-        });
-        const bestCandidate = eligible.reduce((acc, position)=>{
-            const raw = position.rangePnl ?? position.pnl ?? Number.NEGATIVE_INFINITY;
-            const value = Number(raw);
-            const usable = Number.isFinite(value) ? value : Number.NEGATIVE_INFINITY;
-            if(acc === null) return { position, value: usable };
-            return usable > acc.value ? { position, value: usable } : acc;
-        }, null);
-
-        if(bestCandidate && bestCandidate.position && bestCandidate.value !== Number.NEGATIVE_INFINITY){
-            const best = bestCandidate.position;
-            const displayName = best.displayName || best.Symbol || best.Name || '—';
-            const bestChanged = previousBestPerformer.id && previousBestPerformer.id !== best.id;
-            if(bestNameEl){
-                bestNameEl.textContent = displayName;
-                if(bestChanged){
-                    flashElement(bestNameEl, 'up');
-                }
-            }
-            if(bestMetaEl){
-                bestMetaEl.textContent = `${best.type || '—'} · Qty ${formatQty(Number(best.qty || 0))}`;
-            }
-            if(bestPnlEl){
-                bestPnlEl.textContent = money(bestCandidate.value);
-                if(bestChanged){
-                    flashElement(bestPnlEl, 'up');
-                }else if(previousBestPerformer.pnl !== null){
-                    const direction = bestCandidate.value > previousBestPerformer.pnl ? 'up' : bestCandidate.value < previousBestPerformer.pnl ? 'down' : null;
-                    flashElement(bestPnlEl, direction);
-                }
-            }
-            if(bestChangeEl){
-                const changeRaw = best.rangeChangePct ?? best.changePct ?? 0;
-                const changeVal = Number(changeRaw);
-                const hasChange = Number.isFinite(changeVal);
-                bestChangeEl.textContent = hasChange ? `${changeVal >= 0 ? '+' : ''}${changeVal.toFixed(2)}%` : '—';
-                if(bestChanged && hasChange){
-                    flashElement(bestChangeEl, changeVal >= 0 ? 'up' : 'down');
-                }else if(hasChange && previousBestPerformer.change !== null){
-                    const direction = changeVal > previousBestPerformer.change ? 'up' : changeVal < previousBestPerformer.change ? 'down' : null;
-                    flashElement(bestChangeEl, direction);
-                }
-                previousBestPerformer.change = hasChange ? changeVal : null;
-            }
-            previousBestPerformer.id = best.id;
-            previousBestPerformer.pnl = bestCandidate.value;
-        }else{
-            if(bestNameEl) bestNameEl.textContent = '—';
-            if(bestPnlEl) bestPnlEl.textContent = '—';
-            if(bestChangeEl) bestChangeEl.textContent = '—';
-            if(bestMetaEl) bestMetaEl.textContent = 'Awaiting data…';
-            previousBestPerformer.id = null;
-            previousBestPerformer.pnl = null;
-            previousBestPerformer.change = null;
         }
     }
 
@@ -5066,6 +6686,8 @@ document.addEventListener('DOMContentLoaded', ()=>{
     ensureTransactionModalElements();
     ensureNetWorthDetailModalElements();
     initializePnlRangeTabs();
+    renderPnlTrendChart(pnlRange);
+    initializeBestInfoTriggers();
     document.addEventListener('keydown', event => {
         if(event.key === 'Escape'){
             let handled = false;
@@ -5075,6 +6697,10 @@ document.addEventListener('DOMContentLoaded', ()=>{
             }
             if(transactionModal && !transactionModal.classList.contains('hidden')){
                 closeTransactionModal();
+                handled = true;
+            }
+            if(bestInfoPopoverElements && bestInfoPopoverElements.popover && !bestInfoPopoverElements.popover.classList.contains('hidden')){
+                hideBestInfoPopover();
                 handled = true;
             }
             if(handled){
