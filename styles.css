@@ -355,6 +355,33 @@ body::before {
     gap: 8px;
 }
 
+.modal-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: flex-start;
+}
+
+.modal-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 120px;
+}
+
+.modal-stat-label {
+    font-size: 0.75rem;
+    letter-spacing: 0.35px;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 600;
+}
+
+.modal-stat-value {
+    font-size: 1.35rem;
+    font-weight: 600;
+}
+
 .price-history-note {
     font-size: 0.85rem;
     color: var(--muted);
@@ -551,11 +578,10 @@ body.light-theme .lot-neutral {
     border-radius: 12px;
     background: rgba(15, 23, 42, 0.45);
     border: 1px solid rgba(148, 163, 184, 0.25);
-    margin-top: 8px;
+    margin: 0;
     align-self: flex-start;
-    margin-left: 0;
-    margin-right: auto;
-    flex-basis: 100%;
+    flex: 0 0 auto;
+    min-width: 230px;
 }
 
 .market-dot {
@@ -1241,28 +1267,18 @@ body.light-theme .pnl-chart {
 .analytics-header-right {
     flex-wrap: wrap;
     justify-content: flex-end;
+    width: 100%;
 }
 
 .card-header-right .analytics-summary,
 .analytics-header-right .analytics-summary {
     margin: 0;
-    flex: 1 1 auto;
-    min-width: 0;
+    flex: 1 1 240px;
+    min-width: 200px;
 }
 
-.analytics-header-actions {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    flex: 0 0 auto;
-    margin-left: auto;
-}
-
-.analytics-header-actions .market-status {
+.analytics-header-right .market-status {
     margin: 0;
-    flex-basis: auto;
 }
 
 .best-info-popover {
@@ -2498,6 +2514,11 @@ body.light-theme .status-dot { background: #22c55e; box-shadow: 0 0 6px rgba(34,
     .controls { width: 100%; }
     .pnl-breakdown { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
     .pnl-chart { height: 150px; padding: 12px; }
+    .analytics-header-right .market-status,
+    .analytics-header-right .analytics-summary {
+        flex-basis: 100%;
+        min-width: 0;
+    }
 }
 
 @media (max-width: 600px) {
