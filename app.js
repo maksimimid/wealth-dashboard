@@ -224,8 +224,8 @@ const transactionPriceCache = new Map();
 const localHistoricalCache = new Map();
 const LOCAL_HISTORIC_DIR = 'assets/historic';
 const LOCAL_HISTORIC_PREFIX = 'historic-';
-const LOCAL_HISTORIC_SUFFIX = '-usd.tsv';
-const DEFAULT_HISTORIC_HEADER = '"Time"\t"Close"';
+const LOCAL_HISTORIC_SUFFIX = '-usd.csv';
+const DEFAULT_HISTORIC_HEADER = '"Time","Close"';
 const HISTORIC_SYMBOL_SUFFIXES = ['USDT','USDC','USD'];
 const MS_IN_DAY = 24 * 60 * 60 * 1000;
 
@@ -318,10 +318,34 @@ function buildHistoricFilePath(cacheKey){
 function buildHistoricHeader(position){
     const base = getCryptoBaseTicker(position);
     if(!base) return DEFAULT_HISTORIC_HEADER;
-    return `"Time"\t"${base.toUpperCase()} / USD Close"`;
+    return `"Time","${base.toUpperCase()} / USD Close"`;
 }
 
-function parseLocalHistoricalTsv(text){
+function splitCsvLine(line){
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+    for(let i = 0; i < line.length; i++){
+        const char = line[i];
+        if(char === '"'){
+            if(inQuotes && line[i + 1] === '"'){
+                current += '"';
+                i++;
+            }else{
+                inQuotes = !inQuotes;
+            }
+        }else if(char === ',' && !inQuotes){
+            result.push(current);
+            current = '';
+        }else{
+            current += char;
+        }
+    }
+    result.push(current);
+    return result.map(value => value.trim());
+}
+
+function parseLocalHistoricalCsv(text){
     if(typeof text !== 'string') return null;
     const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
     if(!lines.length) return null;
@@ -329,7 +353,7 @@ function parseLocalHistoricalTsv(text){
     const series = [];
     lines.forEach(line=>{
         if(!line) return;
-        const parts = line.split(/\t/);
+        const parts = splitCsvLine(line);
         if(parts.length < 2) return;
         const dateStr = parts[0].replace(/"/g, '').trim();
         const priceStr = parts[1].replace(/"/g, '').replace(/,/g,'').trim();
@@ -383,7 +407,7 @@ async function loadLocalHistoricalSeries(position){
             return null;
         }
     }
-    const parsed = parseLocalHistoricalTsv(text);
+    const parsed = parseLocalHistoricalCsv(text);
     if(!parsed){
         localHistoricalCache.set(cacheKey, null);
         return null;
@@ -461,12 +485,12 @@ async function writeHistoricalSeriesFile(relativePath, header, series){
             if(!date || !Number.isFinite(price)) return;
             const dateKey = formatDateKey(date);
             if(!dateKey) return;
-            lines.push(`"${dateKey}"\t${price}`);
+            lines.push(`"${dateKey}",${price}`);
         });
         await fs.writeFile(absolutePath, lines.join('\n'), 'utf8');
         return true;
     }catch(error){
-        console.warn('Failed to persist historical TSV', relativePath, error);
+        console.warn('Failed to persist historical CSV', relativePath, error);
         return false;
     }
 }
@@ -3567,7 +3591,7 @@ async function preloadHistoricalPriceSeries(){
             const currentIndex = nextIndex++;
             const position = eligible[currentIndex];
             try{
-                await fetchHistoricalPriceSeries(position);
+                await fetchLocalCsvSeries(position);
             }catch(error){
                 console.warn('Historical preload failed', position?.Symbol || position?.displayName || position?.Name, error);
             }finally{
