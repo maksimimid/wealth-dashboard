@@ -3520,6 +3520,20 @@ async function fetchHistoricalPriceSeries(position){
     return [];
 }
 
+async function fetchLocalCsvSeries(position){
+    try{
+        const info = await loadLocalHistoricalSeries(position);
+        if(!info || !Array.isArray(info.series) || !info.series.length){
+            return [];
+        }
+        const firstPurchaseTime = getFirstPurchaseTime(position);
+        return preparePriceSeries(info.series, firstPurchaseTime, position);
+    }catch(error){
+        console.warn('Local CSV load failed', error);
+        return [];
+    }
+}
+
 function shouldPreloadPriceHistory(position){
     if(!position) return false;
     if(Array.isArray(position.priceHistory) && position.priceHistory.length){
@@ -4466,14 +4480,14 @@ function openTransactionModal(position){
 
 async function loadHistoricalPriceSeries(position){
     try{
-        const series = await fetchHistoricalPriceSeries(position);
+        const series = await fetchLocalCsvSeries(position);
         if(!series.length){
             if(transactionModalMeta){
                 const existing = transactionModalMeta.querySelector('.price-history-note');
                 if(!existing){
                     const note = document.createElement('div');
                     note.className = 'pos price-history-note';
-                    note.textContent = 'Historical price data unavailable.';
+                    note.textContent = 'Provide an assets/historic CSV to enable price history.';
                     transactionModalMeta.appendChild(note);
                 }
             }
@@ -4494,7 +4508,7 @@ async function loadHistoricalPriceSeries(position){
         transactionChart.canvas.classList.remove('hidden');
         renderPnlTrendChart(pnlRange);
     }catch(error){
-        console.warn('Failed to load historical price series', error);
+        console.warn('Failed to load local historical price series', error);
     }
 }
 
