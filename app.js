@@ -3577,7 +3577,7 @@ async function preloadHistoricalPriceSeries(){
             const currentIndex = nextIndex++;
             const position = eligible[currentIndex];
             try{
-                await fetchLocalCsvSeries(position);
+                await fetchHistoricalPriceSeries(position);
             }catch(error){
                 console.warn('Historical preload failed', position?.Symbol || position?.displayName || position?.Name, error);
             }finally{
@@ -4490,14 +4490,14 @@ function openTransactionModal(position){
 
 async function loadHistoricalPriceSeries(position){
     try{
-        const series = await fetchLocalCsvSeries(position);
+        const series = await fetchHistoricalPriceSeries(position);
         if(!series.length){
             if(transactionModalMeta){
                 const existing = transactionModalMeta.querySelector('.price-history-note');
                 if(!existing){
                     const note = document.createElement('div');
                     note.className = 'pos price-history-note';
-                    note.textContent = 'Provide an assets/historic CSV to enable price history.';
+                    note.textContent = 'Historical price data unavailable.';
                     transactionModalMeta.appendChild(note);
                 }
             }
