@@ -3544,20 +3544,6 @@ async function fetchHistoricalPriceSeries(position){
     return [];
 }
 
-async function fetchLocalCsvSeries(position){
-    try{
-        const info = await loadLocalHistoricalSeries(position);
-        if(!info || !Array.isArray(info.series) || !info.series.length){
-            return [];
-        }
-        const firstPurchaseTime = getFirstPurchaseTime(position);
-        return preparePriceSeries(info.series, firstPurchaseTime, position);
-    }catch(error){
-        console.warn('Local CSV load failed', error);
-        return [];
-    }
-}
-
 function shouldPreloadPriceHistory(position){
     if(!position) return false;
     if(Array.isArray(position.priceHistory) && position.priceHistory.length){
