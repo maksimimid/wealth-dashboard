@@ -3897,9 +3897,30 @@ function buildTransactionChartData(position){
 
 function buildTransactionChartConfig(data, position, priceSeries = []){
     const datasets = [];
-    const effectivePriceSeries = (priceSeries.length ? priceSeries : (data.fallbackPriceSeries || [])).map(point=> ({ x: point.x, y: point.y ?? point.c ?? point.price ?? point.value }));
+    const basePriceSeries = (priceSeries.length ? priceSeries : (data.fallbackPriceSeries || [])).map(point=> ({ x: point.x, y: point.y ?? point.c ?? point.price ?? point.value }));
+    const livePrice = Number(position?.currentPrice ?? position?.displayPrice ?? position?.lastKnownPrice ?? position?.avgPrice ?? 0);
     const fallbackPrice = Number(position.displayPrice || position.currentPrice || position.lastKnownPrice || position.avgPrice || 0) || 0;
     const chartHasTransactions = data.purchases.length || data.sales.length;
+
+    const effectivePriceSeries = (()=> {
+        const series = [...basePriceSeries];
+        if(Number.isFinite(livePrice) && livePrice > 0){
+            const nowPoint = { x: new Date(), y: livePrice };
+            const lastPoint = series[series.length - 1];
+            if(!lastPoint){
+                series.push(nowPoint);
+            }else{
+                const lastTime = lastPoint.x instanceof Date ? lastPoint.x.getTime() : new Date(lastPoint.x).getTime();
+                const nowTime = nowPoint.x.getTime();
+                if(!Number.isFinite(lastTime) || Math.abs(nowTime - lastTime) > 60 * 1000){
+                    series.push(nowPoint);
+                }else{
+                    series[series.length - 1] = nowPoint;
+                }
+            }
+        }
+        return series;
+    })();
 
     if(effectivePriceSeries.length){
         datasets.push({
