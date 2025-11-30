@@ -87,7 +87,7 @@ const realEstateRentFilters = new Map();
 const realEstateGroupState = { active: true, passive: false };
 let transactionModal = null;
 let transactionModalTitle = null;
-let transactionModalSubtitle = null;
+let transactionModalOperations = null;
 let transactionModalMeta = null;
 let transactionModalCanvas = null;
 let transactionChart = null;
@@ -224,8 +224,8 @@ const transactionPriceCache = new Map();
 const localHistoricalCache = new Map();
 const LOCAL_HISTORIC_DIR = 'assets/historic';
 const LOCAL_HISTORIC_PREFIX = 'historic-';
-const LOCAL_HISTORIC_SUFFIX = '-usd.tsv';
-const DEFAULT_HISTORIC_HEADER = '"Time"\t"Close"';
+const LOCAL_HISTORIC_SUFFIX = '-usd.csv';
+const DEFAULT_HISTORIC_HEADER = '"Time","Close"';
 const HISTORIC_SYMBOL_SUFFIXES = ['USDT','USDC','USD'];
 const MS_IN_DAY = 24 * 60 * 60 * 1000;
 
@@ -318,10 +318,34 @@ function buildHistoricFilePath(cacheKey){
 function buildHistoricHeader(position){
     const base = getCryptoBaseTicker(position);
     if(!base) return DEFAULT_HISTORIC_HEADER;
-    return `"Time"\t"${base.toUpperCase()} / USD Close"`;
+    return `"Time","${base.toUpperCase()} / USD Close"`;
 }
 
-function parseLocalHistoricalTsv(text){
+function splitCsvLine(line){
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+    for(let i = 0; i < line.length; i++){
+        const char = line[i];
+        if(char === '"'){
+            if(inQuotes && line[i + 1] === '"'){
+                current += '"';
+                i++;
+            }else{
+                inQuotes = !inQuotes;
+            }
+        }else if(char === ',' && !inQuotes){
+            result.push(current);
+            current = '';
+        }else{
+            current += char;
+        }
+    }
+    result.push(current);
+    return result.map(value => value.trim());
+}
+
+function parseLocalHistoricalCsv(text){
     if(typeof text !== 'string') return null;
     const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
     if(!lines.length) return null;
@@ -329,7 +353,7 @@ function parseLocalHistoricalTsv(text){
     const series = [];
     lines.forEach(line=>{
         if(!line) return;
-        const parts = line.split(/\t/);
+        const parts = splitCsvLine(line);
         if(parts.length < 2) return;
         const dateStr = parts[0].replace(/"/g, '').trim();
         const priceStr = parts[1].replace(/"/g, '').replace(/,/g,'').trim();
@@ -383,7 +407,7 @@ async function loadLocalHistoricalSeries(position){
             return null;
         }
     }
-    const parsed = parseLocalHistoricalTsv(text);
+    const parsed = parseLocalHistoricalCsv(text);
     if(!parsed){
         localHistoricalCache.set(cacheKey, null);
         return null;
@@ -461,12 +485,12 @@ async function writeHistoricalSeriesFile(relativePath, header, series){
             if(!date || !Number.isFinite(price)) return;
             const dateKey = formatDateKey(date);
             if(!dateKey) return;
-            lines.push(`"${dateKey}"\t${price}`);
+            lines.push(`"${dateKey}",${price}`);
         });
         await fs.writeFile(absolutePath, lines.join('\n'), 'utf8');
         return true;
     }catch(error){
-        console.warn('Failed to persist historical TSV', relativePath, error);
+        console.warn('Failed to persist historical CSV', relativePath, error);
         return false;
     }
 }
@@ -3338,7 +3362,7 @@ function ensureTransactionModalElements(){
     transactionModal = document.getElementById('transaction-modal');
     if(!transactionModal) return;
     transactionModalTitle = document.getElementById('transaction-modal-title');
-    transactionModalSubtitle = document.getElementById('transaction-modal-subtitle');
+    transactionModalOperations = document.getElementById('transaction-modal-operations-count');
     transactionModalMeta = document.getElementById('transaction-modal-meta');
     transactionModalCanvas = document.getElementById('transaction-chart');
     modalChartContainer = transactionModal.querySelector('.modal-chart');
@@ -3520,6 +3544,53 @@ async function fetchHistoricalPriceSeries(position){
     return [];
 }
 
+function shouldPreloadPriceHistory(position){
+    if(!position) return false;
+    if(Array.isArray(position.priceHistory) && position.priceHistory.length){
+        return false;
+    }
+    if(!Array.isArray(position.operations) || !position.operations.length){
+        return false;
+    }
+    const typeKey = String(position.type || position.Category || '').toLowerCase();
+    return typeKey === 'crypto' || typeKey === 'stock';
+}
+
+async function preloadHistoricalPriceSeries(){
+    if(!Array.isArray(positions) || !positions.length){
+        return;
+    }
+    const eligible = positions.filter(shouldPreloadPriceHistory);
+    if(!eligible.length){
+        return;
+    }
+    let completed = 0;
+    const total = eligible.length;
+    const updateProgress = ()=>{
+        reportLoading(`Loading historical price data… ${completed}/${total}`);
+    };
+    updateProgress();
+    const CONCURRENCY = 3;
+    let nextIndex = 0;
+    async function worker(){
+        while(nextIndex < eligible.length){
+            const currentIndex = nextIndex++;
+            const position = eligible[currentIndex];
+            try{
+                await fetchHistoricalPriceSeries(position);
+            }catch(error){
+                console.warn('Historical preload failed', position?.Symbol || position?.displayName || position?.Name, error);
+            }finally{
+                completed += 1;
+                updateProgress();
+            }
+        }
+    }
+    const workerCount = Math.min(CONCURRENCY, eligible.length);
+    await Promise.all(Array.from({length: workerCount}, worker));
+    reportLoading('Preparing dashboard data…');
+}
+
 async function fetchFinnhubSeries(position, rawSymbol, firstPurchaseTime){
     try{
         if(!position.finnhubSymbol){
@@ -3697,6 +3768,24 @@ async function fetchCoinGeckoSeries(coinId, firstPurchaseTime){
 }
 
 function registerFinancialControllers(){ /* no-op placeholder */ }
+
+function getOperationCount(position){
+    if(!position || !Array.isArray(position.operations)) return 0;
+    return position.operations.filter(op=>{
+        const type = String(op.type || '').toLowerCase();
+        if(type !== 'purchasesell') return false;
+        if(op.skipInCharts) return false;
+        return true;
+    }).length;
+}
+
+function formatOperationCount(value){
+    const count = Number(value);
+    if(!Number.isFinite(count) || count < 0){
+        return '0';
+    }
+    return count.toLocaleString();
+}
 
 function buildTransactionChartData(position){
     const operations = Array.isArray(position.operations) ? position.operations.filter(op => String(op.type || '').toLowerCase() === 'purchasesell' && !op.skipInCharts) : [];
@@ -4359,12 +4448,9 @@ function openTransactionModal(position){
     if(transactionModalTitle){
         transactionModalTitle.textContent = `${displayName} transactions`;
     }
-    if(transactionModalSubtitle){
-            transactionModalSubtitle.textContent = position.type || '—';
-            const note = document.createElement('div');
-            note.className = 'pos modal-note';
-            note.textContent = 'Dot size represents traded quantity.';
-            transactionModalSubtitle.appendChild(note);
+    if(transactionModalOperations){
+        const operationCount = getOperationCount(position);
+        transactionModalOperations.textContent = formatOperationCount(operationCount);
     }
 
     const hasData = data.purchases.length || data.sales.length;
@@ -4432,7 +4518,7 @@ async function loadHistoricalPriceSeries(position){
         transactionChart.canvas.classList.remove('hidden');
         renderPnlTrendChart(pnlRange);
     }catch(error){
-        console.warn('Failed to load historical price series', error);
+        console.warn('Failed to load local historical price series', error);
     }
 }
 
@@ -6639,6 +6725,7 @@ function setPnlPercentageVisibility(enabled){
 // ----------------- BOOTSTRAP LOGIC -----------------
 async function bootstrap(){
     await loadPositions();
+    await preloadHistoricalPriceSeries();
 
     const finnhubSymbols = Array.from(symbolSet);
     if(finnhubSymbols.length){
