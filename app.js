@@ -3418,7 +3418,8 @@ async function fetchHistoricalPriceSeries(position){
     const yahooSymbol = mapYahooSymbol(position);
     const cacheKey = `${finnhubSymbol || ''}|${coinGeckoId || yahooSymbol || ''}|${typeKey}`;
     const firstPurchaseTime = getFirstPurchaseTime(position);
-    const finalizeSeries = rawSeries=>{
+
+    const prepareAndCacheSeries = rawSeries=>{
         const sanitized = sanitizePriceSeries(rawSeries);
         if(!sanitized.length){
             transactionPriceCache.set(cacheKey, []);
@@ -3439,104 +3440,96 @@ async function fetchHistoricalPriceSeries(position){
         }
     }
 
+    let combinedSeries = [];
+    const appendSeries = incoming=>{
+        if(!Array.isArray(incoming) || !incoming.length) return false;
+        combinedSeries = mergeHistoricalSeries(combinedSeries, incoming);
+        return true;
+    };
+    const getLastPointDate = ()=>{
+        if(!combinedSeries.length) return null;
+        const last = combinedSeries[combinedSeries.length - 1];
+        return toValidDate(last.time ?? last.x ?? last.date ?? last.timestamp ?? null);
+    };
+    const needsSeriesUpdate = ()=> needsHistoricalUpdate(getLastPointDate());
+
+    const cacheKeyLocal = getLocalHistoricCacheKey(position);
+    const localHeader = buildHistoricHeader(position);
+    let localInfo = cacheKeyLocal ? await loadLocalHistoricalSeries(position) : null;
+    let localPath = localInfo?.path || (cacheKeyLocal ? buildHistoricFilePath(cacheKeyLocal) : null);
+    let shouldPersistLocal = false;
+
+    if(localInfo && Array.isArray(localInfo.series) && localInfo.series.length){
+        appendSeries(localInfo.series);
+    }
+
     if(typeKey === 'crypto'){
-        const localInfo = await loadLocalHistoricalSeries(position);
-        let localSeriesUsed = null;
-        if(localInfo && Array.isArray(localInfo.series) && localInfo.series.length){
-            let workingSeries = localInfo.series.slice();
-            localSeriesUsed = workingSeries;
-            let lastLocalDate = toValidDate(localInfo.lastDate);
-            const todayKey = formatDateKey(new Date());
-            const alreadyCheckedToday = localInfo.lastChecked && localInfo.lastChecked === todayKey;
-            const requiresUpdate = needsHistoricalUpdate(lastLocalDate);
-
-            if(!alreadyCheckedToday && requiresUpdate && MASSIVE_API_KEY){
-                let startDate = addDays(lastLocalDate, 1);
-                const endDate = new Date();
-                if(startDate && startDate <= endDate){
-                    const earliestAllowed = addDays(endDate, -730);
-                    if(earliestAllowed && startDate < earliestAllowed){
-                        startDate = earliestAllowed;
-                    }
-                    const updates = await fetchMassiveHistoricalSeries(position, startDate, endDate);
-                    if(Array.isArray(updates) && updates.length){
-                        workingSeries = mergeHistoricalSeries(workingSeries, updates);
-                        const mergedLastPoint = workingSeries[workingSeries.length - 1];
-                        lastLocalDate = mergedLastPoint ? toValidDate(mergedLastPoint.time) : lastLocalDate;
-                        if(typeof window === 'undefined'){
-                            await writeHistoricalSeriesFile(localInfo.path, localInfo.header, workingSeries);
-                        }
-                    }
-                }
-                localHistoricalCache.set(localInfo.cacheKey, {
-                    ...localInfo,
-                    series: workingSeries,
-                    lastDate: lastLocalDate,
-                    lastChecked: todayKey
-                });
-            }else if(!requiresUpdate && localInfo.lastChecked !== todayKey){
-                localHistoricalCache.set(localInfo.cacheKey, {
-                    ...localInfo,
-                    lastChecked: todayKey
-                });
-            }
-
-            const finalLocal = finalizeSeries(workingSeries);
-            if(finalLocal.length){
-                return finalLocal;
-            }
-        }
-
-        if(MASSIVE_API_KEY && (!localInfo || !localSeriesUsed || !localSeriesUsed.length)){
+        if(MASSIVE_API_KEY && needsSeriesUpdate()){
+            const lastDate = getLastPointDate();
+            let startDate = lastDate ? addDays(lastDate, 1) : null;
             const endDate = new Date();
-            let startDate = firstPurchaseTime ? toValidDate(firstPurchaseTime) : null;
-            if(!startDate){
+            if(!startDate || startDate > endDate){
                 startDate = addDays(endDate, -730);
             }
             if(startDate && startDate <= endDate){
                 const updates = await fetchMassiveHistoricalSeries(position, startDate, endDate);
                 if(Array.isArray(updates) && updates.length){
-                    const merged = mergeHistoricalSeries([], updates);
-                    const cacheKeyLocal = getLocalHistoricCacheKey(position);
-                    const relativePath = buildHistoricFilePath(cacheKeyLocal);
-                    if(cacheKeyLocal && relativePath){
-                        if(typeof window === 'undefined'){
-                            await writeHistoricalSeriesFile(relativePath, buildHistoricHeader(position), merged);
-                        }
-                        localHistoricalCache.set(cacheKeyLocal, {
-                            cacheKey: cacheKeyLocal,
-                            path: relativePath,
-                            header: buildHistoricHeader(position),
-                            series: merged,
-                            lastDate: merged.length ? toValidDate(merged[merged.length - 1].time) : null,
-                            lastChecked: formatDateKey(new Date())
-                        });
-                    }
-                    return finalizeSeries(merged);
+                    appendSeries(updates);
+                    shouldPersistLocal = true;
                 }
+            }
+        }
+        if((!combinedSeries.length || needsSeriesUpdate()) && coinGeckoId){
+            const updates = await fetchCoinGeckoSeries(coinGeckoId, firstPurchaseTime);
+            if(Array.isArray(updates) && updates.length){
+                appendSeries(updates);
+                shouldPersistLocal = true;
             }
         }
     }
 
-    if(finnhubSymbol && FINNHUB_KEY){
+    if((!combinedSeries.length || needsSeriesUpdate()) && finnhubSymbol && FINNHUB_KEY){
         const series = await fetchFinnhubSeries(position, finnhubSymbol, firstPurchaseTime);
-        if(series.length){
-            return finalizeSeries(series);
+        if(Array.isArray(series) && series.length){
+            appendSeries(series);
         }
     }
 
-    if(coinGeckoId){
+    if((!combinedSeries.length || needsSeriesUpdate()) && coinGeckoId && typeKey !== 'crypto'){
         const series = await fetchCoinGeckoSeries(coinGeckoId, firstPurchaseTime);
-        if(series.length){
-            return finalizeSeries(series);
+        if(Array.isArray(series) && series.length){
+            appendSeries(series);
         }
     }
 
-    if(yahooSymbol){
-        const series = await fetchAlphaVantageSeries(yahooSymbol, typeKey, firstPurchaseTime);
-        if(series.length){
-            return finalizeSeries(series);
+    if(!combinedSeries.length || needsSeriesUpdate()){
+        if(yahooSymbol){
+            const series = await fetchAlphaVantageSeries(yahooSymbol, typeKey, firstPurchaseTime);
+            if(Array.isArray(series) && series.length){
+                appendSeries(series);
+            }
         }
+    }
+
+    if(combinedSeries.length){
+        if(shouldPersistLocal && cacheKeyLocal && localPath){
+            if(typeof window === 'undefined'){
+                try{
+                    await writeHistoricalSeriesFile(localPath, localHeader, combinedSeries);
+                }catch(error){
+                    console.warn('Failed to persist historical CSV', localPath, error);
+                }
+            }
+            localHistoricalCache.set(cacheKeyLocal, {
+                cacheKey: cacheKeyLocal,
+                path: localPath,
+                header: localHeader,
+                series: combinedSeries,
+                lastDate: getLastPointDate(),
+                lastChecked: formatDateKey(new Date())
+            });
+        }
+        return prepareAndCacheSeries(combinedSeries);
     }
 
     transactionPriceCache.set(cacheKey, []);
