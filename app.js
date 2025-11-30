@@ -6409,17 +6409,13 @@ function renderPnlTrendChart(range){
                 }
             },
             y: {
-                grid: {
-                    display: true,
-                    color: 'rgba(148, 163, 184, 0.16)',
-                    borderDash: [4, 6]
-                },
-                ticks: {
-                    color: 'rgba(226, 232, 240, 0.65)',
-                    callback: value => money(value)
-                },
+                display: false,
                 suggestedMin,
-                suggestedMax
+                suggestedMax,
+                grid: {
+                    display: false,
+                    drawBorder: false
+                }
             }
         },
         interaction: {
