@@ -1059,14 +1059,17 @@ function getRangeStartDate(range){
         case '1D':
             start.setDate(start.getDate() - 1);
             break;
-        case '1W':
-            start.setDate(start.getDate() - 7);
+        case '1W':{
+            const weekday = start.getDay(); // Sunday = 0, Monday = 1
+            const offsetFromMonday = (weekday + 6) % 7;
+            start.setDate(start.getDate() - offsetFromMonday);
             break;
+        }
         case '1M':
-            start.setMonth(start.getMonth() - 1);
+            start.setDate(1);
             break;
         case '1Y':
-            start.setFullYear(start.getFullYear() - 1);
+            start.setMonth(0, 1);
             break;
         default:
             return null;
