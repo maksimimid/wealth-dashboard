@@ -2319,7 +2319,7 @@ function transformOperations(records, progressCb){
                 const sellQty = Math.abs(amount);
                 const proceeds = spent < 0 ? Math.abs(spent) : Math.abs(price * sellQty);
                 const saleId = rec.id || `sale-${index}`;
-                const saleDate = date instanceof Date ? date : (date ? new Date(date) : null);
+                const sellDate = date instanceof Date ? date : (date ? new Date(date) : null);
                 if(useLots){
                     let remaining = sellQty;
                     let costOut = 0;
