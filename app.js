@@ -57,6 +57,11 @@ const RANGE_LABELS = PNL_RANGE_CONFIG.reduce((acc, item)=>{
     acc[item.key] = item.label;
     return acc;
 }, {});
+const DATA_SOURCE_LABELS = {
+    loading: 'Loading data…',
+    airtable: 'Live Airtable',
+    fallback: 'Offline snapshot'
+};
 const PNL_CHART_TIME_CONFIG = {
     '1D': { unit: 'hour', displayFormats: { hour: 'ha' }, maxTicks: 6 },
     '1W': { unit: 'day', displayFormats: { day: 'MMM d' }, maxTicks: 7 },
@@ -160,6 +165,7 @@ let netWorthBubbleSnapshot = null;
 let netWorthBubbleSnapshotTotal = 0;
 let netWorthDetailSubtitle = null;
 let netWorthDetailMeta = null;
+let dataSourceMode = 'loading';
 const sparklineCrosshairPlugin = {
     id: 'sparklineCrosshair',
     afterDraw(chart){
@@ -2514,6 +2520,8 @@ async function loadPositions(){
         if(!positions.length){
             throw new Error('No positions available after transformation');
         }
+        dataSourceMode = 'airtable';
+        updateDataSourceBadge();
     }catch(err){
         console.warn('Airtable load failed, using fallback', err);
         setStatus('Airtable unavailable — showing demo data');
@@ -2529,6 +2537,8 @@ async function loadPositions(){
         });
         setLoadingState('error','Airtable unavailable — showing demo data');
         setTimeout(()=>setLoadingState('hidden'), 1400);
+        dataSourceMode = 'fallback';
+        updateDataSourceBadge();
     }
     rangeDirty = true;
     assetYearSeriesDirty = true;
@@ -2868,6 +2878,16 @@ function renderAllCharts(){
 
 // ----------------- UI -----------------
 function setStatus(s){ const el = document.getElementById('status'); if(el) el.textContent = s; }
+
+function updateDataSourceBadge(){
+    if(typeof document === 'undefined') return;
+    const badge = document.getElementById('data-source-badge');
+    if(!badge) return;
+    const label = DATA_SOURCE_LABELS[dataSourceMode] || DATA_SOURCE_LABELS.loading;
+    badge.textContent = label;
+    badge.setAttribute('data-source', dataSourceMode in DATA_SOURCE_LABELS ? dataSourceMode : 'loading');
+    badge.title = label;
+}
 
 function computeRealEstateAnalytics(){
     const now = new Date();
@@ -6783,6 +6803,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
     if(loadingOverlay){
         setLoadingState('visible','Loading Airtable…');
     }
+    updateDataSourceBadge();
     ensureTransactionModalElements();
     ensureNetWorthDetailModalElements();
     initializePnlRangeTabs();
