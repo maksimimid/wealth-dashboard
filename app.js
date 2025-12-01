@@ -23,6 +23,11 @@ const AIRTABLE_URL = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${encodeUR
 
 const MASSIVE_API_KEY = RUNTIME_CONFIG.MASSIVE_API_KEY || DEFAULT_CONFIG.MASSIVE_API_KEY;
 const MASSIVE_API_BASE_URL = RUNTIME_CONFIG.MASSIVE_API_BASE_URL || DEFAULT_CONFIG.MASSIVE_API_BASE_URL;
+const SNAPSHOT_STORAGE_KEYS = {
+    records: 'airtableSnapshotRecords',
+    savedAt: 'airtableSnapshotSavedAt',
+    csv: 'airtableSnapshotCsv'
+};
 
 // ----------------- STATE --------------------
 let positions = [];
@@ -40,6 +45,16 @@ let currentRangeTotalPnl = 0;
 let currentCategoryRangeTotals = { crypto: 0, stock: 0, realEstate: 0, other: 0 };
 let rangeDirty = true;
 const referencePriceCache = new Map();
+function rebuildSymbolIndex(){
+    symbolSet = new Set();
+    finnhubIndex = new Map();
+    positions.forEach(p=>{
+        if(p && p.finnhubSymbol){
+            symbolSet.add(p.finnhubSymbol);
+            finnhubIndex.set(p.finnhubSymbol, p);
+        }
+    });
+}
 const PNL_RANGE_CONFIG = [
     { key: '1D', label: 'Daily PNL' },
     { key: '1W', label: 'Weekly PNL' },
@@ -60,7 +75,8 @@ const RANGE_LABELS = PNL_RANGE_CONFIG.reduce((acc, item)=>{
 const DATA_SOURCE_LABELS = {
     loading: 'Loading data…',
     airtable: 'Live Airtable',
-    fallback: 'Offline snapshot'
+    snapshot: 'Cached snapshot',
+    fallback: 'Offline test data'
 };
 const PNL_CHART_TIME_CONFIG = {
     '1D': { unit: 'hour', displayFormats: { hour: 'ha' }, maxTicks: 6 },
@@ -166,6 +182,7 @@ let netWorthBubbleSnapshotTotal = 0;
 let netWorthDetailSubtitle = null;
 let netWorthDetailMeta = null;
 let dataSourceMode = 'loading';
+let isSwitchingDataSource = false;
 const sparklineCrosshairPlugin = {
     id: 'sparklineCrosshair',
     afterDraw(chart){
@@ -2150,6 +2167,61 @@ async function fetchAllAirtableOperations(onProgress){
     return records;
 }
 
+function buildSnapshotCsv(records){
+    const header = ['Asset','Category','Operation','Amount','Price','Spent','Date','Tags'];
+    const rows = [header.join(',')];
+    records.forEach(rec=>{
+        const fields = rec?.fields || {};
+        const tags = Array.isArray(fields.Tags) ? fields.Tags.join('|') : '';
+        const amountValue = Number(fields.Amount);
+        const priceValue = Number(fields['Asset price on invest date'] ?? fields.Price);
+        const spentValue = Number(fields['Spent on operation']);
+        const values = [
+            fields.Asset || fields.Name || '',
+            fields.Category || '',
+            fields['Operation type'] || fields.Operation || '',
+            Number.isFinite(amountValue) ? amountValue : '',
+            Number.isFinite(priceValue) ? priceValue : '',
+            Number.isFinite(spentValue) ? spentValue : '',
+            fields.Date || '',
+            tags
+        ].map(value => `"${String(value ?? '').replace(/"/g,'""')}"`);
+        rows.push(values.join(','));
+    });
+    return rows.join('\n');
+}
+
+function persistAirtableSnapshot(records){
+    try{
+        if(typeof window === 'undefined' || !window.localStorage || !Array.isArray(records) || !records.length){
+            return;
+        }
+        window.localStorage.setItem(SNAPSHOT_STORAGE_KEYS.records, JSON.stringify(records));
+        window.localStorage.setItem(SNAPSHOT_STORAGE_KEYS.savedAt, new Date().toISOString());
+        window.localStorage.setItem(SNAPSHOT_STORAGE_KEYS.csv, buildSnapshotCsv(records));
+    }catch(error){
+        console.warn('Failed to persist Airtable snapshot', error);
+    }
+}
+
+function loadSnapshotRecords(){
+    try{
+        if(typeof window === 'undefined' || !window.localStorage) return null;
+        const raw = window.localStorage.getItem(SNAPSHOT_STORAGE_KEYS.records);
+        if(!raw) return null;
+        return JSON.parse(raw);
+    }catch(error){
+        console.warn('Failed to read cached Airtable snapshot', error);
+        return null;
+    }
+}
+
+function getSnapshotSavedAt(){
+    if(typeof window === 'undefined' || !window.localStorage) return null;
+    const ts = window.localStorage.getItem(SNAPSHOT_STORAGE_KEYS.savedAt);
+    return ts ? new Date(ts) : null;
+}
+
 function transformOperations(records, progressCb){
     const ordered = sortByDateAscending(records);
     const map = new Map();
@@ -2246,7 +2318,7 @@ function transformOperations(records, progressCb){
             }else if(amount < 0){
                 const sellQty = Math.abs(amount);
                 const proceeds = spent < 0 ? Math.abs(spent) : Math.abs(price * sellQty);
-                const saleId = op.id || `sale-${index}`;
+                const saleId = rec.id || `sale-${index}`;
                 const saleDate = date instanceof Date ? date : (date ? new Date(date) : null);
                 if(useLots){
                     let remaining = sellQty;
@@ -2481,6 +2553,7 @@ async function loadPositions(){
     try{
         reportLoading('Connecting to Airtable API…');
         const records = await fetchAllAirtableOperations(reportLoading);
+        persistAirtableSnapshot(records);
         operationsMeta = {count: records.length, fetchedAt: new Date()};
         if(records.length){
             reportLoading(`Processing operations… 0/${records.length}`);
@@ -2509,40 +2582,124 @@ async function loadPositions(){
         });
         reportLoading('Preparing dashboard data…');
         netContributionTotal = positions.reduce((sum,p)=>sum + Number(p.cashflow || 0),0);
-        symbolSet = new Set();
-        finnhubIndex = new Map();
-        positions.forEach(p=>{
-            if(p.finnhubSymbol){
-                symbolSet.add(p.finnhubSymbol);
-                finnhubIndex.set(p.finnhubSymbol, p);
-            }
-        });
+        rebuildSymbolIndex();
         if(!positions.length){
             throw new Error('No positions available after transformation');
         }
         dataSourceMode = 'airtable';
         updateDataSourceBadge();
     }catch(err){
-        console.warn('Airtable load failed, using fallback', err);
-        setStatus('Airtable unavailable — showing demo data');
-        positions = useFallbackPositions();
-        netContributionTotal = positions.reduce((sum,p)=>sum + Number(p.cashflow || 0),0);
-        symbolSet = new Set();
-        finnhubIndex = new Map();
-        positions.forEach(p=>{
-            if(p.finnhubSymbol){
-                symbolSet.add(p.finnhubSymbol);
-                finnhubIndex.set(p.finnhubSymbol, p);
-            }
-        });
+        console.warn('Airtable load failed, attempting snapshot fallback', err);
+        const snapshotRecords = loadSnapshotRecords();
+        if(Array.isArray(snapshotRecords) && snapshotRecords.length){
+            positions = transformOperations(snapshotRecords, null);
+            netContributionTotal = positions.reduce((sum,p)=>sum + Number(p.cashflow || 0),0);
+            rebuildSymbolIndex();
+            operationsMeta = {count: snapshotRecords.length, fetchedAt: getSnapshotSavedAt()};
+            setStatus('Cached Airtable snapshot loaded');
+            dataSourceMode = 'snapshot';
+        }else{
+            setStatus('Airtable unavailable — showing demo data');
+            positions = useFallbackPositions();
+            netContributionTotal = positions.reduce((sum,p)=>sum + Number(p.cashflow || 0),0);
+            rebuildSymbolIndex();
+            operationsMeta = {count: 0, fetchedAt: null};
+            dataSourceMode = 'fallback';
+        }
         setLoadingState('error','Airtable unavailable — showing demo data');
         setTimeout(()=>setLoadingState('hidden'), 1400);
-        dataSourceMode = 'fallback';
         updateDataSourceBadge();
     }
     rangeDirty = true;
     assetYearSeriesDirty = true;
     realEstateRentSeriesDirty = true;
+}
+
+async function switchDataSource(mode){
+    const target = mode === 'fallback' ? 'fallback' : mode === 'snapshot' ? 'snapshot' : 'airtable';
+    if(isSwitchingDataSource) return;
+    if(target === dataSourceMode && target !== 'loading') return;
+    isSwitchingDataSource = true;
+    const previousMode = dataSourceMode;
+    try{
+        if(target === 'fallback'){
+            dataSourceMode = 'loading';
+            updateDataSourceBadge();
+            positions = useFallbackPositions();
+            netContributionTotal = positions.reduce((sum,p)=>sum + Number(p.cashflow || 0),0);
+            rebuildSymbolIndex();
+            operationsMeta = {count: 0, fetchedAt: null};
+            rangeDirty = true;
+            assetYearSeriesDirty = true;
+            realEstateRentSeriesDirty = true;
+            dataSourceMode = 'fallback';
+            setStatus('Offline test data loaded');
+            updateDataSourceBadge();
+            scheduleUIUpdate({immediate:true});
+            subscribeAll();
+            return;
+        }
+        if(target === 'snapshot'){
+            dataSourceMode = 'loading';
+            updateDataSourceBadge();
+            const snapshotRecords = loadSnapshotRecords();
+            if(Array.isArray(snapshotRecords) && snapshotRecords.length){
+                positions = transformOperations(snapshotRecords, null);
+                netContributionTotal = positions.reduce((sum,p)=>sum + Number(p.cashflow || 0),0);
+                rebuildSymbolIndex();
+                operationsMeta = {count: snapshotRecords.length, fetchedAt: getSnapshotSavedAt()};
+                rangeDirty = true;
+                assetYearSeriesDirty = true;
+                realEstateRentSeriesDirty = true;
+                dataSourceMode = 'snapshot';
+                setStatus('Cached Airtable snapshot loaded');
+                updateDataSourceBadge();
+                scheduleUIUpdate({immediate:true});
+                subscribeAll();
+            }else{
+                setStatus('No cached snapshot available');
+                dataSourceMode = (previousMode === 'airtable' || previousMode === 'snapshot') ? previousMode : 'fallback';
+                updateDataSourceBadge();
+            }
+            return;
+        }
+        if(loadingOverlay){
+            setLoadingState('visible','Loading Airtable…');
+        }
+        dataSourceMode = 'loading';
+        updateDataSourceBadge();
+        await loadPositions();
+        await preloadHistoricalPriceSeries();
+        positions.forEach(recomputePositionMetrics);
+        lastUpdated = new Date();
+        rangeDirty = true;
+        assetYearSeriesDirty = true;
+        realEstateRentSeriesDirty = true;
+        dataSourceMode = 'airtable';
+        updateDataSourceBadge();
+        scheduleUIUpdate({immediate:true});
+        subscribeAll();
+    }catch(error){
+        console.error('Failed to switch data source', error);
+        positions = useFallbackPositions();
+        netContributionTotal = positions.reduce((sum,p)=>sum + Number(p.cashflow || 0),0);
+        rebuildSymbolIndex();
+        operationsMeta = {count: 0, fetchedAt: null};
+        dataSourceMode = 'fallback';
+        updateDataSourceBadge();
+        setStatus('Offline test data loaded');
+        rangeDirty = true;
+        assetYearSeriesDirty = true;
+        realEstateRentSeriesDirty = true;
+        scheduleUIUpdate({immediate:true});
+        subscribeAll();
+    }finally{
+        if(loadingOverlay){
+            setLoadingState('hidden');
+        }
+        isSwitchingDataSource = false;
+        updateDataSourceBadge();
+    }
 }
 
 // ----------------- FINNHUB REST (snapshot) -----------------
@@ -2881,12 +3038,33 @@ function setStatus(s){ const el = document.getElementById('status'); if(el) el.t
 
 function updateDataSourceBadge(){
     if(typeof document === 'undefined') return;
-    const badge = document.getElementById('data-source-badge');
-    if(!badge) return;
-    const label = DATA_SOURCE_LABELS[dataSourceMode] || DATA_SOURCE_LABELS.loading;
-    badge.textContent = label;
-    badge.setAttribute('data-source', dataSourceMode in DATA_SOURCE_LABELS ? dataSourceMode : 'loading');
-    badge.title = label;
+    const select = document.getElementById('data-source-select');
+    if(!select) return;
+    const normalized = (dataSourceMode === 'airtable' || dataSourceMode === 'fallback' || dataSourceMode === 'snapshot') ? dataSourceMode : 'loading';
+    select.setAttribute('data-source', normalized);
+    if(normalized === 'loading'){
+        let loadingOption = select.querySelector('option[value="loading"]');
+        if(!loadingOption){
+            loadingOption = document.createElement('option');
+            loadingOption.value = 'loading';
+            loadingOption.disabled = true;
+            loadingOption.hidden = true;
+            select.insertBefore(loadingOption, select.firstChild);
+        }
+        loadingOption.textContent = DATA_SOURCE_LABELS.loading;
+        select.value = 'loading';
+        select.disabled = true;
+    }else{
+        const loadingOption = select.querySelector('option[value="loading"]');
+        if(loadingOption){
+            loadingOption.remove();
+        }
+        select.disabled = isSwitchingDataSource;
+        if(select.value !== normalized){
+            select.value = normalized;
+        }
+    }
+    select.title = DATA_SOURCE_LABELS[dataSourceMode] || DATA_SOURCE_LABELS.loading;
 }
 
 function computeRealEstateAnalytics(){
@@ -6804,6 +6982,17 @@ document.addEventListener('DOMContentLoaded', ()=>{
         setLoadingState('visible','Loading Airtable…');
     }
     updateDataSourceBadge();
+    const dataSourceSelect = document.getElementById('data-source-select');
+    if(dataSourceSelect){
+        dataSourceSelect.addEventListener('change', event=>{
+            const value = event.target.value;
+            if(value === 'loading'){
+                event.target.value = dataSourceMode;
+                return;
+            }
+            switchDataSource(value);
+        });
+    }
     ensureTransactionModalElements();
     ensureNetWorthDetailModalElements();
     initializePnlRangeTabs();
