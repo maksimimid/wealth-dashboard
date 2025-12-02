@@ -4337,8 +4337,7 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
                     },
                     pan: {
                         enabled: true,
-                        mode: 'xy',
-                        modifierKey: 'shift'
+                        mode: 'xy'
                     }
                 }
             },
