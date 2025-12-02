@@ -13,6 +13,7 @@ const RUNTIME_CONFIG = (typeof window !== 'undefined' && window.DASHBOARD_CONFIG
 const loadingOverlay = typeof document !== 'undefined' ? document.getElementById('loading-overlay') : null;
 
 const FINNHUB_KEY = RUNTIME_CONFIG.FINNHUB_KEY || DEFAULT_CONFIG.FINNHUB_KEY;
+const HAS_FINNHUB_KEY = Boolean(FINNHUB_KEY);
 const FINNHUB_REST = 'https://finnhub.io/api/v1';
 const MAX_REST_BATCH = 5;
 
@@ -41,6 +42,7 @@ const UI_REFRESH_INTERVAL = 10000;
 const CRYPTO_UI_INTERVAL = 10000;
 let lastRenderAt = 0;
 let scheduledRender = null;
+let isBootstrapping = true;
 let currentRangeTotalPnl = 0;
 let currentCategoryRangeTotals = { crypto: 0, stock: 0, realEstate: 0, other: 0 };
 let rangeDirty = true;
@@ -1072,7 +1074,9 @@ function setLoadingState(state, message){
 
 function reportLoading(message){
     if(!message) return;
-    setLoadingState('visible', message);
+    if(isBootstrapping){
+        setLoadingState('visible', message);
+    }
     setStatus(message);
 }
 
@@ -2887,6 +2891,10 @@ async function applySnapshotResults(results){
 
 // ----------------- WEBSOCKET REAL-TIME -----------------
 function initFinnhubWS(){
+    if(!HAS_FINNHUB_KEY){
+        console.warn('Finnhub websocket disabled — API key missing');
+        return;
+    }
     try{
         ws = new WebSocket(`wss://ws.finnhub.io?token=${FINNHUB_KEY}`);
         ws.onopen = ()=>{ setStatus('Finnhub WS connected'); subscribeAll(); };
@@ -2913,6 +2921,7 @@ function initFinnhubWS(){
 }
 
 function subscribeAll(){
+    if(!HAS_FINNHUB_KEY) return;
     if(!ws || ws.readyState !== WebSocket.OPEN) return;
     symbolSet.forEach(sym=>{
         try{ ws.send(JSON.stringify({type:'subscribe', symbol:sym})); }
@@ -7121,9 +7130,11 @@ function setPnlPercentageVisibility(enabled){
 // ----------------- BOOTSTRAP LOGIC -----------------
 async function bootstrap(){
     await loadPositions();
-    await preloadHistoricalPriceSeries();
+    preloadHistoricalPriceSeries().catch(error=>{
+        console.warn('Historical price preload failed', error);
+    });
 
-    const finnhubSymbols = Array.from(symbolSet);
+    const finnhubSymbols = HAS_FINNHUB_KEY ? Array.from(symbolSet) : [];
     if(finnhubSymbols.length){
         const batches = [];
         for(let i=0;i<finnhubSymbols.length;i+=MAX_REST_BATCH){
@@ -7153,6 +7164,8 @@ async function bootstrap(){
 
         const workerCount = Math.min(MAX_SNAPSHOT_CONCURRENCY, batches.length);
         await Promise.all(Array.from({length: workerCount}, snapshotWorker));
+    }else if(!HAS_FINNHUB_KEY){
+        console.warn('Skipping Finnhub snapshot bootstrap — API key missing');
     }
 
     positions.forEach(recomputePositionMetrics);
@@ -7319,12 +7332,14 @@ document.addEventListener('DOMContentLoaded', ()=>{
     });
 
     bootstrap().then(()=>{
+        isBootstrapping = false;
         if(loadingOverlay){
             setLoadingState('hidden');
         }
     }).catch(err=>{
         console.error('Bootstrap failed', err);
         setStatus('Bootstrap failed — see console');
+        isBootstrapping = false;
         if(loadingOverlay){
             setLoadingState('error','Bootstrap failed — see console');
         }
