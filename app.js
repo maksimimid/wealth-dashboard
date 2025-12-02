@@ -183,6 +183,7 @@ let netWorthDetailSubtitle = null;
 let netWorthDetailMeta = null;
 let dataSourceMode = 'loading';
 let isSwitchingDataSource = false;
+let zoomPluginRegistered = false;
 const sparklineCrosshairPlugin = {
     id: 'sparklineCrosshair',
     afterDraw(chart){
@@ -212,6 +213,16 @@ const sparklineCrosshairPlugin = {
     }
 };
 
+function registerZoomPluginIfNeeded(){
+    if(zoomPluginRegistered) return;
+    if(typeof Chart === 'undefined' || !Chart.register) return;
+    const zoomPlugin = typeof window !== 'undefined' ? window['chartjs-plugin-zoom'] || window.chartjsPluginZoom : null;
+    if(zoomPlugin){
+        Chart.register(zoomPlugin);
+        zoomPluginRegistered = true;
+    }
+}
+
 const transactionHoverPlugin = {
     id: 'transactionHoverHelper',
     afterDraw(chart){
@@ -233,7 +244,7 @@ const transactionHoverPlugin = {
         if(!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(baselineY)) return;
         const pointPrice = Number(activePoint.raw?.price ?? activePoint.raw?.y ?? activePoint.parsed?.y);
         if(!Number.isFinite(pointPrice)) return;
-        const diffValue = pointPrice - baselineValue;
+        const diffValue = baselineValue - pointPrice;
         const diffPct = Number.isFinite(baselineValue) && Math.abs(baselineValue) > 1e-9 ? (diffValue / baselineValue) * 100 : null;
         const ctx = chart.ctx;
         const color = diffValue >= 0 ? 'rgba(34, 197, 94, 0.9)' : 'rgba(248, 113, 113, 0.9)';
@@ -247,13 +258,10 @@ const transactionHoverPlugin = {
         ctx.stroke();
         ctx.restore();
 
-        const labelTextParts = [];
-        const moneyText = diffValue >= 0 ? `+${money(diffValue)}` : money(diffValue);
-        labelTextParts.push(moneyText);
-        if(diffPct !== null){
-            labelTextParts.push(`(${pct(diffPct)})`);
-        }
-        const label = labelTextParts.join(' ');
+        const descriptor = diffValue >= 0 ? 'Potential profit' : 'Potential loss';
+        const deltaMoney = diffValue >= 0 ? `+${money(diffValue)}` : money(diffValue);
+        const pctText = diffPct !== null ? ` (${pct(diffPct)})` : '';
+        const label = `${descriptor} ${deltaMoney}${pctText}`;
         const font = '11px "Inter", system-ui, -apple-system, BlinkMacSystemFont, sans-serif';
         ctx.save();
         ctx.font = font;
@@ -4313,6 +4321,25 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
                             return `${type} ${qtyText} ${priceText}${usdText}${dateLabel ? ' · ' + dateLabel : ''}`;
                         }
                     }
+                },
+                hoverBaseline: {
+                    value: Number.isFinite(baselineValue) ? baselineValue : null
+                },
+                zoom: {
+                    limits: {
+                        x: { min: 'original', max: 'original' },
+                        y: { min: 'original', max: 'original' }
+                    },
+                    zoom: {
+                        wheel: { enabled: true, speed: 0.1 },
+                        pinch: { enabled: true },
+                        mode: 'xy'
+                    },
+                    pan: {
+                        enabled: true,
+                        mode: 'xy',
+                        modifierKey: 'shift'
+                    }
                 }
             },
             scales: {
@@ -4333,7 +4360,6 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
             }
         }
     };
-    config.options.plugins.hoverBaseline = { value: Number.isFinite(baselineValue) ? baselineValue : null };
     config.plugins = [...(config.plugins || []), transactionHoverPlugin];
     return config;
 }
@@ -7086,6 +7112,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
     if(loadingOverlay){
         setLoadingState('visible','Loading Airtable…');
     }
+    registerZoomPluginIfNeeded();
     updateDataSourceBadge();
     const dataSourceSelect = document.getElementById('data-source-select');
     if(dataSourceSelect){
