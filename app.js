@@ -223,6 +223,45 @@ function registerZoomPluginIfNeeded(){
     }
 }
 
+function ensurePanSupport(options, mode = 'x'){
+    if(!options || typeof options !== 'object'){
+        return options;
+    }
+    registerZoomPluginIfNeeded();
+    if(!options.plugins){
+        options.plugins = {};
+    }
+    if(!options.plugins.zoom){
+        options.plugins.zoom = {};
+    }
+    const zoomOptions = options.plugins.zoom;
+    if(!zoomOptions.pan){
+        zoomOptions.pan = {};
+    }
+    if(typeof zoomOptions.pan.enabled === 'undefined'){
+        zoomOptions.pan.enabled = true;
+    }
+    if(!zoomOptions.pan.mode){
+        zoomOptions.pan.mode = mode || 'x';
+    }
+    if(typeof zoomOptions.pan.threshold !== 'number'){
+        zoomOptions.pan.threshold = 8;
+    }
+    if(!zoomOptions.zoom){
+        zoomOptions.zoom = {};
+    }
+    if(!zoomOptions.zoom.wheel){
+        zoomOptions.zoom.wheel = { enabled: false };
+    }
+    if(!zoomOptions.zoom.pinch){
+        zoomOptions.zoom.pinch = { enabled: false };
+    }
+    if(!zoomOptions.zoom.drag){
+        zoomOptions.zoom.drag = { enabled: false };
+    }
+    return options;
+}
+
 const transactionHoverPlugin = {
     id: 'transactionHoverHelper',
     afterDraw(chart){
@@ -3056,6 +3095,8 @@ function applyDatasetChanges(target, source){
 }
 
 function createOrUpdateChart(id,type,data,options){
+    registerZoomPluginIfNeeded();
+    const preferredPanMode = type === 'scatter' ? 'xy' : 'x';
     const defaultOptions = {
         responsive: true,
         maintainAspectRatio: false,
@@ -3089,6 +3130,7 @@ function createOrUpdateChart(id,type,data,options){
         if(options){
             mergeDeep(existing.options, options);
         }
+        ensurePanSupport(existing.options, preferredPanMode);
         existing.update('none');
         return existing;
     }
@@ -3096,6 +3138,7 @@ function createOrUpdateChart(id,type,data,options){
     if(!canvas) return null;
     const ctx = canvas.getContext('2d');
     const mergedOptions = mergeDeep(mergeDeep({}, defaultOptions), options || {});
+    ensurePanSupport(mergedOptions, preferredPanMode);
     const initialData = {
         labels: Array.isArray(data.labels) ? data.labels.slice() : [],
         datasets: Array.isArray(data.datasets) ? data.datasets.map(ds=>{
@@ -4203,7 +4246,11 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
     const avgPurchasePrice = data.purchases.length
         ? data.purchases.reduce((sum, point)=> sum + Number(point.price ?? point.y ?? 0), 0) / data.purchases.length
         : fallbackPrice;
-    const baselineValue = Number.isFinite(avgPurchasePrice) ? avgPurchasePrice : fallbackPrice;
+    const hasLivePrice = Number.isFinite(livePrice) && livePrice > 0;
+    const fallbackBaselineValue = Number.isFinite(avgPurchasePrice) ? avgPurchasePrice : fallbackPrice;
+    const baselineValue = hasLivePrice ? livePrice : fallbackBaselineValue;
+    const baselineLabel = hasLivePrice ? 'Current price' : 'Avg trade price';
+    const baselineColor = hasLivePrice ? 'rgba(250, 204, 21, 0.95)' : 'rgba(56, 189, 248, 0.55)';
 
     const effectivePriceSeries = (()=> {
         const series = [...basePriceSeries];
@@ -4246,10 +4293,10 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
     if(baselineSource.length && Number.isFinite(baselineValue)){
         datasets.push({
             type: 'line',
-            label: 'Avg trade price',
+            label: baselineLabel,
             data: baselineSource.map(point=> ({ x: point.x, y: baselineValue })),
-            borderColor: 'rgba(56, 189, 248, 0.55)',
-            borderDash: [4, 4],
+            borderColor: baselineColor,
+            borderDash: [6, 4],
             borderWidth: 1.5,
             pointRadius: 0,
             tension: 0,
@@ -4309,8 +4356,13 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
                         label(ctx){
                             const raw = ctx.raw || {};
                             if(ctx.dataset.type === 'line'){
-                                if(ctx.dataset.label === 'Avg trade price'){
-                                    return `Avg trade price ${money(raw.y)}`;
+                                if(ctx.dataset.label === baselineLabel){
+                                    const value = Number(raw.y ?? ctx.parsed?.y ?? 0);
+                                    return `${baselineLabel} ${money(value)}`;
+                                }
+                                if(ctx.dataset.label === 'Price history'){
+                                    const value = Number(raw.y ?? ctx.parsed?.y ?? 0);
+                                    return `Price history ${money(value)}`;
                                 }
                             }
                             const type = raw.quantity > 0 ? 'Buy' : 'Sell';
@@ -5433,6 +5485,7 @@ function renderNetWorthSparkline(timeline){
             padding: { top: 16, bottom: 6, left: 6, right: 6 }
         }
     };
+    ensurePanSupport(options, 'x');
 
     if(netWorthSparklineChart){
         netWorthSparklineChart.data.datasets = [dataset];
@@ -6007,6 +6060,7 @@ function renderNetWorthDetailChart(timeline){
             padding: { top: 8, right: 12, bottom: 8, left: 8 }
         }
     };
+    ensurePanSupport(options, 'x');
     const data = { datasets };
     if(netWorthDetailChart){
         netWorthDetailChart.data = data;
@@ -6768,6 +6822,7 @@ function renderPnlTrendChart(range){
             mode: 'index'
         }
     };
+    ensurePanSupport(options, 'x');
     if(pnlTrendChart){
         pnlTrendChart.data.datasets = [dataset];
         pnlTrendChart.options = options;
