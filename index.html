@@ -11,6 +11,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@3.3.0/dist/chartjs-chart-financial.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js" defer></script>
 <script src="./config.sample.js" defer></script>
 <script src="./config.local.js" defer></script>
 <script src="./app.js" defer></script>
@@ -44,7 +45,17 @@
 <div class="wrap">
     <header>
         <div>
-            <div class="pill">Realtime Wealth Overview &middot; <span>Connected</span></div>
+            <div class="pill">
+                Realtime Wealth Overview &middot; <span>Connected</span>
+                <label class="data-source-select-wrapper">
+                    <span class="sr-only" id="data-source-select-label">Choose data source</span>
+                    <select id="data-source-select" class="data-source-select" aria-labelledby="data-source-select-label">
+                        <option value="airtable">Live Airtable</option>
+                        <option value="snapshot">Cached snapshot</option>
+                        <option value="fallback">Offline test data</option>
+                    </select>
+                </label>
+            </div>
             <h1>Wealth Intelligence Hub</h1>
             <p class="subtitle">Live holdings pulled directly from Airtable Operations and enriched with Finnhub market data. Track allocations, intraday moves, and long-term performance in one glass dashboard.</p>
         </div>
@@ -200,6 +211,17 @@
                 <div class="pos" style="margin-top:4px">Equity allocations, gains, and concentration across public markets.</div>
             </div>
             <div class="analytics-header-right">
+                <div class="market-status" id="market-status">
+                    <span class="market-dot" id="market-status-dot"></span>
+                    <div class="market-status-text">
+                        <span id="market-status-text">Checking market hours…</span>
+                        <div class="market-hours">
+                            <span id="market-hours-us"></span>
+                            <span id="market-hours-local"></span>
+                            <span id="market-next-open"></span>
+                        </div>
+                    </div>
+                </div>
                 <div class="analytics-summary">
                     <div class="metric">
                         <span class="label">Market Value</span>
@@ -214,23 +236,10 @@
                         <span class="value" id="stock-allocation">?</span>
                     </div>
                 </div>
-                <div class="analytics-header-actions">
-                    <div class="market-status" id="market-status">
-                        <span class="market-dot" id="market-status-dot"></span>
-                        <div class="market-status-text">
-                            <span id="market-status-text">Checking market hours…</span>
-                            <div class="market-hours">
-                                <span id="market-hours-us"></span>
-                                <span id="market-hours-local"></span>
-                                <span id="market-next-open"></span>
-                            </div>
-                        </div>
-                    </div>
-                    <button type="button" class="card-info-button info-button" data-best-info-trigger="stock" aria-haspopup="dialog" aria-expanded="false">
-                        <span class="info-icon" aria-hidden="true">i</span>
-                        <span class="sr-only">Show stock best performer</span>
-                    </button>
-                </div>
+                <button type="button" class="card-info-button info-button" data-best-info-trigger="stock" aria-haspopup="dialog" aria-expanded="false">
+                    <span class="info-icon" aria-hidden="true">i</span>
+                    <span class="sr-only">Show stock best performer</span>
+                </button>
             </div>
         </div>
         <details class="analytics-section chart-section" data-chart="stockPortfolioChart">
@@ -271,7 +280,12 @@
     <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="transaction-modal-title">
         <button type="button" class="modal-close" aria-label="Close transactions chart">&times;</button>
         <h3 class="modal-title" id="transaction-modal-title">Asset transactions</h3>
-        <div class="modal-subtitle" id="transaction-modal-subtitle"></div>
+        <div class="modal-stats">
+            <div class="modal-stat">
+                <span class="modal-stat-label">Operations</span>
+                <span class="modal-stat-value" id="transaction-modal-operations-count">0</span>
+            </div>
+        </div>
         <div class="modal-chart">
             <canvas id="transaction-chart"></canvas>
         </div>

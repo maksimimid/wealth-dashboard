@@ -355,6 +355,33 @@ body::before {
     gap: 8px;
 }
 
+.modal-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: flex-start;
+}
+
+.modal-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 120px;
+}
+
+.modal-stat-label {
+    font-size: 0.75rem;
+    letter-spacing: 0.35px;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 600;
+}
+
+.modal-stat-value {
+    font-size: 1.35rem;
+    font-weight: 600;
+}
+
 .price-history-note {
     font-size: 0.85rem;
     color: var(--muted);
@@ -551,11 +578,10 @@ body.light-theme .lot-neutral {
     border-radius: 12px;
     background: rgba(15, 23, 42, 0.45);
     border: 1px solid rgba(148, 163, 184, 0.25);
-    margin-top: 8px;
+    margin: 0;
     align-self: flex-start;
-    margin-left: 0;
-    margin-right: auto;
-    flex-basis: 100%;
+    flex: 0 0 auto;
+    min-width: 230px;
 }
 
 .market-dot {
@@ -970,13 +996,15 @@ h1 {
 }
 
 .pnl-chart {
-    margin-top: 16px;
-    height: 165px;
-    border-radius: 18px;
-    background: rgba(15, 23, 42, 0.55);
-    border: 1px solid rgba(148, 163, 184, 0.2);
-    padding: 12px 16px;
+    width: 100%;
+    height: 130px;
+    min-height: 130px;
     position: relative;
+    margin-top: 16px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
 }
 
 .pnl-chart canvas {
@@ -986,8 +1014,8 @@ h1 {
 }
 
 body.light-theme .pnl-chart {
-    background: rgba(241, 245, 249, 0.92);
-    border-color: rgba(148, 163, 184, 0.35);
+    background: transparent;
+    border-color: transparent;
 }
 
 .networth-chart {
@@ -1241,28 +1269,18 @@ body.light-theme .pnl-chart {
 .analytics-header-right {
     flex-wrap: wrap;
     justify-content: flex-end;
+    width: 100%;
 }
 
 .card-header-right .analytics-summary,
 .analytics-header-right .analytics-summary {
     margin: 0;
-    flex: 1 1 auto;
-    min-width: 0;
+    flex: 1 1 240px;
+    min-width: 200px;
 }
 
-.analytics-header-actions {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    flex: 0 0 auto;
-    margin-left: auto;
-}
-
-.analytics-header-actions .market-status {
+.analytics-header-right .market-status {
     margin: 0;
-    flex-basis: auto;
 }
 
 .best-info-popover {
@@ -1390,6 +1408,86 @@ body.light-theme .pnl-chart {
 .pill span {
     font-weight: 600;
     color: #34d399;
+}
+
+.data-source-select-wrapper {
+    display: inline-flex;
+    align-items: center;
+}
+
+.data-source-select {
+    appearance: none;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    background: rgba(148, 163, 184, 0.2);
+    color: #e2e8f0;
+    border-radius: 999px;
+    font-size: 11px;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    padding: 2px 24px 2px 10px;
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+    position: relative;
+}
+
+.data-source-select:focus-visible {
+    outline: 2px solid rgba(148, 163, 184, 0.65);
+    outline-offset: 2px;
+}
+
+.data-source-select[data-source="airtable"] {
+    background: rgba(34, 197, 94, 0.18);
+    border-color: rgba(34, 197, 94, 0.45);
+    color: #bbf7d0;
+}
+
+.data-source-select[data-source="fallback"] {
+    background: rgba(248, 113, 113, 0.15);
+    border-color: rgba(248, 113, 113, 0.4);
+    color: #fecaca;
+}
+
+.data-source-select[data-source="snapshot"] {
+    background: rgba(251, 191, 36, 0.18);
+    border-color: rgba(251, 191, 36, 0.4);
+    color: #fef3c7;
+}
+
+.data-source-select[data-source="loading"] {
+    background: rgba(148, 163, 184, 0.18);
+    border-color: rgba(148, 163, 184, 0.35);
+    color: #e2e8f0;
+    cursor: progress;
+}
+
+body.light-theme .data-source-select {
+    background: rgba(148, 163, 184, 0.2);
+    border-color: rgba(148, 163, 184, 0.4);
+    color: #334155;
+}
+
+body.light-theme .data-source-select[data-source="airtable"] {
+    background: rgba(16, 185, 129, 0.16);
+    border-color: rgba(16, 185, 129, 0.4);
+    color: #065f46;
+}
+
+body.light-theme .data-source-select[data-source="fallback"] {
+    background: rgba(248, 113, 113, 0.18);
+    border-color: rgba(248, 113, 113, 0.35);
+    color: #7f1d1d;
+}
+
+body.light-theme .data-source-select[data-source="snapshot"] {
+    background: rgba(251, 191, 36, 0.2);
+    border-color: rgba(251, 191, 36, 0.45);
+    color: #92400e;
+}
+
+body.light-theme .data-source-select[data-source="loading"] {
+    background: rgba(148, 163, 184, 0.18);
+    border-color: rgba(148, 163, 184, 0.4);
+    color: #475569;
 }
 
 .grid {
@@ -2498,6 +2596,11 @@ body.light-theme .status-dot { background: #22c55e; box-shadow: 0 0 6px rgba(34,
     .controls { width: 100%; }
     .pnl-breakdown { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
     .pnl-chart { height: 150px; padding: 12px; }
+    .analytics-header-right .market-status,
+    .analytics-header-right .analytics-summary {
+        flex-basis: 100%;
+        min-width: 0;
+    }
 }
 
 @media (max-width: 600px) {
