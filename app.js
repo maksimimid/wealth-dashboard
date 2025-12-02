@@ -211,6 +211,95 @@ const sparklineCrosshairPlugin = {
         ctx.restore();
     }
 };
+
+const transactionHoverPlugin = {
+    id: 'transactionHoverHelper',
+    afterDraw(chart){
+        const baselineValue = chart?.options?.plugins?.hoverBaseline?.value;
+        if(!Number.isFinite(baselineValue)) return;
+        const tooltip = chart?.tooltip;
+        if(!tooltip || tooltip.opacity === 0 || !tooltip.dataPoints?.length) return;
+        const activePoint = tooltip.dataPoints[0];
+        if(!activePoint) return;
+        const dataset = chart.data?.datasets?.[activePoint.datasetIndex];
+        if(!dataset || dataset.label !== 'Purchases') return;
+        const element = activePoint.element;
+        if(!element) return;
+        const yScale = chart.scales?.y;
+        if(!yScale) return;
+        const baselineY = yScale.getPixelForValue(baselineValue);
+        const x = element.x;
+        const y = element.y;
+        if(!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(baselineY)) return;
+        const pointPrice = Number(activePoint.raw?.price ?? activePoint.raw?.y ?? activePoint.parsed?.y);
+        if(!Number.isFinite(pointPrice)) return;
+        const diffValue = pointPrice - baselineValue;
+        const diffPct = Number.isFinite(baselineValue) && Math.abs(baselineValue) > 1e-9 ? (diffValue / baselineValue) * 100 : null;
+        const ctx = chart.ctx;
+        const color = diffValue >= 0 ? 'rgba(34, 197, 94, 0.9)' : 'rgba(248, 113, 113, 0.9)';
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.setLineDash([4, 4]);
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x, baselineY);
+        ctx.stroke();
+        ctx.restore();
+
+        const labelTextParts = [];
+        const moneyText = diffValue >= 0 ? `+${money(diffValue)}` : money(diffValue);
+        labelTextParts.push(moneyText);
+        if(diffPct !== null){
+            labelTextParts.push(`(${pct(diffPct)})`);
+        }
+        const label = labelTextParts.join(' ');
+        const font = '11px "Inter", system-ui, -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.save();
+        ctx.font = font;
+        const textMetrics = ctx.measureText(label);
+        const textWidth = textMetrics.width;
+        const textHeight = (textMetrics.actualBoundingBoxAscent || 9) + (textMetrics.actualBoundingBoxDescent || 3);
+        const paddingX = 8;
+        const paddingY = 4;
+        const boxWidth = textWidth + paddingX * 2;
+        const boxHeight = textHeight + paddingY * 2;
+        const midY = (y + baselineY) / 2;
+        const chartArea = chart.chartArea || { left: 0, right: chart.width, top: 0, bottom: chart.height };
+        let boxX = x - boxWidth / 2;
+        boxX = Math.max(chartArea.left + 4, Math.min(boxX, chartArea.right - boxWidth - 4));
+        let boxY = midY - boxHeight / 2;
+        boxY = Math.max(chartArea.top + 4, Math.min(boxY, chartArea.bottom - boxHeight - 4));
+        const borderColor = diffValue >= 0 ? 'rgba(34, 197, 94, 1)' : 'rgba(248, 113, 113, 1)';
+        const backgroundColor = diffValue >= 0 ? 'rgba(34, 197, 94, 0.9)' : 'rgba(248, 113, 113, 0.9)';
+
+        const drawRoundedRect = (context, xPos, yPos, width, height, radius)=>{
+            const r = Math.min(radius, width / 2, height / 2);
+            context.beginPath();
+            context.moveTo(xPos + r, yPos);
+            context.lineTo(xPos + width - r, yPos);
+            context.quadraticCurveTo(xPos + width, yPos, xPos + width, yPos + r);
+            context.lineTo(xPos + width, yPos + height - r);
+            context.quadraticCurveTo(xPos + width, yPos + height, xPos + width - r, yPos + height);
+            context.lineTo(xPos + r, yPos + height);
+            context.quadraticCurveTo(xPos, yPos + height, xPos, yPos + height - r);
+            context.lineTo(xPos, yPos + r);
+            context.quadraticCurveTo(xPos, yPos, xPos + r, yPos);
+            context.closePath();
+        };
+
+        drawRoundedRect(ctx, boxX, boxY, boxWidth, boxHeight, 6);
+        ctx.fillStyle = backgroundColor;
+        ctx.fill();
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = borderColor;
+        ctx.stroke();
+        ctx.fillStyle = '#0f172a';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, boxX + paddingX, boxY + boxHeight / 2);
+        ctx.restore();
+    }
+};
 let lastCryptoUiSync = 0;
 let pendingCryptoUiSync = null;
 const CATEGORY_CONFIG = {
@@ -2386,8 +2475,12 @@ function transformOperations(records, progressCb){
                         totalProceeds: proceeds
                     });
                 }
-                if(price){
-                    entry.lastKnownPrice = price;
+                if(entry.qty <= 1e-9){
+                    if(price){
+                        entry.lastKnownPrice = price;
+                    }else if(entry.lastPurchasePrice){
+                        entry.lastKnownPrice = entry.lastPurchasePrice;
+                    }
                 }
             }
             entry.cashflow += spent;
@@ -4099,6 +4192,10 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
     const livePrice = Number(position?.currentPrice ?? position?.displayPrice ?? position?.lastKnownPrice ?? position?.avgPrice ?? 0);
     const fallbackPrice = Number(position.displayPrice || position.currentPrice || position.lastKnownPrice || position.avgPrice || 0) || 0;
     const chartHasTransactions = data.purchases.length || data.sales.length;
+    const avgPurchasePrice = data.purchases.length
+        ? data.purchases.reduce((sum, point)=> sum + Number(point.price ?? point.y ?? 0), 0) / data.purchases.length
+        : fallbackPrice;
+    const baselineValue = Number.isFinite(avgPurchasePrice) ? avgPurchasePrice : fallbackPrice;
 
     const effectivePriceSeries = (()=> {
         const series = [...basePriceSeries];
@@ -4133,11 +4230,16 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
             pointRadius: 0,
             order: 0
         });
-        const avgClose = effectivePriceSeries.reduce((sum, point)=> sum + Number(point.y || 0), 0) / effectivePriceSeries.length || fallbackPrice;
+    }
+
+    const baselineSource = effectivePriceSeries.length
+        ? effectivePriceSeries
+        : (data.purchases.length ? data.purchases : (data.fallbackPriceSeries || []));
+    if(baselineSource.length && Number.isFinite(baselineValue)){
         datasets.push({
             type: 'line',
             label: 'Avg trade price',
-            data: effectivePriceSeries.map(point=> ({ x: point.x, y: avgClose })),
+            data: baselineSource.map(point=> ({ x: point.x, y: baselineValue })),
             borderColor: 'rgba(56, 189, 248, 0.55)',
             borderDash: [4, 4],
             borderWidth: 1.5,
@@ -4184,7 +4286,7 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
     const minY = combinedValues.length ? Math.min(...combinedValues) : fallbackPrice;
     const maxY = combinedValues.length ? Math.max(...combinedValues) : fallbackPrice;
 
-    return {
+    const config = {
         type: 'scatter',
         data: { datasets },
         options: {
@@ -4231,6 +4333,9 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
             }
         }
     };
+    config.options.plugins.hoverBaseline = { value: Number.isFinite(baselineValue) ? baselineValue : null };
+    config.plugins = [...(config.plugins || []), transactionHoverPlugin];
+    return config;
 }
 
 function setModalView(view){
