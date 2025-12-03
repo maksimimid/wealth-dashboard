@@ -287,6 +287,9 @@ const transactionHoverPlugin = {
         if(!Number.isFinite(pointPrice)) return;
         const diffValue = baselineValue - pointPrice;
         const diffPct = Number.isFinite(baselineValue) && Math.abs(baselineValue) > 1e-9 ? (diffValue / baselineValue) * 100 : null;
+        const rawQty = Number(activePoint.raw?.quantity ?? activePoint.raw?.rawQty ?? 0);
+        const absQty = Math.abs(rawQty);
+        const quantityAwareDiff = diffValue * (absQty > 0 ? absQty : 1);
         const ctx = chart.ctx;
         const color = diffValue >= 0 ? 'rgba(34, 197, 94, 0.9)' : 'rgba(248, 113, 113, 0.9)';
         ctx.save();
@@ -300,7 +303,11 @@ const transactionHoverPlugin = {
         ctx.restore();
 
         const descriptor = diffValue >= 0 ? 'Potential profit' : 'Potential loss';
-        const deltaMoney = diffValue >= 0 ? `+${money(diffValue)}` : money(diffValue);
+        const deltaMoney = quantityAwareDiff > 0
+            ? `+${money(quantityAwareDiff)}`
+            : quantityAwareDiff < 0
+                ? money(quantityAwareDiff)
+                : money(0);
         const pctText = diffPct !== null ? ` (${pct(diffPct)})` : '';
         const label = `${descriptor} ${deltaMoney}${pctText}`;
         const font = '11px "Inter", system-ui, -apple-system, BlinkMacSystemFont, sans-serif';
