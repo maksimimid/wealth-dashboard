@@ -4266,10 +4266,8 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
         ? data.purchases.reduce((sum, point)=> sum + Number(point.price ?? point.y ?? 0), 0) / data.purchases.length
         : fallbackPrice;
     const hasLivePrice = Number.isFinite(livePrice) && livePrice > 0;
-    const fallbackBaselineValue = Number.isFinite(avgPurchasePrice) ? avgPurchasePrice : fallbackPrice;
-    const baselineValue = hasLivePrice ? livePrice : fallbackBaselineValue;
-    const baselineLabel = hasLivePrice ? 'Current price' : 'Avg trade price';
-    const baselineColor = hasLivePrice ? 'rgba(250, 204, 21, 0.95)' : 'rgba(56, 189, 248, 0.55)';
+    const avgLineValue = Number.isFinite(avgPurchasePrice) ? avgPurchasePrice : fallbackPrice;
+    const currentLineValue = hasLivePrice ? livePrice : null;
 
     const effectivePriceSeries = (()=> {
         const series = [...basePriceSeries];
@@ -4306,20 +4304,40 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
         });
     }
 
-    const baselineSource = effectivePriceSeries.length
+    const baselineAnchors = data.purchases.length ? data.purchases : (data.fallbackPriceSeries || []);
+    const lineAnchorSource = effectivePriceSeries.length
         ? effectivePriceSeries
-        : (data.purchases.length ? data.purchases : (data.fallbackPriceSeries || []));
-    if(baselineSource.length && Number.isFinite(baselineValue)){
+        : (baselineAnchors.length ? baselineAnchors : []);
+
+    if(lineAnchorSource.length && Number.isFinite(avgLineValue)){
+        const avgLineData = lineAnchorSource.map(point=> ({ x: point.x, y: avgLineValue }));
         datasets.push({
             type: 'line',
-            label: baselineLabel,
-            data: baselineSource.map(point=> ({ x: point.x, y: baselineValue })),
-            borderColor: baselineColor,
+            label: 'Avg buy price',
+            data: avgLineData,
+            borderColor: 'rgba(96, 165, 250, 0.95)',
+            borderDash: [4, 4],
+            borderWidth: 1.5,
+            pointRadius: 0,
+            tension: 0,
+            order: 1,
+            yAxisID: 'y'
+        });
+    }
+
+    if(lineAnchorSource.length && Number.isFinite(currentLineValue)){
+        const currentLineData = lineAnchorSource.map(point=> ({ x: point.x, y: currentLineValue }));
+        datasets.push({
+            type: 'line',
+            label: 'Current price',
+            data: currentLineData,
+            borderColor: 'rgba(250, 204, 21, 0.95)',
             borderDash: [6, 4],
             borderWidth: 1.5,
             pointRadius: 0,
             tension: 0,
-            order: 1
+            order: 1,
+            yAxisID: 'y'
         });
     }
 
@@ -4356,9 +4374,12 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
 
     const yValues = [...data.purchases, ...data.sales].map(point=> point.y);
     const priceYValues = effectivePriceSeries.map(point=> point.y);
-    const combinedValues = [...yValues, ...priceYValues].filter(value => Number.isFinite(value));
-    const minY = combinedValues.length ? Math.min(...combinedValues) : fallbackPrice;
-    const maxY = combinedValues.length ? Math.max(...combinedValues) : fallbackPrice;
+    const combinedValues = [...yValues, ...priceYValues];
+    if(Number.isFinite(avgLineValue)) combinedValues.push(avgLineValue);
+    if(Number.isFinite(currentLineValue)) combinedValues.push(currentLineValue);
+    const filteredCombined = combinedValues.filter(value => Number.isFinite(value));
+    const minY = filteredCombined.length ? Math.min(...filteredCombined) : fallbackPrice;
+    const maxY = filteredCombined.length ? Math.max(...filteredCombined) : fallbackPrice;
 
     const config = {
         type: 'scatter',
@@ -4375,9 +4396,13 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
                         label(ctx){
                             const raw = ctx.raw || {};
                             if(ctx.dataset.type === 'line'){
-                                if(ctx.dataset.label === baselineLabel){
+                                if(ctx.dataset.label === 'Avg buy price'){
                                     const value = Number(raw.y ?? ctx.parsed?.y ?? 0);
-                                    return `${baselineLabel} ${money(value)}`;
+                                    return `Avg buy price ${money(value)}`;
+                                }
+                                if(ctx.dataset.label === 'Current price'){
+                                    const value = Number(raw.y ?? ctx.parsed?.y ?? 0);
+                                    return `Current price ${money(value)}`;
                                 }
                                 if(ctx.dataset.label === 'Price history'){
                                     const value = Number(raw.y ?? ctx.parsed?.y ?? 0);
@@ -4394,7 +4419,7 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
                     }
                 },
                 hoverBaseline: {
-                    value: Number.isFinite(baselineValue) ? baselineValue : null
+                    value: Number.isFinite(avgLineValue) ? avgLineValue : null
                 },
                 zoom: {
                     limits: {
@@ -4425,7 +4450,7 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
                     suggestedMax: Number.isFinite(maxY) ? maxY * 1.08 : undefined,
                     title: {
                         display: true,
-                        text: ['Price', 'Avg buy · Current price']
+                        text: 'Price (Avg buy · Current)'
                     },
                     grid: { color: 'rgba(148, 163, 184, 0.25)' },
                     ticks: { callback: value => money(value) }
