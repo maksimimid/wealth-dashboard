@@ -364,25 +364,33 @@ let pendingCryptoUiSync = null;
 const CATEGORY_CONFIG = {
     crypto: {
         metricKey: 'crypto',
-        chartId: 'cryptoPortfolioChart',
         listId: 'crypto-positions',
         summary: {
             market: 'crypto-market-value',
             pnl: 'crypto-pnl',
             allocation: 'crypto-allocation'
         },
-        emptyLabel: 'crypto'
+        emptyLabel: 'crypto',
+        chartTabs: [
+            { key: 'allocation', label: 'Allocation', chartId: 'cryptoChartAllocation', type: 'bar' },
+            { key: 'performance', label: 'Performance', chartId: 'cryptoChartPerformance', type: 'bar' },
+            { key: 'exposure', label: 'Exposure', chartId: 'cryptoChartExposure', type: 'doughnut' }
+        ]
     },
     stock: {
         metricKey: 'stock',
-        chartId: 'stockPortfolioChart',
         listId: 'stock-positions',
         summary: {
             market: 'stock-market-value',
             pnl: 'stock-pnl',
             allocation: 'stock-allocation'
         },
-        emptyLabel: 'stock'
+        emptyLabel: 'stock',
+        chartTabs: [
+            { key: 'allocation', label: 'Allocation', chartId: 'stockChartAllocation', type: 'bar' },
+            { key: 'performance', label: 'Performance', chartId: 'stockChartPerformance', type: 'bar' },
+            { key: 'exposure', label: 'Exposure', chartId: 'stockChartExposure', type: 'doughnut' }
+        ]
     }
 };
 const CRYPTO_ICON_PROVIDERS = [
@@ -397,6 +405,7 @@ const LOCAL_HISTORIC_DIR = 'assets/historic';
 const LOCAL_HISTORIC_PREFIX = 'historic-';
 const LOCAL_HISTORIC_SUFFIX = '-usd.csv';
 const DEFAULT_HISTORIC_HEADER = '"Time","Close"';
+const categoryChartTabState = {};
 const HISTORIC_SYMBOL_SUFFIXES = ['USDT','USDC','USD'];
 const MS_IN_DAY = 24 * 60 * 60 * 1000;
 
@@ -1135,6 +1144,28 @@ async function fetchJsonWithCorsFallback(url, options){
 function money(v){
     if(v===null || v===undefined || Number.isNaN(Number(v))) return '—';
     return '$' + Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+
+function formatPriceTickValue(value){
+    if(!Number.isFinite(value)) return '—';
+    const abs = Math.abs(value);
+    if(abs >= 1_000_000){
+        const scaled = value / 1_000_000;
+        const decimals = Math.abs(scaled) >= 100 ? 0 : 1;
+        return `${scaled.toFixed(decimals)}M`;
+    }
+    if(abs >= 10_000){
+        const scaled = value / 1000;
+        const decimals = Math.abs(scaled) >= 100 ? 0 : 1;
+        return `${scaled.toFixed(decimals)}K`;
+    }
+    if(abs >= 100){
+        return value.toFixed(0);
+    }
+    if(abs >= 10){
+        return value.toFixed(1);
+    }
+    return value.toFixed(2);
 }
 
 function pct(v){
@@ -4315,7 +4346,7 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
             type: 'line',
             label: 'Avg buy price',
             data: avgLineData,
-            borderColor: 'rgba(96, 165, 250, 0.95)',
+            borderColor: 'rgba(251, 146, 60, 0.95)',
             borderDash: [4, 4],
             borderWidth: 1.5,
             pointRadius: 0,
@@ -4331,7 +4362,7 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
             type: 'line',
             label: 'Current price',
             data: currentLineData,
-            borderColor: 'rgba(250, 204, 21, 0.95)',
+            borderColor: 'rgba(239, 68, 68, 0.95)',
             borderDash: [6, 4],
             borderWidth: 1.5,
             pointRadius: 0,
@@ -4381,6 +4412,16 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
     const minY = filteredCombined.length ? Math.min(...filteredCombined) : fallbackPrice;
     const maxY = filteredCombined.length ? Math.max(...filteredCombined) : fallbackPrice;
 
+    const markerConfig = {
+        avg: Number.isFinite(avgLineValue) ? { value: avgLineValue, label: 'Avg price', shortLabel: 'Avg', color: 'rgba(251, 146, 60, 1)' } : null,
+        current: Number.isFinite(currentLineValue) ? { value: currentLineValue, label: 'Current price', shortLabel: 'Current', color: 'rgba(239, 68, 68, 1)' } : null
+    };
+    const markerList = Object.values(markerConfig).filter(Boolean);
+    const matchMarker = (value, range)=>{
+        const tolerance = Math.max(1e-6, (range || Math.abs(maxY - minY) || 1) * 0.002);
+        return markerList.find(marker => Math.abs(marker.value - value) <= tolerance) || null;
+    };
+
     const config = {
         type: 'scatter',
         data: { datasets },
@@ -4389,6 +4430,22 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
             maintainAspectRatio: false,
             parsing: false,
             animation: false,
+            onClick(event, elements, chart){
+                if(!elements || !elements.length) return;
+                const element = elements[0];
+                const dataset = chart.data?.datasets?.[element.datasetIndex];
+                if(!dataset || dataset.label !== 'Purchases') return;
+                const baseline = chart.options?.plugins?.hoverBaseline;
+                if(!baseline) return;
+                if(baseline.mode === 'avg' && Number.isFinite(baseline.currentValue)){
+                    baseline.mode = 'current';
+                    baseline.value = baseline.currentValue;
+                }else if(Number.isFinite(baseline.avgValue)){
+                    baseline.mode = 'avg';
+                    baseline.value = baseline.avgValue;
+                }
+                chart.update('none');
+            },
             plugins: {
                 legend: { labels: { usePointStyle: true } },
                 tooltip: {
@@ -4419,7 +4476,10 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
                     }
                 },
                 hoverBaseline: {
-                    value: Number.isFinite(avgLineValue) ? avgLineValue : null
+                    value: Number.isFinite(avgLineValue) ? avgLineValue : (Number.isFinite(currentLineValue) ? currentLineValue : null),
+                    mode: Number.isFinite(avgLineValue) ? 'avg' : (Number.isFinite(currentLineValue) ? 'current' : null),
+                    avgValue: Number.isFinite(avgLineValue) ? avgLineValue : null,
+                    currentValue: Number.isFinite(currentLineValue) ? currentLineValue : null
                 },
                 zoom: {
                     limits: {
@@ -4445,15 +4505,43 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
                     grid: { color: 'rgba(148, 163, 184, 0.25)' }
                 },
                 y: {
+                    customMarkers: markerConfig,
+                    afterBuildTicks(axis){
+                        const range = Math.abs(axis.max - axis.min) || 1;
+                        markerList.forEach(marker=>{
+                            if(!marker) return;
+                            const exists = axis.ticks.some(tick => Math.abs(tick.value - marker.value) <= Math.max(1e-6, range * 0.002));
+                            if(!exists){
+                                axis.ticks.push({ value: marker.value });
+                            }
+                        });
+                        axis.ticks.sort((a,b)=> a.value - b.value);
+                    },
                     beginAtZero: false,
                     suggestedMin: Number.isFinite(minY) ? minY * 0.92 : undefined,
                     suggestedMax: Number.isFinite(maxY) ? maxY * 1.08 : undefined,
-                    title: {
-                        display: true,
-                        text: 'Price (Avg buy · Current)'
-                    },
+                    title: { display: false },
                     grid: { color: 'rgba(148, 163, 184, 0.25)' },
-                    ticks: { callback: value => money(value) }
+                    ticks: {
+                        callback(value){
+                            const marker = matchMarker(value, Math.abs(this.max - this.min));
+                            if(marker){
+                                return `${marker.shortLabel}: ${formatPriceTickValue(value)}`;
+                            }
+                            return formatPriceTickValue(value);
+                        },
+                        color(ctx){
+                            const marker = matchMarker(ctx.tick.value, Math.abs(ctx.scale.max - ctx.scale.min));
+                            return marker ? marker.color : 'rgba(226, 232, 240, 0.82)';
+                        },
+                        font(ctx){
+                            const marker = matchMarker(ctx.tick.value, Math.abs(ctx.scale.max - ctx.scale.min));
+                            if(marker){
+                                return { weight: '600', size: 12 };
+                            }
+                            return { size: 11 };
+                        }
+                    }
                 }
             }
         }
@@ -4890,84 +4978,96 @@ function renderTransactionMeta(position, data){
         position.avgPrice
     ].map(value=> Number(value)).filter(value=> Number.isFinite(value) && Math.abs(value) > 1e-9);
     const currentPrice = currentPriceCandidates.length ? currentPriceCandidates[0] : fallbackAverage;
+    const primaryStats = [
+        `<strong>Avg buy price:</strong> ${money(avgPurchasePrice)}`,
+        `<strong>Current price:</strong> ${money(currentPrice)}`,
+        `<strong>Net quantity:</strong> ${formatQty(summary.netQty)}`,
+        `<strong>Total bought:</strong> ${formatQty(summary.totalBuys)}`,
+        `<strong>Total sold:</strong> ${formatQty(summary.totalSells)}`,
+        `<strong>Cash invested:</strong> ${money(summary.totalSpent)}`,
+        `<strong>Cash returned:</strong> ${money(summary.totalProceeds)}`
+    ];
+    const insightItems = buildPurchaseInsightItems(purchases, avgPurchasePrice, currentPrice);
+    const combinedItems = [...primaryStats, ...insightItems];
+    if(!combinedItems.length){
+        transactionModalMeta.innerHTML = '';
+        return;
+    }
     transactionModalMeta.innerHTML = `
-        <div class="modal-meta-grid">
-            <div><strong>Avg buy price:</strong> ${money(avgPurchasePrice)}</div>
-            <div><strong>Current price:</strong> ${money(currentPrice)}</div>
-            <div><strong>Net qty:</strong> ${formatQty(summary.netQty)}</div>
-            <div><strong>Total bought:</strong> ${formatQty(summary.totalBuys)}</div>
-            <div><strong>Total sold:</strong> ${formatQty(summary.totalSells)}</div>
-            <div><strong>Cash invested:</strong> ${money(summary.totalSpent)}</div>
-            <div><strong>Cash returned:</strong> ${money(summary.totalProceeds)}</div>
-        </div>
-        ${buildPurchaseInsights(purchases, avgPurchasePrice, currentPrice)}
+        <details class="modal-insights">
+            <summary>
+                <span>Purchase insights</span>
+                <span class="insight-hint">tap to expand</span>
+            </summary>
+            <ul class="modal-insights-list">
+                ${combinedItems.map(item => `<li>${item}</li>`).join('')}
+            </ul>
+        </details>
     `;
 }
 
-function buildPurchaseInsights(purchases, avgPrice, currentPrice){
+function buildPurchaseInsightItems(purchases, avgPrice, currentPrice){
     if(!Array.isArray(purchases) || !purchases.length){
-        return '';
+        return [];
     }
     const priceValues = purchases
         .map(point=> Number(point.price ?? point.y ?? 0))
         .filter(value => Number.isFinite(value));
     if(!priceValues.length){
-        return '';
+        return [];
     }
     const EPS = 1e-9;
-    const countAboveAvg = Number.isFinite(avgPrice) ? priceValues.filter(value => value > avgPrice + EPS).length : 0;
-    const countBelowAvg = Number.isFinite(avgPrice) ? priceValues.filter(value => value < avgPrice - EPS).length : 0;
-    const countNearAvg = Number.isFinite(avgPrice) ? priceValues.length - countAboveAvg - countBelowAvg : 0;
-    const countAboveCurrent = Number.isFinite(currentPrice) ? priceValues.filter(value => value > currentPrice + EPS).length : null;
-    const countBelowCurrent = Number.isFinite(currentPrice) ? priceValues.filter(value => value < currentPrice - EPS).length : null;
+    const items = [];
+    if(Number.isFinite(avgPrice)){
+        const countAboveAvg = priceValues.filter(value => value > avgPrice + EPS).length;
+        const countBelowAvg = priceValues.filter(value => value < avgPrice - EPS).length;
+        const countNearAvg = priceValues.length - countAboveAvg - countBelowAvg;
+        items.push(`<strong>Vs avg:</strong> ${countAboveAvg} buys above · ${countBelowAvg} below${countNearAvg > 0 ? ` · ${countNearAvg} near` : ''}`);
+    }
+    if(Number.isFinite(currentPrice)){
+        const countAboveCurrent = priceValues.filter(value => value > currentPrice + EPS).length;
+        const countBelowCurrent = priceValues.filter(value => value < currentPrice - EPS).length;
+        items.push(`<strong>Vs current:</strong> ${countAboveCurrent} buys above · ${countBelowCurrent} below`);
+    }
     const medianPrice = computeMedian(priceValues);
     const priceStdDev = computeStdDeviation(priceValues);
     const minPrice = Math.min(...priceValues);
     const maxPrice = Math.max(...priceValues);
+    items.push(`<strong>Median buy:</strong> ${money(medianPrice)} · σ ${money(priceStdDev)}`);
+    items.push(`<strong>Price span:</strong> ${money(minPrice)} – ${money(maxPrice)} (${money(maxPrice - minPrice)})`);
     const purchaseDates = purchases
         .map(point => point.date instanceof Date ? point.date : (point.x ? new Date(point.x) : null))
         .filter(date => date instanceof Date && !Number.isNaN(date.getTime()))
         .sort((a,b)=> a - b);
-    let avgSpacingText = null;
     if(purchaseDates.length >= 2){
         let totalDiff = 0;
         for(let i=1;i<purchaseDates.length;i+=1){
             totalDiff += Math.abs(purchaseDates[i] - purchaseDates[i-1]);
         }
         const avgDiff = totalDiff / (purchaseDates.length - 1);
-        avgSpacingText = formatDuration(avgDiff);
+        items.push(`<strong>Avg spacing:</strong> ${formatDuration(avgDiff)}`);
     }
-    const latestPurchase = purchaseDates.length ? purchaseDates[purchaseDates.length - 1] : null;
-    const stats = [];
-    if(Number.isFinite(avgPrice)){
-        stats.push(`<strong>${countAboveAvg}</strong> buys above avg · <strong>${countBelowAvg}</strong> below${countNearAvg > 0 ? ` · <strong>${countNearAvg}</strong> near avg` : ''}`);
+    if(purchaseDates.length){
+        const latestPurchase = purchaseDates[purchaseDates.length - 1];
+        items.push(`<strong>Last buy:</strong> ${formatDateShort(latestPurchase)}`);
+    }
+    if(priceValues.length >= 3){
+        const sorted = priceValues.slice().sort((a,b)=> b - a);
+        const topCount = Math.min(3, sorted.length);
+        const topSum = sorted.slice(0, topCount).reduce((sum, value)=> sum + value, 0);
+        const totalSum = priceValues.reduce((sum, value)=> sum + value, 0);
+        if(totalSum !== 0){
+            const share = (topSum / totalSum) * 100;
+            items.push(`<strong>Top buys share:</strong> ${share.toFixed(1)}% of buy capital in top ${topCount}`);
+        }
     }
     if(Number.isFinite(currentPrice)){
-        stats.push(`<strong>${countAboveCurrent}</strong> buys above current · <strong>${countBelowCurrent}</strong> below current`);
+        const deltas = priceValues.map(value => currentPrice - value);
+        const best = Math.max(...deltas);
+        const worst = Math.min(...deltas);
+        items.push(`<strong>Best vs current:</strong> ${money(best)} · worst ${money(worst)}`);
     }
-    stats.push(`Median buy ${money(medianPrice)} · σ ${money(priceStdDev)}`);
-    stats.push(`Price span ${money(minPrice)} – ${money(maxPrice)} (${money(maxPrice - minPrice)} range)`);
-    if(Number.isFinite(currentPrice)){
-        const bestBuy = Math.min(...priceValues.map(value => currentPrice - value));
-        const worstBuy = Math.max(...priceValues.map(value => currentPrice - value));
-        stats.push(`Best buy vs current ${money(Math.max(0, bestBuy))} · Worst ${money(Math.min(0, worstBuy))}`);
-    }
-    if(avgSpacingText){
-        stats.push(`Average time between buys ${avgSpacingText}`);
-    }
-    if(latestPurchase){
-        stats.push(`Last buy ${formatDateShort(latestPurchase)}`);
-    }
-    if(!stats.length){
-        return '';
-    }
-    const list = stats.map(item => `<li>${item}</li>`).join('');
-    return `
-        <div class="modal-meta-stats">
-            <h4>Purchase insights</h4>
-            <ul>${list}</ul>
-        </div>
-    `;
+    return items;
 }
 
 function computeMedian(values){
@@ -5321,6 +5421,53 @@ function applyAssetViewMode(){
         assetViewToggleButton.classList.toggle('mode-plates', isPlates);
         assetViewToggleButton.classList.toggle('mode-rows', !isPlates);
     }
+}
+
+function setCategoryChartTab(categoryKey, tabKey, options = {}){
+    const normalized = String(categoryKey || '').toLowerCase();
+    const config = CATEGORY_CONFIG[normalized];
+    if(!config) return;
+    const tabs = Array.isArray(config.chartTabs) && config.chartTabs.length ? config.chartTabs : [];
+    if(!tabs.length) return;
+    const effectiveKey = tabs.some(tab => tab.key === tabKey) ? tabKey : (tabs[0]?.key || tabKey);
+    if(!effectiveKey) return;
+    categoryChartTabState[normalized] = effectiveKey;
+    const panel = document.querySelector(`.chart-tab-panel[data-category="${normalized}"]`);
+    if(panel){
+        panel.querySelectorAll('.chart-tab').forEach(button=>{
+            button.classList.toggle('active', button.dataset.chartKey === effectiveKey);
+        });
+        panel.querySelectorAll('canvas').forEach(canvas=>{
+            canvas.classList.toggle('active', canvas.dataset.chartKey === effectiveKey);
+        });
+    }
+    if(!options.silent){
+        const activeTab = tabs.find(tab => tab.key === effectiveKey);
+        if(activeTab){
+            const chart = charts[activeTab.chartId];
+            if(chart){
+                chart.resize();
+                chart.update('none');
+            }
+        }
+    }
+}
+
+function initializeChartTabs(){
+    document.querySelectorAll('.chart-tab-panel').forEach(panel=>{
+        const category = panel.dataset.category;
+        if(!category) return;
+        panel.querySelectorAll('.chart-tab').forEach(button=>{
+            button.addEventListener('click', ()=>{
+                setCategoryChartTab(category, button.dataset.chartKey);
+            });
+        });
+        const config = CATEGORY_CONFIG[category];
+        const defaultKey = categoryChartTabState[category] || (config?.chartTabs?.[0]?.key);
+        if(defaultKey){
+            setCategoryChartTab(category, defaultKey, { silent: true });
+        }
+    });
 }
 
 function setAssetViewMode(mode){
@@ -6996,7 +7143,9 @@ function renderPnlTrendChart(range){
 function renderCategoryAnalytics(categoryKey, config){
     const normalized = categoryKey.toLowerCase();
     const listEl = document.getElementById(config.listId);
-    const chartId = config.chartId;
+    const chartTabs = Array.isArray(config.chartTabs) && config.chartTabs.length
+        ? config.chartTabs
+        : [{ key: 'allocation', chartId: config.chartId, type: 'bar' }];
     const items = positions.filter(p=> (p.type || '').toLowerCase() === normalized);
     const totalPortfolioValue = positions.reduce((sum,p)=> sum + Number(p.marketValue || 0), 0);
     const totalCategoryValue = items.reduce((sum,p)=> sum + Number(p.marketValue || 0), 0);
@@ -7018,10 +7167,12 @@ function renderCategoryAnalytics(categoryKey, config){
 
     if(!items.length){
         if(listEl) listEl.innerHTML = `<div class="pos">No ${config.emptyLabel} holdings yet.</div>`;
-        if(charts[chartId]){
-            charts[chartId].destroy();
-            delete charts[chartId];
-        }
+        chartTabs.forEach(tab=>{
+            if(tab.chartId && charts[tab.chartId]){
+                charts[tab.chartId].destroy();
+                delete charts[tab.chartId];
+            }
+        });
         return;
     }
 
@@ -7039,27 +7190,29 @@ function renderCategoryAnalytics(categoryKey, config){
         ? openPositions.filter(p=> Number(p.marketValue || 0) > 0)
         : sorted.filter(p=> Number(p.marketValue || 0) > 0);
 
-    if(chartSource.length){
-        const labels = chartSource.map(p=> p.displayName || p.Symbol || p.Name);
-        const data = chartSource.map(p=> Number(p.marketValue || 0));
-        const backgroundColors = labels.map((_, idx)=> `hsla(${(idx * 47) % 360},70%,60%,0.75)`);
-        const borderColors = labels.map((_, idx)=> `hsla(${(idx * 47) % 360},70%,50%,1)`);
-        const chartData = { labels, datasets: [{ data, backgroundColor: backgroundColors, borderColor: borderColors, borderWidth: 1, borderRadius: 8 }] };
-        createOrUpdateChart(chartId, 'bar', chartData, {
-            plugins: { legend: { display: false } },
-            interaction: { mode: 'index', intersect: false },
-            scales: {
-                x: { ticks: { autoSkip: false, maxRotation: 45, minRotation: 0 } },
-                y: {
-                    beginAtZero: true,
-                    ticks: { callback: value => money(value) }
-                }
-            }
-        });
-    }else if(charts[chartId]){
-        charts[chartId].destroy();
-        delete charts[chartId];
-    }
+    const allocationPayload = buildAllocationChartPayload(chartSource);
+    const performancePayload = buildPerformanceChartPayload(sorted);
+const exposurePayload = buildExposureChartPayload(openPositions, closedPositions);
+
+    chartTabs.forEach(tab=>{
+        let payload = null;
+        switch(tab.key){
+            case 'performance':
+                payload = performancePayload;
+                break;
+            case 'exposure':
+                payload = exposurePayload;
+                break;
+            default:
+                payload = allocationPayload;
+        }
+        if(payload && tab.chartId){
+            createOrUpdateChart(tab.chartId, tab.type || payload.type || 'bar', payload.data, payload.options);
+        }else if(tab.chartId && charts[tab.chartId]){
+            charts[tab.chartId].destroy();
+            delete charts[tab.chartId];
+        }
+    });
 
     if(listEl){
         const state = categorySectionState[config.metricKey] || { open: true, closed: false };
@@ -7082,6 +7235,10 @@ function renderCategoryAnalytics(categoryKey, config){
         }));
     }
     applyAssetViewMode();
+    const desiredTab = categoryChartTabState[normalized] || (chartTabs[0]?.key);
+    if(desiredTab){
+        setCategoryChartTab(normalized, desiredTab, { silent: true });
+    }
 }
 
 function renderCryptoAnalytics(){
@@ -7091,6 +7248,126 @@ function renderCryptoAnalytics(){
 function renderStockAnalytics(){
     renderCategoryAnalytics('stock', CATEGORY_CONFIG.stock);
     updateMarketStatus();
+}
+
+function buildAllocationChartPayload(source){
+    if(!Array.isArray(source) || !source.length){
+        return null;
+    }
+    const labels = source.map(p=> p.displayName || p.Symbol || p.Name);
+    const data = source.map(p=> Number(p.marketValue || 0));
+    const backgroundColors = labels.map((_, idx)=> `hsla(${(idx * 47) % 360},70%,60%,0.75)`);
+    const borderColors = labels.map((_, idx)=> `hsla(${(idx * 47) % 360},70%,50%,1)`);
+    return {
+        type: 'bar',
+        data: { labels, datasets: [{ data, backgroundColor: backgroundColors, borderColor: borderColors, borderWidth: 1, borderRadius: 8 }] },
+        options: {
+            plugins: { legend: { display: false } },
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                x: { ticks: { autoSkip: false, maxRotation: 45, minRotation: 0 } },
+                y: {
+                    beginAtZero: true,
+                    ticks: { callback: value => money(value) }
+                }
+            }
+        }
+    };
+}
+
+function buildPerformanceChartPayload(positions){
+    if(!Array.isArray(positions) || !positions.length){
+        return null;
+    }
+    const sample = positions.slice(0, Math.min(8, positions.length));
+    if(!sample.length){
+        return null;
+    }
+    const labels = sample.map(p=> p.displayName || p.Symbol || p.Name);
+    const values = sample.map(p=>{
+        const pctValue = Number(p.rangeChangePct);
+        if(Number.isFinite(pctValue)) return pctValue;
+        const market = Number(p.marketValue || 0);
+        const cost = Number(p.costBasis || 0);
+        if(!cost) return 0;
+        return ((market - cost) / Math.abs(cost)) * 100;
+    });
+    const backgroundColors = values.map(value=> value >= 0 ? 'rgba(34, 197, 94, 0.75)' : 'rgba(239, 68, 68, 0.75)');
+    return {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [{
+                data: values,
+                backgroundColor: backgroundColors,
+                borderRadius: 6,
+                borderSkipped: false
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            plugins: { legend: { display: false } },
+            scales: {
+                x: {
+                    beginAtZero: true,
+                    ticks: {
+                        callback: value => `${Number(value).toFixed(0)}%`
+                    },
+                    grid: { color: 'rgba(148, 163, 184, 0.2)' }
+                },
+                y: {
+                    ticks: { autoSkip: false },
+                    grid: { display: false }
+                }
+            }
+        }
+    };
+}
+
+function buildExposureChartPayload(openPositions, closedPositions){
+    const invested = openPositions.reduce((sum,p)=> sum + Number(p.costBasis || 0), 0);
+    const marketValue = openPositions.reduce((sum,p)=> sum + Number(p.marketValue || 0), 0);
+    const realized = closedPositions.reduce((sum,p)=> sum + Number(p.realized || 0), 0);
+    const data = [
+        Math.max(marketValue, 0),
+        Math.max(invested, 0),
+        Math.max(Math.abs(realized), 0)
+    ];
+    if(!data.some(value => value > 0)){
+        return null;
+    }
+    const realizedColor = realized >= 0 ? 'rgba(34, 197, 94, 0.85)' : 'rgba(239, 68, 68, 0.85)';
+    return {
+        type: 'doughnut',
+        data: {
+            labels: ['Market value', 'Invested capital', 'Realized P&L'],
+            datasets: [{
+                data,
+                backgroundColor: [
+                    'rgba(59, 130, 246, 0.85)',
+                    'rgba(251, 191, 36, 0.92)',
+                    realizedColor
+                ],
+                borderColor: 'rgba(15, 23, 42, 0.9)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            plugins: {
+                legend: { position: 'bottom' },
+                tooltip: {
+                    callbacks: {
+                        label(ctx){
+                            const label = ctx.label || '';
+                            const value = Number(ctx.parsed || 0);
+                            return `${label}: ${money(value)}`;
+                        }
+                    }
+                }
+            },
+            cutout: '58%'
+        }
+    };
 }
 
 function updateKpis(){
@@ -7341,6 +7618,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
     initializePnlRangeTabs();
     renderPnlTrendChart(pnlRange);
     initializeBestInfoTriggers();
+    initializeChartTabs();
     document.addEventListener('keydown', event => {
         if(event.key === 'Escape'){
             let handled = false;
@@ -7443,18 +7721,33 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
     initMarketStatusWatcher();
 
-    document.querySelectorAll('details[data-chart]').forEach(section=>{
+    document.querySelectorAll('details[data-chart], details[data-chart-group]').forEach(section=>{
         section.addEventListener('toggle', ()=>{
             if(!section.open) return;
             const chartId = section.getAttribute('data-chart');
-            if(!chartId) return;
-            requestAnimationFrame(()=>{
-                const chart = charts[chartId];
-                if(chart){
-                    chart.resize();
-                    chart.update('none');
-                }
-            });
+            if(chartId){
+                requestAnimationFrame(()=>{
+                    const chart = charts[chartId];
+                    if(chart){
+                        chart.resize();
+                        chart.update('none');
+                    }
+                });
+            }
+            const groupKey = section.getAttribute('data-chart-group');
+            if(groupKey){
+                const config = CATEGORY_CONFIG[groupKey];
+                const tabs = Array.isArray(config?.chartTabs) ? config.chartTabs : [];
+                requestAnimationFrame(()=>{
+                    tabs.forEach(tab=>{
+                        const chart = charts[tab.chartId];
+                        if(chart){
+                            chart.resize();
+                            chart.update('none');
+                        }
+                    });
+                });
+            }
         });
     });
 
