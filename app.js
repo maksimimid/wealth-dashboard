@@ -279,10 +279,14 @@ const transactionHoverPlugin = {
         if(!element) return;
         const yScale = chart.scales?.y;
         if(!yScale) return;
-        const baselineY = yScale.getPixelForValue(baselineValue);
+        const chartArea = chart.chartArea || { left: 0, right: chart.width, top: 0, bottom: chart.height };
+        const clampY = value => Math.min(Math.max(value, chartArea.top), chartArea.bottom);
+        const baselineYRaw = yScale.getPixelForValue(baselineValue);
         const x = element.x;
         const y = element.y;
-        if(!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(baselineY)) return;
+        if(!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(baselineYRaw)) return;
+        const baselineY = clampY(baselineYRaw);
+        const pointY = clampY(y);
         const pointPrice = Number(activePoint.raw?.price ?? activePoint.raw?.y ?? activePoint.parsed?.y);
         if(!Number.isFinite(pointPrice)) return;
         const diffValue = baselineValue - pointPrice;
@@ -297,7 +301,7 @@ const transactionHoverPlugin = {
         ctx.setLineDash([4, 4]);
         ctx.lineWidth = 1.2;
         ctx.beginPath();
-        ctx.moveTo(x, y);
+        ctx.moveTo(x, pointY);
         ctx.lineTo(x, baselineY);
         ctx.stroke();
         ctx.restore();
@@ -320,8 +324,7 @@ const transactionHoverPlugin = {
         const paddingY = 4;
         const boxWidth = textWidth + paddingX * 2;
         const boxHeight = textHeight + paddingY * 2;
-        const midY = (y + baselineY) / 2;
-        const chartArea = chart.chartArea || { left: 0, right: chart.width, top: 0, bottom: chart.height };
+        const midY = (pointY + baselineY) / 2;
         let boxX = x - boxWidth / 2;
         boxX = Math.max(chartArea.left + 4, Math.min(boxX, chartArea.right - boxWidth - 4));
         let boxY = midY - boxHeight / 2;
@@ -4420,7 +4423,10 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
                     beginAtZero: false,
                     suggestedMin: Number.isFinite(minY) ? minY * 0.92 : undefined,
                     suggestedMax: Number.isFinite(maxY) ? maxY * 1.08 : undefined,
-                    title: { display: true, text: 'Price' },
+                    title: {
+                        display: true,
+                        text: ['Price', 'Avg buy · Current price']
+                    },
                     grid: { color: 'rgba(148, 163, 184, 0.25)' },
                     ticks: { callback: value => money(value) }
                 }
@@ -4837,10 +4843,32 @@ function renderTransactionLots(position, data){
     listElement.scrollTop = 0;
 }
 
-function renderTransactionMeta(position, summary){
+function renderTransactionMeta(position, data){
     if(!transactionModalMeta) return;
+    const summary = data?.summary || {
+        netQty: 0,
+        totalBuys: 0,
+        totalSells: 0,
+        totalSpent: 0,
+        totalProceeds: 0
+    };
+    const purchases = Array.isArray(data?.purchases) ? data.purchases : [];
+    const fallbackAverage = Number(position.avgPrice || position.lastPurchasePrice || position.displayPrice || position.currentPrice || 0) || 0;
+    const avgPurchasePrice = purchases.length
+        ? purchases.reduce((sum, point)=> sum + Number(point.price ?? point.y ?? 0), 0) / purchases.length
+        : fallbackAverage;
+    const currentPriceCandidates = [
+        position.displayPrice,
+        position.currentPrice,
+        position.lastKnownPrice,
+        position.lastPurchasePrice,
+        position.avgPrice
+    ].map(value=> Number(value)).filter(value=> Number.isFinite(value) && Math.abs(value) > 1e-9);
+    const currentPrice = currentPriceCandidates.length ? currentPriceCandidates[0] : fallbackAverage;
     transactionModalMeta.innerHTML = `
         <div class="modal-meta-grid">
+            <div><strong>Avg buy price:</strong> ${money(avgPurchasePrice)}</div>
+            <div><strong>Current price:</strong> ${money(currentPrice)}</div>
             <div><strong>Net qty:</strong> ${formatQty(summary.netQty)}</div>
             <div><strong>Total bought:</strong> ${formatQty(summary.totalBuys)}</div>
             <div><strong>Total sold:</strong> ${formatQty(summary.totalSells)}</div>
@@ -4884,7 +4912,7 @@ function openTransactionModal(position){
             transactionChart.canvas.classList.remove('hidden');
     }
     if(hasData){
-        renderTransactionMeta(position, data.summary);
+        renderTransactionMeta(position, data);
     }else if(transactionModalMeta){
         transactionModalMeta.innerHTML = '<div class="pos">No purchase or sale operations recorded yet.</div>';
     }

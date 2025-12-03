@@ -320,14 +320,6 @@ body::before {
     display: block;
 }
 
-.chart-nav-note {
-    margin-top: 10px;
-    font-size: 0.85rem;
-    color: var(--muted);
-    text-align: center;
-    letter-spacing: 0.2px;
-}
-
 .hidden {
     display: none !important;
 }
