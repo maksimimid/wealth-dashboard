@@ -4900,7 +4900,91 @@ function renderTransactionMeta(position, data){
             <div><strong>Cash invested:</strong> ${money(summary.totalSpent)}</div>
             <div><strong>Cash returned:</strong> ${money(summary.totalProceeds)}</div>
         </div>
+        ${buildPurchaseInsights(purchases, avgPurchasePrice, currentPrice)}
     `;
+}
+
+function buildPurchaseInsights(purchases, avgPrice, currentPrice){
+    if(!Array.isArray(purchases) || !purchases.length){
+        return '';
+    }
+    const priceValues = purchases
+        .map(point=> Number(point.price ?? point.y ?? 0))
+        .filter(value => Number.isFinite(value));
+    if(!priceValues.length){
+        return '';
+    }
+    const EPS = 1e-9;
+    const countAboveAvg = Number.isFinite(avgPrice) ? priceValues.filter(value => value > avgPrice + EPS).length : 0;
+    const countBelowAvg = Number.isFinite(avgPrice) ? priceValues.filter(value => value < avgPrice - EPS).length : 0;
+    const countNearAvg = Number.isFinite(avgPrice) ? priceValues.length - countAboveAvg - countBelowAvg : 0;
+    const countAboveCurrent = Number.isFinite(currentPrice) ? priceValues.filter(value => value > currentPrice + EPS).length : null;
+    const countBelowCurrent = Number.isFinite(currentPrice) ? priceValues.filter(value => value < currentPrice - EPS).length : null;
+    const medianPrice = computeMedian(priceValues);
+    const priceStdDev = computeStdDeviation(priceValues);
+    const minPrice = Math.min(...priceValues);
+    const maxPrice = Math.max(...priceValues);
+    const purchaseDates = purchases
+        .map(point => point.date instanceof Date ? point.date : (point.x ? new Date(point.x) : null))
+        .filter(date => date instanceof Date && !Number.isNaN(date.getTime()))
+        .sort((a,b)=> a - b);
+    let avgSpacingText = null;
+    if(purchaseDates.length >= 2){
+        let totalDiff = 0;
+        for(let i=1;i<purchaseDates.length;i+=1){
+            totalDiff += Math.abs(purchaseDates[i] - purchaseDates[i-1]);
+        }
+        const avgDiff = totalDiff / (purchaseDates.length - 1);
+        avgSpacingText = formatDuration(avgDiff);
+    }
+    const latestPurchase = purchaseDates.length ? purchaseDates[purchaseDates.length - 1] : null;
+    const stats = [];
+    if(Number.isFinite(avgPrice)){
+        stats.push(`<strong>${countAboveAvg}</strong> buys above avg · <strong>${countBelowAvg}</strong> below${countNearAvg > 0 ? ` · <strong>${countNearAvg}</strong> near avg` : ''}`);
+    }
+    if(Number.isFinite(currentPrice)){
+        stats.push(`<strong>${countAboveCurrent}</strong> buys above current · <strong>${countBelowCurrent}</strong> below current`);
+    }
+    stats.push(`Median buy ${money(medianPrice)} · σ ${money(priceStdDev)}`);
+    stats.push(`Price span ${money(minPrice)} – ${money(maxPrice)} (${money(maxPrice - minPrice)} range)`);
+    if(Number.isFinite(currentPrice)){
+        const bestBuy = Math.min(...priceValues.map(value => currentPrice - value));
+        const worstBuy = Math.max(...priceValues.map(value => currentPrice - value));
+        stats.push(`Best buy vs current ${money(Math.max(0, bestBuy))} · Worst ${money(Math.min(0, worstBuy))}`);
+    }
+    if(avgSpacingText){
+        stats.push(`Average time between buys ${avgSpacingText}`);
+    }
+    if(latestPurchase){
+        stats.push(`Last buy ${formatDateShort(latestPurchase)}`);
+    }
+    if(!stats.length){
+        return '';
+    }
+    const list = stats.map(item => `<li>${item}</li>`).join('');
+    return `
+        <div class="modal-meta-stats">
+            <h4>Purchase insights</h4>
+            <ul>${list}</ul>
+        </div>
+    `;
+}
+
+function computeMedian(values){
+    if(!Array.isArray(values) || !values.length) return 0;
+    const sorted = values.slice().sort((a,b)=> a-b);
+    const mid = Math.floor(sorted.length / 2);
+    if(sorted.length % 2 === 0){
+        return (sorted[mid - 1] + sorted[mid]) / 2;
+    }
+    return sorted[mid];
+}
+
+function computeStdDeviation(values){
+    if(!Array.isArray(values) || values.length < 2) return 0;
+    const mean = values.reduce((sum, value)=> sum + value, 0) / values.length;
+    const variance = values.reduce((sum, value)=> sum + Math.pow(value - mean, 2), 0) / (values.length - 1);
+    return Math.sqrt(Math.max(variance, 0));
 }
 
 function openTransactionModal(position){

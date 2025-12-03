@@ -399,6 +399,31 @@ body::before {
     margin-right: 6px;
 }
 
+.modal-meta-stats {
+    margin-top: 14px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.modal-meta-stats h4 {
+    margin: 0 0 6px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--muted);
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+}
+
+.modal-meta-stats ul {
+    margin: 0;
+    padding-left: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.9rem;
+    color: var(--base-text-color);
+}
+
 .modal-lots {
     display: flex;
     flex-direction: column;
