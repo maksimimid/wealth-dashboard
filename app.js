@@ -4422,6 +4422,16 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
         return markerList.find(marker => Math.abs(marker.value - value) <= tolerance) || null;
     };
 
+    const getMarkerForContext = ctx => {
+        if(!ctx || !ctx.tick) return null;
+        const tickValue = Number(ctx.tick.value);
+        if(!Number.isFinite(tickValue)) return null;
+        const range = ctx.scale && Number.isFinite(ctx.scale.max) && Number.isFinite(ctx.scale.min)
+            ? Math.abs(ctx.scale.max - ctx.scale.min)
+            : null;
+        return matchMarker(tickValue, range);
+    };
+
     const config = {
         type: 'scatter',
         data: { datasets },
@@ -4524,22 +4534,20 @@ function buildTransactionChartConfig(data, position, priceSeries = []){
                     grid: { color: 'rgba(148, 163, 184, 0.25)' },
                     ticks: {
                         callback(value){
-                            const marker = matchMarker(value, Math.abs(this.max - this.min));
-                            if(marker){
-                                return `${marker.shortLabel}: ${formatPriceTickValue(value)}`;
-                            }
-                            return formatPriceTickValue(value);
+                            const range = this && Number.isFinite(this.max) && Number.isFinite(this.min)
+                                ? Math.abs(this.max - this.min)
+                                : null;
+                            const marker = matchMarker(Number(value), range);
+                            const text = formatPriceTickValue(Number(value));
+                            return marker ? `${marker.shortLabel}: ${text}` : text;
                         },
                         color(ctx){
-                            const marker = matchMarker(ctx.tick.value, Math.abs(ctx.scale.max - ctx.scale.min));
+                            const marker = getMarkerForContext(ctx);
                             return marker ? marker.color : 'rgba(226, 232, 240, 0.82)';
                         },
                         font(ctx){
-                            const marker = matchMarker(ctx.tick.value, Math.abs(ctx.scale.max - ctx.scale.min));
-                            if(marker){
-                                return { weight: '600', size: 12 };
-                            }
-                            return { size: 11 };
+                            const marker = getMarkerForContext(ctx);
+                            return marker ? { weight: '600', size: 12 } : { size: 11 };
                         }
                     }
                 }

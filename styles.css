@@ -1722,13 +1722,13 @@ body.light-theme .data-source-select[data-source="loading"] {
 }
 
 .chart-tab-content canvas {
-    display: none;
+    display: none !important;
     width: 100% !important;
-    height: 350px !important;
+    height: 360px !important;
 }
 
 .chart-tab-content canvas.active {
-    display: block;
+    display: block !important;
 }
 
 .chart-tabs {
