@@ -432,6 +432,9 @@ body::before {
     gap: 6px;
     font-size: 0.9rem;
     color: var(--base-text-color);
+    max-height: 300px;
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .modal-insights-list li strong {

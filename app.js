@@ -1895,9 +1895,13 @@ async function ensureRangeReference(position, range){
         return base;
     }
     if(range === '1D'){
-        const base = position.prevClose ?? position.avgPrice ?? position.lastKnownPrice ?? position.displayPrice ?? 0;
-        bucket['1D'] = base;
-        return base;
+        if(position.prevClose !== undefined && position.prevClose !== null && Number.isFinite(position.prevClose) && position.prevClose > 0){
+            bucket['1D'] = position.prevClose;
+            return position.prevClose;
+        }
+        if(bucket['1D'] !== undefined){
+            return bucket['1D'];
+        }
     }
     if(bucket[range] !== undefined){
         return bucket[range];
@@ -1961,7 +1965,12 @@ function recomputeRangeMetrics(range){
         const reinvestedQty = Math.max(0, Number(position.reinvested || 0));
         const reinvestBasePrice = Math.abs(price) > 1e-9 ? price : base;
         const reinvestedValue = (reinvestedQty > 1e-6 && Math.abs(reinvestBasePrice) > 1e-9) ? reinvestBasePrice * reinvestedQty : 0;
-        let pnl = unrealized + realized + reinvestedValue;
+        let pnl;
+        if(range === '1D'){
+            pnl = unrealized;
+        }else{
+            pnl = unrealized + realized + reinvestedValue;
+        }
         const typeKey = (position.type || '').toLowerCase();
         if(typeKey === 'real estate'){
             const rentPnl = getRealEstateRangePnl(position, range);
@@ -6060,13 +6069,60 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
     }
 
     const twoPi = Math.PI * 2;
+    const placedBubbles = [];
     nodesData.forEach((node, index)=>{
         const angle = twoPi * (index / nodesData.length) - Math.PI / 2;
-        const rawX = centerX + Math.cos(angle) * radius;
-        const rawY = centerY + Math.sin(angle) * radius;
+        let rawX = centerX + Math.cos(angle) * radius;
+        let rawY = centerY + Math.sin(angle) * radius;
         const half = node.size / 2;
-        const clampedX = Math.min(width - half - 8, Math.max(half + 8, rawX));
-        const clampedY = Math.min(height - half - 8, Math.max(half + 8, rawY));
+        const minSpacing = 12;
+        
+        let attempts = 0;
+        let finalX = rawX;
+        let finalY = rawY;
+        let hasCollision = true;
+        
+        while(hasCollision && attempts < 50){
+            hasCollision = false;
+            finalX = Math.min(width - half - 8, Math.max(half + 8, rawX));
+            finalY = Math.min(height - half - 8, Math.max(half + 8, rawY));
+            
+            for(const placed of placedBubbles){
+                const dx = finalX - placed.x;
+                const dy = finalY - placed.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                const minDistance = half + placed.half + minSpacing;
+                
+                if(distance < minDistance){
+                    hasCollision = true;
+                    const angleToPlaced = Math.atan2(dy, dx);
+                    const pushDistance = minDistance - distance + 2;
+                    rawX = finalX + Math.cos(angleToPlaced) * pushDistance;
+                    rawY = finalY + Math.sin(angleToPlaced) * pushDistance;
+                    attempts++;
+                    break;
+                }
+            }
+            
+            if(!hasCollision){
+                const dx = finalX - centerX;
+                const dy = finalY - centerY;
+                const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
+                const minDistanceFromMain = mainSize / 2 + half + minSpacing;
+                if(distanceFromCenter < minDistanceFromMain){
+                    hasCollision = true;
+                    const angleFromCenter = Math.atan2(dy, dx);
+                    rawX = centerX + Math.cos(angleFromCenter) * minDistanceFromMain;
+                    rawY = centerY + Math.sin(angleFromCenter) * minDistanceFromMain;
+                    attempts++;
+                }
+            }
+        }
+        
+        const clampedX = finalX;
+        const clampedY = finalY;
+        placedBubbles.push({ x: clampedX, y: clampedY, half: half });
+        
         const percentLabel = node.percent > 0 ? `${node.percent.toFixed(1)}%` : '';
         const valueWithPercent = percentLabel
             ? `${formatCompactMoney(node.value)} (${percentLabel})`
