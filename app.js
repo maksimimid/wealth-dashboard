@@ -5016,9 +5016,9 @@ function renderTransactionMeta(position, data){
                 <span>Purchase insights</span>
                 <span class="insight-hint">tap to expand</span>
             </summary>
-            <ul class="modal-insights-list">
-                ${combinedItems.map(item => `<li>${item}</li>`).join('')}
-            </ul>
+            <div class="modal-insights-plates">
+                ${combinedItems.map(item => `<div class="modal-insight-plate">${item}</div>`).join('')}
+            </div>
         </details>
     `;
 }
