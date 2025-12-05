@@ -11,6 +11,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@3.3.0/dist/chartjs-chart-financial.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js" defer></script>
 <script src="./config.sample.js" defer></script>
 <script src="./config.local.js" defer></script>
@@ -188,14 +189,25 @@
                 </button>
             </div>
         </div>
-        <details class="analytics-section chart-section" data-chart="cryptoPortfolioChart">
+        <details class="analytics-section chart-section" data-chart-group="crypto">
             <summary>
-                <div class="summary-left"><span class="summary-title">Allocation chart</span></div>
-                <div class="summary-extra">Value distribution</div>
+                <div class="summary-left"><span class="summary-title">Charts</span></div>
+                <div class="summary-extra">Explore crypto signals</div>
             </summary>
             <div class="analytics-section-content">
-                <div class="analytics-chart">
-                    <canvas id="cryptoPortfolioChart"></canvas>
+                <div class="chart-tab-panel" data-category="crypto">
+                    <div class="analytics-chart">
+                        <div class="chart-tab-content">
+                        <canvas id="cryptoChartAllocation" class="active" data-chart-key="allocation"></canvas>
+                        <canvas id="cryptoChartPerformance" data-chart-key="performance"></canvas>
+                        <canvas id="cryptoChartExposure" data-chart-key="exposure"></canvas>
+                    </div>
+                    </div>
+                    <div class="chart-tabs">
+                        <button type="button" class="chart-tab active" data-chart-key="allocation">Allocation</button>
+                        <button type="button" class="chart-tab" data-chart-key="performance">Performance</button>
+                        <button type="button" class="chart-tab" data-chart-key="exposure">Exposure</button>
+                    </div>
                 </div>
             </div>
         </details>
@@ -242,14 +254,25 @@
                 </button>
             </div>
         </div>
-        <details class="analytics-section chart-section" data-chart="stockPortfolioChart">
+        <details class="analytics-section chart-section" data-chart-group="stock">
             <summary>
-                <div class="summary-left"><span class="summary-title">Allocation chart</span></div>
-                <div class="summary-extra">Value distribution</div>
+                <div class="summary-left"><span class="summary-title">Charts</span></div>
+                <div class="summary-extra">Market structure</div>
             </summary>
             <div class="analytics-section-content">
-                <div class="analytics-chart">
-                    <canvas id="stockPortfolioChart"></canvas>
+                <div class="chart-tab-panel" data-category="stock">
+                    <div class="analytics-chart">
+                        <div class="chart-tab-content">
+                        <canvas id="stockChartAllocation" class="active" data-chart-key="allocation"></canvas>
+                        <canvas id="stockChartPerformance" data-chart-key="performance"></canvas>
+                        <canvas id="stockChartExposure" data-chart-key="exposure"></canvas>
+                    </div>
+                    </div>
+                    <div class="chart-tabs">
+                        <button type="button" class="chart-tab active" data-chart-key="allocation">Allocation</button>
+                        <button type="button" class="chart-tab" data-chart-key="performance">Performance</button>
+                        <button type="button" class="chart-tab" data-chart-key="exposure">Exposure</button>
+                    </div>
                 </div>
             </div>
         </details>

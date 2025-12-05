@@ -311,7 +311,7 @@ body::before {
 
 .modal-chart {
     flex: 1;
-    min-height: 320px;
+    min-height: 360px;
 }
 
 .modal-chart canvas {
@@ -387,16 +387,57 @@ body::before {
     color: var(--muted);
 }
 
-.modal-meta-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-    gap: 12px;
-    font-size: 0.92rem;
+.modal-insights {
+    margin-top: 12px;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.65);
+    overflow: hidden;
 }
 
-.modal-meta-grid strong {
+.modal-insights summary {
+    cursor: pointer;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.95rem;
     font-weight: 600;
-    margin-right: 6px;
+    color: var(--muted);
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+}
+
+.modal-insights summary::-webkit-details-marker {
+    display: none;
+}
+
+.modal-insights .insight-hint {
+    font-size: 0.8rem;
+    text-transform: none;
+    letter-spacing: 0.2px;
+    color: rgba(148, 163, 184, 0.8);
+}
+
+.modal-insights[open] .insight-hint {
+    display: none;
+}
+
+.modal-insights-list {
+    margin: 0;
+    padding: 0 18px 14px 28px;
+    list-style: disc;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 0.9rem;
+    color: var(--base-text-color);
+}
+
+.modal-insights-list li strong {
+    color: var(--muted);
+    font-weight: 600;
+    margin-right: 4px;
 }
 
 .modal-lots {
@@ -1267,9 +1308,9 @@ body.light-theme .pnl-chart {
 }
 
 .analytics-header-right {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     justify-content: flex-end;
-    width: 100%;
+    width: auto;
 }
 
 .card-header-right .analytics-summary,
@@ -1667,6 +1708,58 @@ body.light-theme .data-source-select[data-source="loading"] {
     width: 100% !important;
     height: 100% !important;
     display: block;
+}
+
+.chart-tab-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.chart-tab-content {
+    position: relative;
+    min-height: 340px;
+}
+
+.chart-tab-content canvas {
+    display: none !important;
+    width: 100% !important;
+    height: 360px !important;
+}
+
+.chart-tab-content canvas.active {
+    display: block !important;
+}
+
+.chart-tabs {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.chart-tab {
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    background: rgba(15, 23, 42, 0.4);
+    color: var(--muted);
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.chart-tab:hover,
+.chart-tab:focus-visible {
+    border-color: rgba(59, 130, 246, 0.7);
+    color: #f8fafc;
+}
+
+.chart-tab.active {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.95), rgba(14, 165, 233, 0.85));
+    color: #f8fafc;
+    border-color: transparent;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.4);
 }
 
 .analytics-list {
