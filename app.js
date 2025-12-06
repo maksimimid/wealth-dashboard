@@ -5004,7 +5004,7 @@ function renderTransactionMeta(position, data){
         `<strong>Cash invested:</strong> ${money(summary.totalSpent)}`,
         `<strong>Cash returned:</strong> ${money(summary.totalProceeds)}`
     ];
-    const insightItems = buildPurchaseInsightItems(purchases, avgPurchasePrice, currentPrice);
+    const insightItems = buildPurchaseInsightItems(purchases, avgPurchasePrice, currentPrice, summary.totalSpent, summary.totalProceeds);
     const combinedItems = [...primaryStats, ...insightItems];
     if(!combinedItems.length){
         transactionModalMeta.innerHTML = '';
@@ -5023,7 +5023,7 @@ function renderTransactionMeta(position, data){
     `;
 }
 
-function buildPurchaseInsightItems(purchases, avgPrice, currentPrice){
+function buildPurchaseInsightItems(purchases, avgPrice, currentPrice, totalSpent = 0, totalProceeds = 0){
     if(!Array.isArray(purchases) || !purchases.length){
         return [];
     }
@@ -5063,6 +5063,15 @@ function buildPurchaseInsightItems(purchases, avgPrice, currentPrice){
         }
         const avgDiff = totalDiff / (purchaseDates.length - 1);
         items.push(`<strong>Avg spacing:</strong> ${formatDuration(avgDiff)}`);
+        
+        const firstPurchase = purchaseDates[0];
+        const lastPurchase = purchaseDates[purchaseDates.length - 1];
+        const daysDiff = Math.max(1, Math.ceil((lastPurchase - firstPurchase) / (1000 * 60 * 60 * 24)));
+        const netCashInvested = Number(totalSpent || 0) - Number(totalProceeds || 0);
+        if(netCashInvested > 0 && daysDiff > 0){
+            const dcaProjection = netCashInvested / daysDiff;
+            items.push(`<strong>DCA projection:</strong> ${money(dcaProjection)}/day over ${daysDiff} days`);
+        }
     }
     if(purchaseDates.length){
         const latestPurchase = purchaseDates[purchaseDates.length - 1];
