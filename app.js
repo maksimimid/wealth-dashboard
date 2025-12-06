@@ -5051,8 +5051,9 @@ function buildPurchaseInsightItems(purchases, avgPrice, currentPrice, totalSpent
             const rangeLabel = firstPurchase.getTime() === lastPurchase.getTime()
                 ? formatDateShort(firstPurchase)
                 : `${formatDateShort(firstPurchase)} → ${formatDateShort(lastPurchase)}`;
-            const netLabel = `net ${money(netCashInvested)} over ${inclusiveDays} ${inclusiveDays === 1 ? 'day' : 'days'}`;
-            items.push(`<strong>DCA projection:</strong> ${money(projectedDailyBuy)} per day (${netLabel}${rangeLabel ? ` · ${rangeLabel}` : ''})`);
+            const daysLabel = inclusiveDays === 1 ? 'day' : 'days';
+            items.push(`<strong>DCA projection:</strong> ${money(netCashInvested)} allocated across ${inclusiveDays} ${daysLabel}${rangeLabel ? ` · ${rangeLabel}` : ''}`);
+            items.push(`<strong>DCA AVG:</strong> ${money(projectedDailyBuy)} per day (projected DCA average)`);
         }
     }
 
@@ -6088,19 +6089,28 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
     }
 
     const twoPi = Math.PI * 2;
-    const anchorBubble = { x: centerX, y: centerY, half: mainSize / 2 + minSpacing, locked: true };
-    const initialPlacements = nodesData.map((node, index)=>{
-        const angle = twoPi * (index / nodesData.length) - Math.PI / 2;
-        const jitter = (index % 2 === 0 ? 0 : node.size * 0.12);
-        return {
-            node,
-            x: centerX + Math.cos(angle) * (radius + jitter),
-            y: centerY + Math.sin(angle) * (radius + jitter),
-            half: node.size / 2
-        };
+    const anchorBubble = { x: centerX, y: centerY, half: mainSize / 2 + minSpacing };
+    const basePlacements = nodesData.map((node, index)=>{
+        const fraction = nodesData.length ? (index / nodesData.length) : 0;
+        const angle = twoPi * fraction - Math.PI / 2;
+        const jitter = (index % 2 === 0 ? 1 : -1) * node.size * 0.12;
+        return { node, angle, jitter };
     });
 
-    const clampBubble = (bubble)=>{
+    const createPlacementSet = (multiplier = 1)=>{
+        const radialBoost = radius * multiplier;
+        return basePlacements.map(base=>{
+            const offset = Math.max(0, radialBoost + base.jitter);
+            return {
+                node: base.node,
+                x: centerX + Math.cos(base.angle) * offset,
+                y: centerY + Math.sin(base.angle) * offset,
+                half: base.node.size / 2
+            };
+        });
+    };
+
+    const clampBubble = bubble=>{
         const prevX = bubble.x;
         const prevY = bubble.y;
         const minX = bubble.half + boundaryPadding;
@@ -6120,7 +6130,7 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
         if(distance >= minDistance){
             return false;
         }
-        const overlap = minDistance - distance || minDistance;
+        const overlap = Math.max(minDistance - (distance || 0), minSpacing);
         const angle = distance === 0 ? Math.random() * twoPi : Math.atan2(dy, dx);
         const pushX = Math.cos(angle) * overlap;
         const pushY = Math.sin(angle) * overlap;
@@ -6137,7 +6147,7 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
     };
 
     const resolveMindmapCollisions = bubbles=>{
-        const iterations = 90;
+        const iterations = 120;
         for(let iter = 0; iter < iterations; iter+=1){
             let moved = false;
             for(let i = 0; i < bubbles.length; i+=1){
@@ -6155,11 +6165,43 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
         }
     };
 
-    if(initialPlacements.length){
-        resolveMindmapCollisions(initialPlacements);
-    }
+    const hasOverlap = bubbles=>{
+        for(let i = 0; i < bubbles.length; i+=1){
+            for(let j = i + 1; j < bubbles.length; j+=1){
+                const dx = bubbles[i].x - bubbles[j].x;
+                const dy = bubbles[i].y - bubbles[j].y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                const minDistance = bubbles[i].half + bubbles[j].half + (minSpacing - 2);
+                if(distance < minDistance){
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
 
-    initialPlacements.forEach((placement, index)=>{
+    const computePlacements = ()=>{
+        if(!basePlacements.length){
+            return [];
+        }
+        let attempt = 0;
+        let placements = createPlacementSet(1);
+        const maxAttempts = 5;
+        while(attempt < maxAttempts){
+            resolveMindmapCollisions(placements);
+            if(!hasOverlap(placements)){
+                break;
+            }
+            attempt += 1;
+            const multiplier = 1 + attempt * 0.2;
+            placements = createPlacementSet(multiplier);
+        }
+        return placements;
+    };
+
+    const finalPlacements = computePlacements();
+
+    finalPlacements.forEach((placement, index)=>{
         const node = placement.node;
         const percentLabel = node.percent > 0 ? `${node.percent.toFixed(1)}%` : '';
         const valueWithPercent = percentLabel

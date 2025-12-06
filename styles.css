@@ -245,6 +245,7 @@ body::before {
     box-shadow: 0 30px 120px rgba(2, 6, 23, 0.6);
     display: flex;
     flex-direction: column;
+    align-items: stretch;
     gap: 18px;
     overflow-x: hidden;
     overflow-y: auto;
@@ -333,11 +334,15 @@ body::before {
 }
 
 .modal-toolbar-bottom {
-    margin-top: 12px;
+    margin-top: auto;
+    padding-top: 14px;
+    border-top: 1px solid rgba(148, 163, 184, 0.25);
+    width: 100%;
 }
 
 .modal-toolbar-bottom .btn-secondary {
     flex: 1;
+    width: 100%;
 }
 
 .modal-chart canvas.hidden {
@@ -355,7 +360,8 @@ body::before {
     flex-direction: column;
     gap: 8px;
     min-height: 0;
-    flex: 0 1 auto;
+    flex: 0 0 auto;
+    width: 100%;
 }
 
 .modal-stats {
@@ -538,6 +544,7 @@ body.light-theme .modal-insight-plate strong {
     flex-direction: column;
     gap: 12px;
     margin-top: 8px;
+    width: 100%;
 }
 
 .lots-controls {
