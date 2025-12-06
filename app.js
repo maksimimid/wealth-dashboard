@@ -1895,9 +1895,13 @@ async function ensureRangeReference(position, range){
         return base;
     }
     if(range === '1D'){
-        const base = position.prevClose ?? position.avgPrice ?? position.lastKnownPrice ?? position.displayPrice ?? 0;
-        bucket['1D'] = base;
-        return base;
+        if(position.prevClose !== undefined && position.prevClose !== null && Number.isFinite(position.prevClose) && position.prevClose > 0){
+            bucket['1D'] = position.prevClose;
+            return position.prevClose;
+        }
+        if(bucket['1D'] !== undefined){
+            return bucket['1D'];
+        }
     }
     if(bucket[range] !== undefined){
         return bucket[range];
@@ -1961,7 +1965,12 @@ function recomputeRangeMetrics(range){
         const reinvestedQty = Math.max(0, Number(position.reinvested || 0));
         const reinvestBasePrice = Math.abs(price) > 1e-9 ? price : base;
         const reinvestedValue = (reinvestedQty > 1e-6 && Math.abs(reinvestBasePrice) > 1e-9) ? reinvestBasePrice * reinvestedQty : 0;
-        let pnl = unrealized + realized + reinvestedValue;
+        let pnl;
+        if(range === '1D'){
+            pnl = unrealized;
+        }else{
+            pnl = unrealized + realized + reinvestedValue;
+        }
         const typeKey = (position.type || '').toLowerCase();
         if(typeKey === 'real estate'){
             const rentPnl = getRealEstateRangePnl(position, range);
@@ -4995,7 +5004,7 @@ function renderTransactionMeta(position, data){
         `<strong>Cash invested:</strong> ${money(summary.totalSpent)}`,
         `<strong>Cash returned:</strong> ${money(summary.totalProceeds)}`
     ];
-    const insightItems = buildPurchaseInsightItems(purchases, avgPurchasePrice, currentPrice);
+    const insightItems = buildPurchaseInsightItems(purchases, avgPurchasePrice, currentPrice, summary.totalSpent, summary.totalProceeds);
     const combinedItems = [...primaryStats, ...insightItems];
     if(!combinedItems.length){
         transactionModalMeta.innerHTML = '';
@@ -5007,14 +5016,14 @@ function renderTransactionMeta(position, data){
                 <span>Purchase insights</span>
                 <span class="insight-hint">tap to expand</span>
             </summary>
-            <ul class="modal-insights-list">
-                ${combinedItems.map(item => `<li>${item}</li>`).join('')}
-            </ul>
+            <div class="modal-insights-plates">
+                ${combinedItems.map(item => `<div class="modal-insight-plate">${item}</div>`).join('')}
+            </div>
         </details>
     `;
 }
 
-function buildPurchaseInsightItems(purchases, avgPrice, currentPrice){
+function buildPurchaseInsightItems(purchases, avgPrice, currentPrice, totalSpent = 0, totalProceeds = 0){
     if(!Array.isArray(purchases) || !purchases.length){
         return [];
     }
@@ -5054,6 +5063,15 @@ function buildPurchaseInsightItems(purchases, avgPrice, currentPrice){
         }
         const avgDiff = totalDiff / (purchaseDates.length - 1);
         items.push(`<strong>Avg spacing:</strong> ${formatDuration(avgDiff)}`);
+        
+        const firstPurchase = purchaseDates[0];
+        const lastPurchase = purchaseDates[purchaseDates.length - 1];
+        const daysDiff = Math.max(1, Math.ceil((lastPurchase - firstPurchase) / (1000 * 60 * 60 * 24)));
+        const netCashInvested = Number(totalSpent || 0) - Number(totalProceeds || 0);
+        if(netCashInvested > 0 && daysDiff > 0){
+            const dcaProjection = netCashInvested / daysDiff;
+            items.push(`<strong>DCA projection:</strong> ${money(dcaProjection)}/day over ${daysDiff} days`);
+        }
     }
     if(purchaseDates.length){
         const latestPurchase = purchaseDates[purchaseDates.length - 1];
@@ -6031,10 +6049,11 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
 
     const maxDiameter = nodesData.reduce((max, node)=> Math.max(max, node.size), 0);
     const availableRadius = Math.max(110, Math.min(width, height) / 2 - 30);
+    const minSpacingForRadius = 24;
     const radius = Math.max(
-        availableRadius * 0.9,
-        availableRadius - (mainSize * 0.45) - (maxDiameter * 0.25),
-        (mainSize * 0.6) + 120
+        availableRadius * 0.85,
+        availableRadius - (mainSize * 0.5) - (maxDiameter * 0.3),
+        (mainSize * 0.65) + maxDiameter * 0.5 + minSpacingForRadius * 2
     );
 
     const mainNode = createMindmapNode({
@@ -6060,13 +6079,68 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
     }
 
     const twoPi = Math.PI * 2;
+    const placedBubbles = [{ x: centerX, y: centerY, half: mainSize / 2 }];
+    const minSpacing = 18;
+    
     nodesData.forEach((node, index)=>{
         const angle = twoPi * (index / nodesData.length) - Math.PI / 2;
-        const rawX = centerX + Math.cos(angle) * radius;
-        const rawY = centerY + Math.sin(angle) * radius;
         const half = node.size / 2;
-        const clampedX = Math.min(width - half - 8, Math.max(half + 8, rawX));
-        const clampedY = Math.min(height - half - 8, Math.max(half + 8, rawY));
+        let rawX = centerX + Math.cos(angle) * radius;
+        let rawY = centerY + Math.sin(angle) * radius;
+        
+        let attempts = 0;
+        let finalX = rawX;
+        let finalY = rawY;
+        let hasCollision = true;
+        const maxAttempts = 100;
+        
+        while(hasCollision && attempts < maxAttempts){
+            hasCollision = false;
+            finalX = Math.min(width - half - 10, Math.max(half + 10, rawX));
+            finalY = Math.min(height - half - 10, Math.max(half + 10, rawY));
+            
+            for(const placed of placedBubbles){
+                const dx = finalX - placed.x;
+                const dy = finalY - placed.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                const minDistance = half + placed.half + minSpacing;
+                
+                if(distance < minDistance){
+                    hasCollision = true;
+                    if(distance < 0.1){
+                        const pushAngle = angle + (Math.random() - 0.5) * 0.5;
+                        rawX = centerX + Math.cos(pushAngle) * (radius + (attempts * 5));
+                        rawY = centerY + Math.sin(pushAngle) * (radius + (attempts * 5));
+                    }else{
+                        const angleToPlaced = Math.atan2(dy, dx);
+                        const pushDistance = (minDistance - distance) * 1.5 + 3;
+                        rawX = finalX + Math.cos(angleToPlaced) * pushDistance;
+                        rawY = finalY + Math.sin(angleToPlaced) * pushDistance;
+                    }
+                    attempts++;
+                    break;
+                }
+            }
+            
+            if(!hasCollision){
+                const dx = finalX - centerX;
+                const dy = finalY - centerY;
+                const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
+                const minDistanceFromMain = mainSize / 2 + half + minSpacing;
+                if(distanceFromCenter < minDistanceFromMain){
+                    hasCollision = true;
+                    const angleFromCenter = Math.atan2(dy, dx);
+                    rawX = centerX + Math.cos(angleFromCenter) * (minDistanceFromMain + 2);
+                    rawY = centerY + Math.sin(angleFromCenter) * (minDistanceFromMain + 2);
+                    attempts++;
+                }
+            }
+        }
+        
+        const clampedX = finalX;
+        const clampedY = finalY;
+        placedBubbles.push({ x: clampedX, y: clampedY, half: half });
+        
         const percentLabel = node.percent > 0 ? `${node.percent.toFixed(1)}%` : '';
         const valueWithPercent = percentLabel
             ? `${formatCompactMoney(node.value)} (${percentLabel})`

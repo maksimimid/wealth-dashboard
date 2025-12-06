@@ -353,6 +353,8 @@ body::before {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    min-height: 0;
+    flex: 0 1 auto;
 }
 
 .modal-stats {
@@ -432,12 +434,102 @@ body::before {
     gap: 6px;
     font-size: 0.9rem;
     color: var(--base-text-color);
+    max-height: 300px;
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .modal-insights-list li strong {
     color: var(--muted);
     font-weight: 600;
     margin-right: 4px;
+}
+
+.modal-insights-plates {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+    padding: 14px 18px 18px;
+    max-height: min(400px, 50vh);
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.4) transparent;
+}
+
+.modal-insights-plates::-webkit-scrollbar {
+    width: 8px;
+}
+
+.modal-insights-plates::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.modal-insights-plates::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.4);
+    border-radius: 4px;
+}
+
+.modal-insights-plates::-webkit-scrollbar-thumb:hover {
+    background: rgba(148, 163, 184, 0.6);
+}
+
+.modal-insight-plate {
+    position: relative;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.78), rgba(15, 23, 42, 0.55));
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    color: #f8fafc;
+    font-size: 0.85rem;
+    line-height: 1.4;
+    overflow: hidden;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.35);
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    min-height: 60px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+}
+
+#transaction-modal-meta .modal-insight-plate {
+    padding: 8px 10px;
+    min-height: 50px;
+    font-size: 0.8rem;
+    line-height: 1.3;
+}
+
+.modal-insight-plate:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.45);
+    border-color: rgba(59, 130, 246, 0.35);
+}
+
+.modal-insight-plate strong {
+    color: var(--muted);
+    font-weight: 600;
+    margin-right: 4px;
+    display: block;
+    margin-bottom: 4px;
+    font-size: 0.8rem;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+}
+
+body.light-theme .modal-insight-plate {
+    background: linear-gradient(135deg, rgba(248, 250, 252, 0.94), rgba(226, 232, 240, 0.75));
+    color: #0f172a;
+    border-color: rgba(148, 163, 184, 0.4);
+    box-shadow: 0 8px 24px rgba(148, 163, 184, 0.25);
+}
+
+body.light-theme .modal-insight-plate:hover {
+    box-shadow: 0 12px 32px rgba(148, 163, 184, 0.35);
+    border-color: rgba(99, 102, 241, 0.45);
+}
+
+body.light-theme .modal-insight-plate strong {
+    color: #64748b;
 }
 
 .modal-lots {
@@ -2703,5 +2795,17 @@ body.light-theme .status-dot { background: #22c55e; box-shadow: 0 0 6px rgba(34,
     .card.full canvas { min-height: 220px; }
     .pnl-breakdown { grid-template-columns: 1fr; }
     .pnl-chart { height: 140px; padding: 10px 12px; }
+    .modal-insights-plates {
+        grid-template-columns: 1fr;
+        max-height: min(350px, 45vh);
+    }
+    .modal-insight-plate {
+        min-height: 55px;
+        padding: 8px 10px;
+    }
+    #transaction-modal-meta .modal-insight-plate {
+        min-height: 45px;
+        padding: 6px 8px;
+    }
 }
 
