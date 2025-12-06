@@ -6040,10 +6040,11 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
 
     const maxDiameter = nodesData.reduce((max, node)=> Math.max(max, node.size), 0);
     const availableRadius = Math.max(110, Math.min(width, height) / 2 - 30);
+    const minSpacingForRadius = 24;
     const radius = Math.max(
-        availableRadius * 0.9,
-        availableRadius - (mainSize * 0.45) - (maxDiameter * 0.25),
-        (mainSize * 0.6) + 120
+        availableRadius * 0.85,
+        availableRadius - (mainSize * 0.5) - (maxDiameter * 0.3),
+        (mainSize * 0.65) + maxDiameter * 0.5 + minSpacingForRadius * 2
     );
 
     const mainNode = createMindmapNode({
@@ -6069,23 +6070,25 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
     }
 
     const twoPi = Math.PI * 2;
-    const placedBubbles = [];
+    const placedBubbles = [{ x: centerX, y: centerY, half: mainSize / 2 }];
+    const minSpacing = 18;
+    
     nodesData.forEach((node, index)=>{
         const angle = twoPi * (index / nodesData.length) - Math.PI / 2;
+        const half = node.size / 2;
         let rawX = centerX + Math.cos(angle) * radius;
         let rawY = centerY + Math.sin(angle) * radius;
-        const half = node.size / 2;
-        const minSpacing = 12;
         
         let attempts = 0;
         let finalX = rawX;
         let finalY = rawY;
         let hasCollision = true;
+        const maxAttempts = 100;
         
-        while(hasCollision && attempts < 50){
+        while(hasCollision && attempts < maxAttempts){
             hasCollision = false;
-            finalX = Math.min(width - half - 8, Math.max(half + 8, rawX));
-            finalY = Math.min(height - half - 8, Math.max(half + 8, rawY));
+            finalX = Math.min(width - half - 10, Math.max(half + 10, rawX));
+            finalY = Math.min(height - half - 10, Math.max(half + 10, rawY));
             
             for(const placed of placedBubbles){
                 const dx = finalX - placed.x;
@@ -6095,10 +6098,16 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
                 
                 if(distance < minDistance){
                     hasCollision = true;
-                    const angleToPlaced = Math.atan2(dy, dx);
-                    const pushDistance = minDistance - distance + 2;
-                    rawX = finalX + Math.cos(angleToPlaced) * pushDistance;
-                    rawY = finalY + Math.sin(angleToPlaced) * pushDistance;
+                    if(distance < 0.1){
+                        const pushAngle = angle + (Math.random() - 0.5) * 0.5;
+                        rawX = centerX + Math.cos(pushAngle) * (radius + (attempts * 5));
+                        rawY = centerY + Math.sin(pushAngle) * (radius + (attempts * 5));
+                    }else{
+                        const angleToPlaced = Math.atan2(dy, dx);
+                        const pushDistance = (minDistance - distance) * 1.5 + 3;
+                        rawX = finalX + Math.cos(angleToPlaced) * pushDistance;
+                        rawY = finalY + Math.sin(angleToPlaced) * pushDistance;
+                    }
                     attempts++;
                     break;
                 }
@@ -6112,8 +6121,8 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
                 if(distanceFromCenter < minDistanceFromMain){
                     hasCollision = true;
                     const angleFromCenter = Math.atan2(dy, dx);
-                    rawX = centerX + Math.cos(angleFromCenter) * minDistanceFromMain;
-                    rawY = centerY + Math.sin(angleFromCenter) * minDistanceFromMain;
+                    rawX = centerX + Math.cos(angleFromCenter) * (minDistanceFromMain + 2);
+                    rawY = centerY + Math.sin(angleFromCenter) * (minDistanceFromMain + 2);
                     attempts++;
                 }
             }
