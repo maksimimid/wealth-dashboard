@@ -5034,7 +5034,28 @@ function buildPurchaseInsightItems(purchases, avgPrice, currentPrice, totalSpent
         return [];
     }
     const EPS = 1e-9;
+    const DAY_IN_MS = 24 * 60 * 60 * 1000;
+    const purchaseDates = purchases
+        .map(point => point.date instanceof Date ? point.date : (point.x ? new Date(point.x) : null))
+        .filter(date => date instanceof Date && !Number.isNaN(date.getTime()))
+        .sort((a,b)=> a - b);
+    const firstPurchase = purchaseDates[0] || null;
+    const lastPurchase = purchaseDates[purchaseDates.length - 1] || null;
     const items = [];
+
+    if(firstPurchase && lastPurchase){
+        const inclusiveDays = Math.max(1, Math.floor(Math.abs(lastPurchase - firstPurchase) / DAY_IN_MS) + 1);
+        const netCashInvested = Number(totalSpent || 0) - Number(totalProceeds || 0);
+        if(netCashInvested > EPS){
+            const projectedDailyBuy = netCashInvested / inclusiveDays;
+            const rangeLabel = firstPurchase.getTime() === lastPurchase.getTime()
+                ? formatDateShort(firstPurchase)
+                : `${formatDateShort(firstPurchase)} → ${formatDateShort(lastPurchase)}`;
+            const netLabel = `net ${money(netCashInvested)} over ${inclusiveDays} ${inclusiveDays === 1 ? 'day' : 'days'}`;
+            items.push(`<strong>DCA projection:</strong> ${money(projectedDailyBuy)} per day (${netLabel}${rangeLabel ? ` · ${rangeLabel}` : ''})`);
+        }
+    }
+
     if(Number.isFinite(avgPrice)){
         const countAboveAvg = priceValues.filter(value => value > avgPrice + EPS).length;
         const countBelowAvg = priceValues.filter(value => value < avgPrice - EPS).length;
@@ -5052,10 +5073,6 @@ function buildPurchaseInsightItems(purchases, avgPrice, currentPrice, totalSpent
     const maxPrice = Math.max(...priceValues);
     items.push(`<strong>Median buy:</strong> ${money(medianPrice)} · σ ${money(priceStdDev)}`);
     items.push(`<strong>Price span:</strong> ${money(minPrice)} – ${money(maxPrice)} (${money(maxPrice - minPrice)})`);
-    const purchaseDates = purchases
-        .map(point => point.date instanceof Date ? point.date : (point.x ? new Date(point.x) : null))
-        .filter(date => date instanceof Date && !Number.isNaN(date.getTime()))
-        .sort((a,b)=> a - b);
     if(purchaseDates.length >= 2){
         let totalDiff = 0;
         for(let i=1;i<purchaseDates.length;i+=1){
@@ -5063,15 +5080,6 @@ function buildPurchaseInsightItems(purchases, avgPrice, currentPrice, totalSpent
         }
         const avgDiff = totalDiff / (purchaseDates.length - 1);
         items.push(`<strong>Avg spacing:</strong> ${formatDuration(avgDiff)}`);
-        
-        const firstPurchase = purchaseDates[0];
-        const lastPurchase = purchaseDates[purchaseDates.length - 1];
-        const daysDiff = Math.max(1, Math.ceil((lastPurchase - firstPurchase) / (1000 * 60 * 60 * 24)));
-        const netCashInvested = Number(totalSpent || 0) - Number(totalProceeds || 0);
-        if(netCashInvested > 0 && daysDiff > 0){
-            const dcaProjection = netCashInvested / daysDiff;
-            items.push(`<strong>DCA projection:</strong> ${money(dcaProjection)}/day over ${daysDiff} days`);
-        }
     }
     if(purchaseDates.length){
         const latestPurchase = purchaseDates[purchaseDates.length - 1];
@@ -6046,15 +6054,16 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
     const sizeLimit = Math.max(110, Math.min(minDimension - 24, 220));
     const baseMainSize = Math.min(sizeLimit, Math.max(110, Math.min(minDimension * 0.6, 200)));
     const mainSize = Math.max(94, Math.min(sizeLimit, Math.round(baseMainSize * 0.85)));
+    const minSpacing = Math.max(18, Math.min(34, minDimension * 0.08));
+    const boundaryPadding = Math.max(12, Math.min(26, minDimension * 0.05));
 
     const maxDiameter = nodesData.reduce((max, node)=> Math.max(max, node.size), 0);
     const availableRadius = Math.max(110, Math.min(width, height) / 2 - 30);
-    const minSpacingForRadius = 24;
-    const radius = Math.max(
-        availableRadius * 0.85,
-        availableRadius - (mainSize * 0.5) - (maxDiameter * 0.3),
-        (mainSize * 0.65) + maxDiameter * 0.5 + minSpacingForRadius * 2
-    );
+    const perimeterNeed = nodesData.reduce((sum, node)=> sum + node.size + minSpacing, 0);
+    const radiusFromPerimeter = perimeterNeed > 0 ? perimeterNeed / (Math.PI * 2) : 0;
+    const minRequiredRadius = (mainSize * 0.5) + (maxDiameter * 0.5) + minSpacing * 2;
+    const rawRadius = Math.max(minRequiredRadius, radiusFromPerimeter);
+    const radius = Math.min(availableRadius, Math.max(rawRadius, availableRadius * 0.6));
 
     const mainNode = createMindmapNode({
         label: 'Net Worth',
@@ -6079,68 +6088,79 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
     }
 
     const twoPi = Math.PI * 2;
-    const placedBubbles = [{ x: centerX, y: centerY, half: mainSize / 2 }];
-    const minSpacing = 18;
-    
-    nodesData.forEach((node, index)=>{
+    const anchorBubble = { x: centerX, y: centerY, half: mainSize / 2 + minSpacing, locked: true };
+    const initialPlacements = nodesData.map((node, index)=>{
         const angle = twoPi * (index / nodesData.length) - Math.PI / 2;
-        const half = node.size / 2;
-        let rawX = centerX + Math.cos(angle) * radius;
-        let rawY = centerY + Math.sin(angle) * radius;
-        
-        let attempts = 0;
-        let finalX = rawX;
-        let finalY = rawY;
-        let hasCollision = true;
-        const maxAttempts = 100;
-        
-        while(hasCollision && attempts < maxAttempts){
-            hasCollision = false;
-            finalX = Math.min(width - half - 10, Math.max(half + 10, rawX));
-            finalY = Math.min(height - half - 10, Math.max(half + 10, rawY));
-            
-            for(const placed of placedBubbles){
-                const dx = finalX - placed.x;
-                const dy = finalY - placed.y;
-                const distance = Math.sqrt(dx * dx + dy * dy);
-                const minDistance = half + placed.half + minSpacing;
-                
-                if(distance < minDistance){
-                    hasCollision = true;
-                    if(distance < 0.1){
-                        const pushAngle = angle + (Math.random() - 0.5) * 0.5;
-                        rawX = centerX + Math.cos(pushAngle) * (radius + (attempts * 5));
-                        rawY = centerY + Math.sin(pushAngle) * (radius + (attempts * 5));
-                    }else{
-                        const angleToPlaced = Math.atan2(dy, dx);
-                        const pushDistance = (minDistance - distance) * 1.5 + 3;
-                        rawX = finalX + Math.cos(angleToPlaced) * pushDistance;
-                        rawY = finalY + Math.sin(angleToPlaced) * pushDistance;
-                    }
-                    attempts++;
-                    break;
+        const jitter = (index % 2 === 0 ? 0 : node.size * 0.12);
+        return {
+            node,
+            x: centerX + Math.cos(angle) * (radius + jitter),
+            y: centerY + Math.sin(angle) * (radius + jitter),
+            half: node.size / 2
+        };
+    });
+
+    const clampBubble = (bubble)=>{
+        const prevX = bubble.x;
+        const prevY = bubble.y;
+        const minX = bubble.half + boundaryPadding;
+        const maxX = Math.max(minX, width - bubble.half - boundaryPadding);
+        const minY = bubble.half + boundaryPadding;
+        const maxY = Math.max(minY, height - bubble.half - boundaryPadding);
+        bubble.x = Math.max(minX, Math.min(maxX, bubble.x));
+        bubble.y = Math.max(minY, Math.min(maxY, bubble.y));
+        return prevX !== bubble.x || prevY !== bubble.y;
+    };
+
+    const separateBubbles = (a, b, lockSecond = false)=>{
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const minDistance = a.half + b.half + minSpacing;
+        if(distance >= minDistance){
+            return false;
+        }
+        const overlap = minDistance - distance || minDistance;
+        const angle = distance === 0 ? Math.random() * twoPi : Math.atan2(dy, dx);
+        const pushX = Math.cos(angle) * overlap;
+        const pushY = Math.sin(angle) * overlap;
+        if(lockSecond){
+            a.x += pushX;
+            a.y += pushY;
+        }else{
+            a.x += pushX / 2;
+            a.y += pushY / 2;
+            b.x -= pushX / 2;
+            b.y -= pushY / 2;
+        }
+        return true;
+    };
+
+    const resolveMindmapCollisions = bubbles=>{
+        const iterations = 90;
+        for(let iter = 0; iter < iterations; iter+=1){
+            let moved = false;
+            for(let i = 0; i < bubbles.length; i+=1){
+                for(let j = i + 1; j < bubbles.length; j+=1){
+                    moved = separateBubbles(bubbles[i], bubbles[j]) || moved;
                 }
             }
-            
-            if(!hasCollision){
-                const dx = finalX - centerX;
-                const dy = finalY - centerY;
-                const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
-                const minDistanceFromMain = mainSize / 2 + half + minSpacing;
-                if(distanceFromCenter < minDistanceFromMain){
-                    hasCollision = true;
-                    const angleFromCenter = Math.atan2(dy, dx);
-                    rawX = centerX + Math.cos(angleFromCenter) * (minDistanceFromMain + 2);
-                    rawY = centerY + Math.sin(angleFromCenter) * (minDistanceFromMain + 2);
-                    attempts++;
-                }
+            for(const bubble of bubbles){
+                moved = separateBubbles(bubble, anchorBubble, true) || moved;
+                moved = clampBubble(bubble) || moved;
+            }
+            if(!moved){
+                break;
             }
         }
-        
-        const clampedX = finalX;
-        const clampedY = finalY;
-        placedBubbles.push({ x: clampedX, y: clampedY, half: half });
-        
+    };
+
+    if(initialPlacements.length){
+        resolveMindmapCollisions(initialPlacements);
+    }
+
+    initialPlacements.forEach((placement, index)=>{
+        const node = placement.node;
         const percentLabel = node.percent > 0 ? `${node.percent.toFixed(1)}%` : '';
         const valueWithPercent = percentLabel
             ? `${formatCompactMoney(node.value)} (${percentLabel})`
@@ -6154,8 +6174,8 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
             size: node.size,
             styles: colorTheme
         });
-        bubble.node.style.left = `${clampedX}px`;
-        bubble.node.style.top = `${clampedY}px`;
+        bubble.node.style.left = `${placement.x}px`;
+        bubble.node.style.top = `${placement.y}px`;
         const titlePercent = percentLabel ? ` (${percentLabel})` : '';
         bubble.node.title = `${node.fullLabel}: ${money(node.value)}${titlePercent}`;
         bubble.node.setAttribute('aria-hidden', 'true');
@@ -6166,8 +6186,8 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
         const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
         line.setAttribute('x1', centerX);
         line.setAttribute('y1', centerY);
-        line.setAttribute('x2', clampedX);
-        line.setAttribute('y2', clampedY);
+        line.setAttribute('x2', placement.x);
+        line.setAttribute('y2', placement.y);
         line.setAttribute('stroke-width', '2');
         line.setAttribute('stroke-dasharray', '6 6');
         line.setAttribute('stroke-linecap', 'round');
