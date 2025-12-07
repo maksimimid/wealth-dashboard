@@ -4996,6 +4996,11 @@ function renderTransactionMeta(position, data){
     ].map(value=> Number(value)).filter(value=> Number.isFinite(value) && Math.abs(value) > 1e-9);
     const currentPrice = currentPriceCandidates.length ? currentPriceCandidates[0] : fallbackAverage;
     const purchaseCount = purchases.length;
+    const reinvestedQty = Math.max(0, Number(position?.reinvested || 0));
+    const inferredReinvestValue = Number(position?.reinvestedValue);
+    const reinvestedValue = Number.isFinite(inferredReinvestValue)
+        ? inferredReinvestValue
+        : (Number.isFinite(currentPrice) && reinvestedQty > 0 ? reinvestedQty * currentPrice : 0);
     const createPlate = (html, detail = '')=> ({ html, detail });
     const netQtyDetail = `Buys ${formatQty(summary.totalBuys)} minus sells ${formatQty(summary.totalSells)} equals ${formatQty(summary.netQty)} net units.`;
     const avgPriceDetail = purchaseCount
@@ -5006,6 +5011,9 @@ function renderTransactionMeta(position, data){
     const totalSoldDetail = `Aggregate quantity across sell operations: ${formatQty(summary.totalSells)}.`;
     const investedDetail = `Absolute cash paid for buys. Sum of spends = ${money(summary.totalSpent)}.`;
     const returnedDetail = `Cash received from sells/refunds. Sum of proceeds = ${money(summary.totalProceeds)}.`;
+    const reinvestedDetail = reinvestedQty > 0
+        ? `Reinvesting tag accumulated ${formatQty(reinvestedQty)} units. Using ${money(reinvestedValue)} (qty × reference price).`
+        : 'No reinvesting operations captured for this asset.';
     const primaryStats = [
         createPlate(`<strong>Avg buy price:</strong> ${money(avgPurchasePrice)}`, avgPriceDetail),
         createPlate(`<strong>Current price:</strong> ${money(currentPrice)}`, currentPriceDetail),
@@ -5013,7 +5021,8 @@ function renderTransactionMeta(position, data){
         createPlate(`<strong>Total bought:</strong> ${formatQty(summary.totalBuys)}`, totalBoughtDetail),
         createPlate(`<strong>Total sold:</strong> ${formatQty(summary.totalSells)}`, totalSoldDetail),
         createPlate(`<strong>Cash invested:</strong> ${money(summary.totalSpent)}`, investedDetail),
-        createPlate(`<strong>Cash returned:</strong> ${money(summary.totalProceeds)}`, returnedDetail)
+        createPlate(`<strong>Cash returned:</strong> ${money(summary.totalProceeds)}`, returnedDetail),
+        createPlate(`<strong>Reinvested:</strong> ${money(reinvestedValue)} · ${formatQty(reinvestedQty)}`, reinvestedDetail)
     ];
     const insightItems = buildPurchaseInsightItems(purchases, avgPurchasePrice, currentPrice, summary.totalSpent, summary.totalProceeds);
     const combinedItems = [...primaryStats, ...insightItems];
