@@ -5053,7 +5053,8 @@ function buildPurchaseInsightItems(purchases, avgPrice, currentPrice, totalSpent
                 : `${formatDateShort(firstPurchase)} → ${formatDateShort(lastPurchase)}`;
             const daysLabel = inclusiveDays === 1 ? 'day' : 'days';
             items.push(`<strong>DCA projection:</strong> ${money(netCashInvested)} allocated across ${inclusiveDays} ${daysLabel}${rangeLabel ? ` · ${rangeLabel}` : ''}`);
-            items.push(`<strong>DCA AVG:</strong> ${money(projectedDailyBuy)} per day (projected DCA average)`);
+            const projectedAvgPrice = priceValues.length ? priceValues.reduce((sum, price)=> sum + price, 0) / priceValues.length : projectedDailyBuy;
+            items.push(`<strong>DCA AVG:</strong> ${money(projectedDailyBuy)} per day · projected avg ${money(projectedAvgPrice)}`);
         }
     }
 
