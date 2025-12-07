@@ -78,7 +78,8 @@ const DATA_SOURCE_LABELS = {
     loading: 'Loading data…',
     airtable: 'Live Airtable',
     snapshot: 'Cached snapshot',
-    fallback: 'Offline test data'
+    fallback: 'Offline test data',
+    csv: 'Imported CSV'
 };
 const PNL_CHART_TIME_CONFIG = {
     '1D': { unit: 'hour', displayFormats: { hour: 'ha' }, maxTicks: 6 },
@@ -165,6 +166,9 @@ const SPARKLINE_PROJECTED_SMOOTHING = 0.32;
 let pnlPercentageToggleButton = null;
 let showPnlPercentages = false;
 const PNL_PERCENTAGE_STORAGE_KEY = 'showPnlPercentages';
+
+let csvDatasetName = '';
+let csvImportInProgress = false;
 const MILLION_TARGET = 1_000_000;
 let netWorthBubbleToggleButton = null;
 let netWorthInlineViewMode = 'chart';
@@ -553,6 +557,234 @@ function parseLocalHistoricalCsv(text){
         series,
         lastDate
     };
+}
+
+function formatDateISO(date){
+    if(!(date instanceof Date) || Number.isNaN(date.getTime())){
+        return '';
+    }
+    return date.toISOString().split('T')[0];
+}
+
+function quoteCsvField(value){
+    const raw = value === undefined || value === null ? '' : String(value);
+    if(/["\n,]/.test(raw)){
+        return `"${raw.replace(/"/g,'""')}"`;
+    }
+    return raw;
+}
+
+function buildCsvFromPositions(){
+    if(!Array.isArray(positions) || !positions.length){
+        return '';
+    }
+    const header = ['Asset','Category','Operation','Amount','Price','Spent','Date','Tags'];
+    const rows = [header.join(',')];
+    positions.forEach(position=>{
+        const ops = Array.isArray(position?.operations) ? position.operations : [];
+        if(!ops.length){
+            return;
+        }
+        const assetName = position.displayName || position.Name || position.Asset || position.id || position.Symbol || '';
+        const category = position.type || position.Category || '';
+        ops.forEach(op=>{
+            const tags = Array.isArray(op.tags) ? op.tags.join('|') : '';
+            const opDate = op.date instanceof Date ? op.date : (op.rawDate ? new Date(op.rawDate) : null);
+            const row = [
+                assetName,
+                category,
+                op.type || 'PurchaseSell',
+                Number.isFinite(op.amount) ? op.amount : '',
+                Number.isFinite(op.price) ? op.price : '',
+                Number.isFinite(op.spent) ? op.spent : '',
+                formatDateISO(opDate) || (typeof op.rawDate === 'string' ? op.rawDate : ''),
+                tags
+            ].map(quoteCsvField);
+            rows.push(row.join(','));
+        });
+    });
+    if(rows.length === 1){
+        return '';
+    }
+    return rows.join('\n');
+}
+
+function downloadTextFile(text, filename){
+    if(typeof window === 'undefined'){
+        return;
+    }
+    const blob = new Blob([text], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(()=> URL.revokeObjectURL(url), 0);
+}
+
+function exportCurrentDataAsCsv(){
+    const csv = buildCsvFromPositions();
+    if(!csv){
+        setStatus('No operations available to export.');
+        return;
+    }
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `wealth-data-${timestamp}.csv`;
+    downloadTextFile(csv, filename);
+    setStatus(`CSV exported · ${filename}`);
+}
+
+function coerceCsvNumber(value){
+    if(value === undefined || value === null){
+        return null;
+    }
+    const normalized = String(value).trim();
+    if(!normalized){
+        return null;
+    }
+    const numeric = Number(normalized.replace(/,/g,''));
+    return Number.isFinite(numeric) ? numeric : null;
+}
+
+function normalizeCsvHeader(name){
+    return String(name || '').trim().replace(/^"|"$/g,'').toLowerCase();
+}
+
+function stripCsvValue(value){
+    return String(value || '').replace(/^"|"$/g,'').trim();
+}
+
+function parseOperationsCsv(text){
+    if(typeof text !== 'string'){
+        return [];
+    }
+    const normalized = text.replace(/\r\n/g,'\n').replace(/\r/g,'\n');
+    const lines = normalized.split('\n').map(line=>line.trim()).filter(line=>line.length);
+    if(!lines.length){
+        return [];
+    }
+    const headerRaw = splitCsvLine(lines.shift());
+    const columnIndex = new Map();
+    headerRaw.forEach((name, idx)=>{
+        columnIndex.set(normalizeCsvHeader(name), idx);
+    });
+    const getValue = (parts, key)=>{
+        const idx = columnIndex.get(key);
+        if(idx === undefined || idx >= parts.length){
+            return '';
+        }
+        return stripCsvValue(parts[idx]);
+    };
+    const records = [];
+    lines.forEach((line, lineIndex)=>{
+        if(!line){
+            return;
+        }
+        const parts = splitCsvLine(line);
+        const asset = getValue(parts, 'asset');
+        if(!asset){
+            return;
+        }
+        const category = getValue(parts, 'category');
+        const operation = getValue(parts, 'operation') || getValue(parts, 'type') || 'PurchaseSell';
+        const amountValue = coerceCsvNumber(getValue(parts, 'amount'));
+        const priceValue = coerceCsvNumber(getValue(parts, 'price'));
+        const spentValue = coerceCsvNumber(getValue(parts, 'spent'));
+        const dateValue = getValue(parts, 'date');
+        const tagsRaw = getValue(parts, 'tags');
+        const tags = tagsRaw ? tagsRaw.split('|').map(tag=>tag.trim()).filter(Boolean) : [];
+        let isoDate = '';
+        if(dateValue){
+            const parsedDate = new Date(dateValue);
+            if(parsedDate instanceof Date && !Number.isNaN(parsedDate.getTime())){
+                isoDate = parsedDate.toISOString();
+            }else{
+                isoDate = dateValue;
+            }
+        }
+        const fields = {
+            Asset: asset,
+            Category: category,
+            'Operation type': operation,
+            Amount: amountValue ?? '',
+            Price: priceValue ?? '',
+            'Asset price on invest date': priceValue ?? '',
+            'Spent on operation': spentValue ?? '',
+            Date: isoDate,
+            Tags: tags
+        };
+        records.push({
+            id: `csv-${lineIndex}-${Date.now()}`,
+            fields
+        });
+    });
+    return records;
+}
+
+function applyCsvRecords(records, sourceLabel){
+    if(!Array.isArray(records) || !records.length){
+        setStatus('CSV file contained no valid rows.');
+        return false;
+    }
+    positions = transformOperations(records, null);
+    netContributionTotal = positions.reduce((sum, p)=> sum + Number(p.cashflow || 0), 0);
+    rebuildSymbolIndex();
+    operationsMeta = {
+        count: records.length,
+        fetchedAt: new Date(),
+        source: sourceLabel || 'CSV import'
+    };
+    dataSourceMode = 'csv';
+    csvDatasetName = sourceLabel || 'CSV import';
+    rangeDirty = true;
+    assetYearSeriesDirty = true;
+    realEstateRentSeriesDirty = true;
+    updateDataSourceBadge();
+    scheduleUIUpdate({ immediate: true });
+    if(typeof subscribeAll === 'function'){
+        subscribeAll();
+    }
+    const select = document.getElementById('data-source-select');
+    if(select){
+        select.disabled = false;
+        if(select.value !== 'csv'){
+            select.value = 'csv';
+        }
+    }
+    setStatus(`CSV data loaded${sourceLabel ? ` · ${sourceLabel}` : ''}`);
+    return true;
+}
+
+async function loadCsvDataFromText(text, sourceLabel){
+    const records = parseOperationsCsv(text);
+    return applyCsvRecords(records, sourceLabel);
+}
+
+async function importCsvFile(file){
+    if(!file){
+        return;
+    }
+    csvImportInProgress = true;
+    try{
+        if(loadingOverlay){
+            setLoadingState('visible','Loading CSV…');
+        }
+        const text = await file.text();
+        const success = await loadCsvDataFromText(text, file.name);
+        if(!success){
+            setStatus('CSV file did not contain any valid records.');
+        }
+    }catch(error){
+        console.error('CSV import failed', error);
+        setStatus('CSV import failed');
+    }finally{
+        csvImportInProgress = false;
+        if(loadingOverlay){
+            setLoadingState('hidden');
+        }
+    }
 }
 
 async function loadLocalHistoricalSeries(position){
@@ -2780,6 +3012,7 @@ async function loadPositions(){
         if(!positions.length){
             throw new Error('No positions available after transformation');
         }
+        csvDatasetName = '';
         dataSourceMode = 'airtable';
         updateDataSourceBadge();
     }catch(err){
@@ -2790,6 +3023,7 @@ async function loadPositions(){
             netContributionTotal = positions.reduce((sum,p)=>sum + Number(p.cashflow || 0),0);
             rebuildSymbolIndex();
             operationsMeta = {count: snapshotRecords.length, fetchedAt: getSnapshotSavedAt()};
+            csvDatasetName = '';
             setStatus('Cached Airtable snapshot loaded');
             dataSourceMode = 'snapshot';
         }else{
@@ -2798,6 +3032,7 @@ async function loadPositions(){
             netContributionTotal = positions.reduce((sum,p)=>sum + Number(p.cashflow || 0),0);
             rebuildSymbolIndex();
             operationsMeta = {count: 0, fetchedAt: null};
+            csvDatasetName = '';
             dataSourceMode = 'fallback';
         }
         setLoadingState('error','Airtable unavailable — showing demo data');
@@ -2810,6 +3045,10 @@ async function loadPositions(){
 }
 
 async function switchDataSource(mode){
+    if(mode === 'csv'){
+        setStatus('Use the CSV import controls to load a file.');
+        return;
+    }
     const target = mode === 'fallback' ? 'fallback' : mode === 'snapshot' ? 'snapshot' : 'airtable';
     if(isSwitchingDataSource) return;
     if(target === dataSourceMode && target !== 'loading') return;
@@ -2826,6 +3065,7 @@ async function switchDataSource(mode){
             rangeDirty = true;
             assetYearSeriesDirty = true;
             realEstateRentSeriesDirty = true;
+        csvDatasetName = '';
             dataSourceMode = 'fallback';
             setStatus('Offline test data loaded');
             updateDataSourceBadge();
@@ -2845,6 +3085,7 @@ async function switchDataSource(mode){
                 rangeDirty = true;
                 assetYearSeriesDirty = true;
                 realEstateRentSeriesDirty = true;
+            csvDatasetName = '';
                 dataSourceMode = 'snapshot';
                 setStatus('Cached Airtable snapshot loaded');
                 updateDataSourceBadge();
@@ -2869,6 +3110,7 @@ async function switchDataSource(mode){
         rangeDirty = true;
         assetYearSeriesDirty = true;
         realEstateRentSeriesDirty = true;
+        csvDatasetName = '';
         dataSourceMode = 'airtable';
         updateDataSourceBadge();
         scheduleUIUpdate({immediate:true});
@@ -2879,6 +3121,7 @@ async function switchDataSource(mode){
         netContributionTotal = positions.reduce((sum,p)=>sum + Number(p.cashflow || 0),0);
         rebuildSymbolIndex();
         operationsMeta = {count: 0, fetchedAt: null};
+        csvDatasetName = '';
         dataSourceMode = 'fallback';
         updateDataSourceBadge();
         setStatus('Offline test data loaded');
@@ -3243,7 +3486,8 @@ function updateDataSourceBadge(){
     if(typeof document === 'undefined') return;
     const select = document.getElementById('data-source-select');
     if(!select) return;
-    const normalized = (dataSourceMode === 'airtable' || dataSourceMode === 'fallback' || dataSourceMode === 'snapshot') ? dataSourceMode : 'loading';
+    const allowedSources = new Set(['airtable','fallback','snapshot','csv']);
+    const normalized = allowedSources.has(dataSourceMode) ? dataSourceMode : 'loading';
     select.setAttribute('data-source', normalized);
     if(normalized === 'loading'){
         let loadingOption = select.querySelector('option[value="loading"]');
@@ -3267,7 +3511,10 @@ function updateDataSourceBadge(){
             select.value = normalized;
         }
     }
-    select.title = DATA_SOURCE_LABELS[dataSourceMode] || DATA_SOURCE_LABELS.loading;
+    const label = dataSourceMode === 'csv' && csvDatasetName
+        ? `${DATA_SOURCE_LABELS.csv} (${csvDatasetName})`
+        : (DATA_SOURCE_LABELS[dataSourceMode] || DATA_SOURCE_LABELS.loading);
+    select.title = label;
 }
 
 function computeRealEstateAnalytics(){
@@ -8022,7 +8269,18 @@ document.addEventListener('DOMContentLoaded', ()=>{
     }
     registerZoomPluginIfNeeded();
     updateDataSourceBadge();
+    const importCsvInput = document.getElementById('import-csv-input');
     const dataSourceSelect = document.getElementById('data-source-select');
+    const importCsvButton = document.getElementById('import-csv-button');
+    const exportCsvButton = document.getElementById('export-csv-button');
+    const requestCsvImport = ()=>{
+        if(importCsvInput){
+            importCsvInput.value = '';
+            importCsvInput.click();
+        }else{
+            setStatus('CSV import is not available in this environment.');
+        }
+    };
     if(dataSourceSelect){
         dataSourceSelect.addEventListener('change', event=>{
             const value = event.target.value;
@@ -8030,7 +8288,41 @@ document.addEventListener('DOMContentLoaded', ()=>{
                 event.target.value = dataSourceMode;
                 return;
             }
+            if(value === 'csv'){
+                event.target.value = dataSourceMode;
+                if(csvImportInProgress){
+                    setStatus('CSV import already in progress…');
+                    return;
+                }
+                requestCsvImport();
+                return;
+            }
             switchDataSource(value);
+        });
+    }
+    if(importCsvButton){
+        importCsvButton.addEventListener('click', ()=>{
+            if(csvImportInProgress){
+                setStatus('CSV import already in progress…');
+                return;
+            }
+            requestCsvImport();
+        });
+    }
+    if(importCsvInput){
+        importCsvInput.addEventListener('change', event=>{
+            const file = event.target.files && event.target.files[0];
+            if(!file){
+                return;
+            }
+            importCsvFile(file).finally(()=>{
+                event.target.value = '';
+            });
+        });
+    }
+    if(exportCsvButton){
+        exportCsvButton.addEventListener('click', ()=>{
+            exportCurrentDataAsCsv();
         });
     }
     ensureTransactionModalElements();
