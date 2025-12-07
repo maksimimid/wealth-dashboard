@@ -5312,6 +5312,18 @@ function renderTransactionMeta(position, data){
         </details>
     `;
     bindInsightPlateDetails(transactionModalMeta);
+    const insightsDetails = transactionModalMeta.querySelector('.modal-insights');
+    if(insightsDetails && !insightsDetails.dataset.scrollBound){
+        insightsDetails.addEventListener('toggle', ()=>{
+            if(insightsDetails.open){
+                ensureInsightsSectionVisible(insightsDetails);
+            }
+        });
+        insightsDetails.dataset.scrollBound = 'true';
+    }
+    if(insightsDetails && insightsDetails.open){
+        ensureInsightsSectionVisible(insightsDetails);
+    }
 }
 
 function buildPurchaseInsightItems(purchases, avgPrice, currentPrice, totalSpent = 0, totalProceeds = 0){
@@ -5563,6 +5575,29 @@ function bindInsightPlateDetails(container){
         window.removeEventListener('resize', resizeHandler);
         mutationObserver.disconnect();
     };
+}
+
+function ensureInsightsSectionVisible(detailsEl){
+    if(!detailsEl){
+        return;
+    }
+    const plates = detailsEl.querySelector('.modal-insights-plates') || detailsEl;
+    requestAnimationFrame(()=>{
+        const container = transactionModalMeta ? transactionModalMeta.closest('.modal-content') : null;
+        if(container){
+            const containerRect = container.getBoundingClientRect();
+            const targetRect = plates.getBoundingClientRect();
+            if(targetRect.bottom > containerRect.bottom){
+                const delta = (targetRect.bottom - containerRect.bottom) + 16;
+                container.scrollBy({ top: delta, behavior: 'smooth' });
+            }else if(targetRect.top < containerRect.top){
+                const delta = (targetRect.top - containerRect.top) - 16;
+                container.scrollBy({ top: delta, behavior: 'smooth' });
+            }
+        }else if(typeof plates.scrollIntoView === 'function'){
+            plates.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+        }
+    });
 }
 
 function computeMedian(values){

@@ -494,7 +494,7 @@ body::before {
     overflow: visible;
     box-shadow: 0 6px 18px rgba(15, 23, 42, 0.35);
     transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
-    min-height: 46px;
+    min-height: 39px;
     display: flex;
     flex-direction: column;
     justify-content: flex-start;
@@ -502,6 +502,14 @@ body::before {
 
 .modal-insight-plate.detail-open {
     z-index: 80;
+}
+
+.modal-insight-plate.detail-position-below.detail-open {
+    z-index: 120;
+}
+
+.modal-insight-plate.detail-position-below.detail-open .modal-insight-detail {
+    z-index: 130;
 }
 
 .modal-insight-plate.detail-position-above.detail-open {
@@ -514,7 +522,7 @@ body::before {
 
 #transaction-modal-meta .modal-insight-plate {
     padding: 7px 9px;
-    min-height: 42px;
+    min-height: 36px;
     font-size: 0.78rem;
     line-height: 1.25;
     z-index: 1;
