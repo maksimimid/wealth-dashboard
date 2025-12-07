@@ -504,6 +504,14 @@ body::before {
     z-index: 80;
 }
 
+.modal-insight-plate.detail-position-above.detail-open {
+    z-index: 140;
+}
+
+.modal-insight-plate.detail-position-above.detail-open .modal-insight-detail {
+    z-index: 150;
+}
+
 #transaction-modal-meta .modal-insight-plate {
     padding: 7px 9px;
     min-height: 42px;
@@ -574,14 +582,17 @@ body::before {
 .modal-insight-plate.detail-position-above .modal-insight-detail {
     bottom: calc(100% + 14px);
     top: auto;
+    background: #0f172a;
+    border-color: rgba(59, 130, 246, 0.45);
+    box-shadow: 0 24px 52px rgba(2, 6, 23, 0.8);
 }
 
 .modal-insight-plate.detail-position-above .modal-insight-detail::after {
     left: 50%;
     bottom: -6px;
-    background: rgba(15, 23, 42, 0.96);
-    border-left: 1px solid rgba(148, 163, 184, 0.3);
-    border-top: 1px solid rgba(148, 163, 184, 0.3);
+    background: #0f172a;
+    border-left: 1px solid rgba(59, 130, 246, 0.45);
+    border-top: 1px solid rgba(59, 130, 246, 0.45);
 }
 
 .modal-insight-plate:hover {
@@ -621,10 +632,16 @@ body.light-theme .modal-insight-plate.detail-position-below .modal-insight-detai
     border-bottom-color: rgba(148, 163, 184, 0.45);
 }
 
+body.light-theme .modal-insight-plate.detail-position-above .modal-insight-detail {
+    background: rgba(248, 250, 252, 1);
+    border-color: rgba(99, 102, 241, 0.45);
+    box-shadow: 0 24px 52px rgba(148, 163, 184, 0.4);
+}
+
 body.light-theme .modal-insight-plate.detail-position-above .modal-insight-detail::after {
-    background: rgba(248, 250, 252, 0.98);
-    border-left-color: rgba(148, 163, 184, 0.45);
-    border-top-color: rgba(148, 163, 184, 0.45);
+    background: rgba(248, 250, 252, 1);
+    border-left-color: rgba(99, 102, 241, 0.45);
+    border-top-color: rgba(99, 102, 241, 0.45);
 }
 
 body.light-theme .modal-insight-plate:hover {
