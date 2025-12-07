@@ -456,7 +456,7 @@ body::before {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 12px;
-    padding: 14px 18px 18px;
+    padding: 14px 18px 48px;
     max-height: min(400px, 50vh);
     overflow-y: auto;
     overflow-x: hidden;
@@ -556,18 +556,15 @@ body::before {
 }
 
 .modal-insight-plate.detail-position-below .modal-insight-detail {
-    position: relative;
-    left: 0;
-    top: auto;
+    top: calc(100% + 14px);
     bottom: auto;
-    transform: none;
-    margin-top: 10px;
-    width: 100%;
-    max-width: none;
+    left: 50%;
+    transform: translate(-50%, 0);
+    max-width: 340px;
 }
 
 .modal-insight-plate.detail-position-below .modal-insight-detail::after {
-    left: 24px;
+    left: 50%;
     top: -6px;
     background: rgba(15, 23, 42, 0.96);
     border-right: 1px solid rgba(148, 163, 184, 0.3);
