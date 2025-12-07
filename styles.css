@@ -483,6 +483,7 @@ body::before {
 
 .modal-insight-plate {
     position: relative;
+    z-index: 1;
     padding: 8px 10px;
     border-radius: 10px;
     background: linear-gradient(135deg, rgba(15, 23, 42, 0.78), rgba(15, 23, 42, 0.55));
@@ -497,6 +498,10 @@ body::before {
     display: flex;
     flex-direction: column;
     justify-content: flex-start;
+}
+
+.modal-insight-plate.detail-open {
+    z-index: 80;
 }
 
 #transaction-modal-meta .modal-insight-plate {
@@ -515,7 +520,8 @@ body::before {
     position: absolute;
     left: 50%;
     transform: translate(-50%, 0);
-    top: calc(100% + 14px);
+    top: auto;
+    bottom: auto;
     max-width: 340px;
     min-width: 220px;
     padding: 10px 12px;
@@ -532,26 +538,47 @@ body::before {
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.15s ease;
-    z-index: 6;
+    z-index: 50;
 }
 
 .modal-insight-detail::after {
     content: '';
     position: absolute;
-    left: 50%;
-    top: -6px;
     width: 12px;
     height: 12px;
     border-radius: 3px;
-    background: rgba(15, 23, 42, 0.96);
-    border-right: 1px solid rgba(148, 163, 184, 0.3);
-    border-bottom: 1px solid rgba(148, 163, 184, 0.3);
     transform: translateX(-50%) rotate(45deg);
 }
 
 .modal-insight-plate.detail-open .modal-insight-detail {
     opacity: 1;
     pointer-events: auto;
+}
+
+.modal-insight-plate.detail-position-below .modal-insight-detail {
+    top: calc(100% + 14px);
+    bottom: auto;
+}
+
+.modal-insight-plate.detail-position-below .modal-insight-detail::after {
+    left: 50%;
+    top: -6px;
+    background: rgba(15, 23, 42, 0.96);
+    border-right: 1px solid rgba(148, 163, 184, 0.3);
+    border-bottom: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+.modal-insight-plate.detail-position-above .modal-insight-detail {
+    bottom: calc(100% + 14px);
+    top: auto;
+}
+
+.modal-insight-plate.detail-position-above .modal-insight-detail::after {
+    left: 50%;
+    bottom: -6px;
+    background: rgba(15, 23, 42, 0.96);
+    border-left: 1px solid rgba(148, 163, 184, 0.3);
+    border-top: 1px solid rgba(148, 163, 184, 0.3);
 }
 
 .modal-insight-plate:hover {
@@ -585,10 +612,16 @@ body.light-theme .modal-insight-detail {
     box-shadow: 0 18px 40px rgba(148, 163, 184, 0.35);
 }
 
-body.light-theme .modal-insight-detail::after {
+body.light-theme .modal-insight-plate.detail-position-below .modal-insight-detail::after {
     background: rgba(248, 250, 252, 0.98);
     border-right-color: rgba(148, 163, 184, 0.45);
     border-bottom-color: rgba(148, 163, 184, 0.45);
+}
+
+body.light-theme .modal-insight-plate.detail-position-above .modal-insight-detail::after {
+    background: rgba(248, 250, 252, 0.98);
+    border-left-color: rgba(148, 163, 184, 0.45);
+    border-top-color: rgba(148, 163, 184, 0.45);
 }
 
 body.light-theme .modal-insight-plate:hover {

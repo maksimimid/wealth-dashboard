@@ -5225,11 +5225,9 @@ function bindInsightPlateDetails(container){
     if(!container){
         return;
     }
-    if(container.__insightOutsideHandler){
-        document.removeEventListener('click', container.__insightOutsideHandler, true);
-        document.removeEventListener('keydown', container.__insightKeyHandler, true);
-        container.__insightOutsideHandler = null;
-        container.__insightKeyHandler = null;
+    if(typeof container.__insightCleanup === 'function'){
+        container.__insightCleanup();
+        container.__insightCleanup = null;
     }
     const plates = Array.from(container.querySelectorAll('.modal-insight-plate[data-detail]'));
     if(!plates.length){
@@ -5238,6 +5236,22 @@ function bindInsightPlateDetails(container){
     const closeAll = ()=>{
         plates.forEach(plate => plate.classList.remove('detail-open'));
     };
+    const updatePlacementDirections = ()=>{
+        if(!plates.length){
+            return;
+        }
+        const tops = plates.map(plate => plate.offsetTop);
+        const firstRowTop = tops.length ? Math.min(...tops) : 0;
+        plates.forEach(plate=>{
+            const isFirstRow = Math.abs(plate.offsetTop - firstRowTop) < 4;
+            plate.classList.toggle('detail-position-below', isFirstRow);
+            plate.classList.toggle('detail-position-above', !isFirstRow);
+        });
+    };
+    const schedulePlacementUpdate = ()=>{
+        window.requestAnimationFrame(updatePlacementDirections);
+    };
+    schedulePlacementUpdate();
     plates.forEach(plate=>{
         if(plate.dataset.detailPrepared === 'true'){
             return;
@@ -5257,6 +5271,7 @@ function bindInsightPlateDetails(container){
             if(!wasOpen){
                 plate.classList.add('detail-open');
             }
+            schedulePlacementUpdate();
             event.stopPropagation();
         });
         plate.addEventListener('keydown', event=>{
@@ -5278,8 +5293,20 @@ function bindInsightPlateDetails(container){
     };
     document.addEventListener('click', outsideHandler, true);
     document.addEventListener('keydown', keyHandler, true);
-    container.__insightOutsideHandler = outsideHandler;
-    container.__insightKeyHandler = keyHandler;
+    const resizeHandler = ()=>{
+        schedulePlacementUpdate();
+    };
+    window.addEventListener('resize', resizeHandler);
+    const mutationObserver = new MutationObserver(()=>{
+        schedulePlacementUpdate();
+    });
+    mutationObserver.observe(container, { childList: true, subtree: true, attributes: true });
+    container.__insightCleanup = ()=>{
+        document.removeEventListener('click', outsideHandler, true);
+        document.removeEventListener('keydown', keyHandler, true);
+        window.removeEventListener('resize', resizeHandler);
+        mutationObserver.disconnect();
+    };
 }
 
 function computeMedian(values){
@@ -6225,6 +6252,15 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
         };
     });
 
+    const bubbleArea = nodesData.reduce((sum, node)=> sum + (node.size * node.size), 0);
+    const allowedBubbleArea = Math.max(1, width * height * 0.35);
+    const bubbleAreaScale = bubbleArea > allowedBubbleArea ? Math.sqrt(allowedBubbleArea / bubbleArea) : 1;
+    if(bubbleAreaScale < 1){
+        nodesData.forEach(node=>{
+            node.size = Math.max(48, Math.round(node.size * bubbleAreaScale));
+        });
+    }
+
     const mainDetail = total > 0 ? 'Total value' : 'Awaiting data';
     const mainTitle = total > 0 ? `Total value: ${money(total)}` : 'Awaiting data';
     const mainDisplayValue = total === 0 ? '$0' : formatCompactMoney(total);
@@ -6233,15 +6269,21 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
     const baseMainSize = Math.min(sizeLimit, Math.max(110, Math.min(minDimension * 0.6, 200)));
     const mainSize = Math.max(94, Math.min(sizeLimit, Math.round(baseMainSize * 0.85)));
     const minSpacing = Math.max(18, Math.min(34, minDimension * 0.08));
-    const boundaryPadding = Math.max(12, Math.min(26, minDimension * 0.05));
+    const boundaryPadding = Math.max(16, Math.min(32, minDimension * 0.08));
 
-    const maxDiameter = nodesData.reduce((max, node)=> Math.max(max, node.size), 0);
-    const availableRadius = Math.max(110, Math.min(width, height) / 2 - 30);
-    const perimeterNeed = nodesData.reduce((sum, node)=> sum + node.size + minSpacing, 0);
-    const radiusFromPerimeter = perimeterNeed > 0 ? perimeterNeed / (Math.PI * 2) : 0;
-    const minRequiredRadius = (mainSize * 0.5) + (maxDiameter * 0.5) + minSpacing * 2;
-    const rawRadius = Math.max(minRequiredRadius, radiusFromPerimeter);
-    const radius = Math.min(availableRadius, Math.max(rawRadius, availableRadius * 0.6));
+    const calculateRadius = ()=>{
+        const currentMaxDiameter = nodesData.reduce((max, node)=> Math.max(max, node.size), 0);
+        const availableRadius = Math.max(110, Math.min(width, height) / 2 - 30);
+        const perimeterNeed = nodesData.reduce((sum, node)=> sum + node.size + minSpacing, 0);
+        const radiusFromPerimeter = perimeterNeed > 0 ? perimeterNeed / (Math.PI * 2) : 0;
+        const minRequiredRadius = (mainSize * 0.5) + (currentMaxDiameter * 0.5) + minSpacing * 2;
+        const rawRadius = Math.max(minRequiredRadius, radiusFromPerimeter);
+        return Math.min(availableRadius, Math.max(rawRadius, availableRadius * 0.55));
+    };
+    let dynamicRadius = calculateRadius();
+    const refreshRadius = ()=>{
+        dynamicRadius = calculateRadius();
+    };
 
     const mainNode = createMindmapNode({
         label: 'Net Worth',
@@ -6267,17 +6309,24 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
 
     const twoPi = Math.PI * 2;
     const anchorBubble = { x: centerX, y: centerY, half: mainSize / 2 + minSpacing };
-    const basePlacements = nodesData.map((node, index)=>{
-        const fraction = nodesData.length ? (index / nodesData.length) : 0;
-        const angle = twoPi * fraction - Math.PI / 2;
-        const jitter = (index % 2 === 0 ? 1 : -1) * node.size * 0.12;
-        return { node, angle, jitter };
-    });
+    const buildBasePlacements = ()=>{
+        return nodesData.map((node, index)=>{
+            const fraction = nodesData.length ? (index / nodesData.length) : 0;
+            const angle = twoPi * fraction - Math.PI / 2;
+            const jitterDirection = index % 2 === 0 ? 1 : -1;
+            return { node, angle, jitterDirection };
+        });
+    };
+    let basePlacements = buildBasePlacements();
+    const refreshBasePlacements = ()=>{
+        basePlacements = buildBasePlacements();
+    };
 
     const createPlacementSet = (multiplier = 1)=>{
-        const radialBoost = radius * multiplier;
+        const radialBoost = dynamicRadius * multiplier;
         return basePlacements.map(base=>{
-            const offset = Math.max(0, radialBoost + base.jitter);
+            const jitter = base.jitterDirection * base.node.size * 0.12;
+            const offset = Math.max(0, radialBoost + jitter);
             return {
                 node: base.node,
                 x: centerX + Math.cos(base.angle) * offset,
@@ -6376,7 +6425,48 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
         return placements;
     };
 
-    const finalPlacements = computePlacements();
+    const isOutOfBounds = placements => placements.some(p=>
+        (p.x - p.half < boundaryPadding) ||
+        (p.x + p.half > width - boundaryPadding) ||
+        (p.y - p.half < boundaryPadding) ||
+        (p.y + p.half > height - boundaryPadding)
+    );
+
+    const getPlacementsWithFit = ()=>{
+        let attempts = 0;
+        let placements = [];
+        while(attempts < 5){
+            refreshRadius();
+            placements = computePlacements();
+            if(!placements || !placements.length){
+                break;
+            }
+            if(!isOutOfBounds(placements)){
+                break;
+            }
+            nodesData.forEach(node=>{
+                node.size = Math.max(48, Math.round(node.size * 0.9));
+            });
+            refreshBasePlacements();
+            attempts += 1;
+        }
+        return placements;
+    };
+
+    const finalPlacements = getPlacementsWithFit();
+    if(!finalPlacements || !finalPlacements.length){
+        lastMindmapRenderHash = hash;
+        lastMindmapDimensions = { width, height };
+        return true;
+    }
+
+    const clampPlacementsToBounds = placements=>{
+        placements.forEach(placement=>{
+            placement.x = Math.min(width - placement.half - boundaryPadding, Math.max(boundaryPadding + placement.half, placement.x));
+            placement.y = Math.min(height - placement.half - boundaryPadding, Math.max(boundaryPadding + placement.half, placement.y));
+        });
+    };
+    clampPlacementsToBounds(finalPlacements);
 
     finalPlacements.forEach((placement, index)=>{
         const node = placement.node;
