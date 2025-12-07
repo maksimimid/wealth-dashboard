@@ -8,13 +8,23 @@ Keep this README up to date whenever you change the Airtable schema, add operati
 
 ## Quick Setup
 
-- Copy `config.sample.js` ? `config.local.js` and populate the values:
+- Copy `config.sample.js` → `config.local.js` and populate the values:
   - `FINNHUB_KEY`
   - `AIRTABLE_API_KEY`
   - `AIRTABLE_BASE_ID`
   - `AIRTABLE_TABLE_NAME` (default: `Operations`)
 - Host the `/workspace` directory (e.g., `npx http-server .` or any static hosting provider).
-- The app throttles UI redraws to every 5?s; you will see log output in the browser console for WebSocket events.
+- The app throttles UI redraws to every 5 s; you will see log output in the browser console for WebSocket events.
+
+### CSV import/export
+
+The header pill now exposes CSV workflows so you can operate without Airtable:
+
+- **Download CSV** — click the down-arrow button to export the currently loaded dataset (live Airtable, cached snapshot, fallback, or a prior import). The file contains the same columns described below, so it can be shared, audited, or re-imported later.
+- **Load CSV** — click the up-arrow button (or choose “Local CSV” in the data-source dropdown) and select a CSV with headers `Asset,Category,Operation,Amount,Price,Spent,Date,Tags`. The dashboard parses each row as if it came from Airtable, swaps to the “Imported CSV” data source badge, and keeps all analytics live.
+- You can hop back to Airtable/snapshot/fallback at any time via the dropdown. The CSV buttons are optional shortcuts and do not require config changes.
+
+Use CSVs for demos, offline reviews, or to debug changes in isolation—no API keys needed.
 
 ---
 
