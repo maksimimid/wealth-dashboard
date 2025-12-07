@@ -556,12 +556,18 @@ body::before {
 }
 
 .modal-insight-plate.detail-position-below .modal-insight-detail {
-    top: calc(100% + 14px);
+    position: relative;
+    left: 0;
+    top: auto;
     bottom: auto;
+    transform: none;
+    margin-top: 10px;
+    width: 100%;
+    max-width: none;
 }
 
 .modal-insight-plate.detail-position-below .modal-insight-detail::after {
-    left: 50%;
+    left: 24px;
     top: -6px;
     background: rgba(15, 23, 42, 0.96);
     border-right: 1px solid rgba(148, 163, 184, 0.3);
