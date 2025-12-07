@@ -5055,6 +5055,7 @@ function renderTransactionMeta(position, data){
             </div>
         </details>
     `;
+    bindInsightPlateDetails(transactionModalMeta);
 }
 
 function buildPurchaseInsightItems(purchases, avgPrice, currentPrice, totalSpent = 0, totalProceeds = 0){
@@ -5218,6 +5219,67 @@ function escapeHtmlAttribute(value){
         .replace(/"/g, '&quot;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
+}
+
+function bindInsightPlateDetails(container){
+    if(!container){
+        return;
+    }
+    if(container.__insightOutsideHandler){
+        document.removeEventListener('click', container.__insightOutsideHandler, true);
+        document.removeEventListener('keydown', container.__insightKeyHandler, true);
+        container.__insightOutsideHandler = null;
+        container.__insightKeyHandler = null;
+    }
+    const plates = Array.from(container.querySelectorAll('.modal-insight-plate[data-detail]'));
+    if(!plates.length){
+        return;
+    }
+    const closeAll = ()=>{
+        plates.forEach(plate => plate.classList.remove('detail-open'));
+    };
+    plates.forEach(plate=>{
+        if(plate.dataset.detailPrepared === 'true'){
+            return;
+        }
+        const detailText = plate.getAttribute('data-detail');
+        if(detailText && !plate.querySelector('.modal-insight-detail')){
+            const detailEl = document.createElement('div');
+            detailEl.className = 'modal-insight-detail';
+            detailEl.textContent = detailText;
+            plate.appendChild(detailEl);
+        }
+        plate.setAttribute('tabindex', '0');
+        plate.dataset.detailPrepared = 'true';
+        plate.addEventListener('click', event=>{
+            const wasOpen = plate.classList.contains('detail-open');
+            closeAll();
+            if(!wasOpen){
+                plate.classList.add('detail-open');
+            }
+            event.stopPropagation();
+        });
+        plate.addEventListener('keydown', event=>{
+            if(event.key === 'Enter' || event.key === ' '){
+                event.preventDefault();
+                plate.click();
+            }
+        });
+    });
+    const outsideHandler = event=>{
+        if(!container.contains(event.target)){
+            closeAll();
+        }
+    };
+    const keyHandler = event=>{
+        if(event.key === 'Escape'){
+            closeAll();
+        }
+    };
+    document.addEventListener('click', outsideHandler, true);
+    document.addEventListener('keydown', keyHandler, true);
+    container.__insightOutsideHandler = outsideHandler;
+    container.__insightKeyHandler = keyHandler;
 }
 
 function computeMedian(values){
