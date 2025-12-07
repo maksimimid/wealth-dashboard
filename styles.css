@@ -504,6 +504,59 @@ body::before {
     min-height: 42px;
     font-size: 0.78rem;
     line-height: 1.25;
+    z-index: 1;
+}
+
+.modal-insight-plate[data-detail] {
+    cursor: help;
+}
+
+.modal-insight-plate[data-detail]::after,
+.modal-insight-plate[data-detail]::before {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+    z-index: 5;
+}
+
+.modal-insight-plate[data-detail]::after {
+    content: attr(data-detail);
+    bottom: calc(100% + 12px);
+    max-width: 320px;
+    min-width: 220px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.96);
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    box-shadow: 0 18px 40px rgba(2, 6, 23, 0.55);
+    font-size: 0.78rem;
+    line-height: 1.4;
+    color: #e2e8f0;
+    text-align: left;
+    white-space: normal;
+    word-break: break-word;
+}
+
+.modal-insight-plate[data-detail]::before {
+    content: '';
+    bottom: calc(100% + 2px);
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    background: rgba(15, 23, 42, 0.96);
+    border-left: 1px solid rgba(148, 163, 184, 0.3);
+    border-top: 1px solid rgba(148, 163, 184, 0.3);
+    transform: translateX(-50%) rotate(45deg);
+}
+
+.modal-insight-plate[data-detail]:hover::after,
+.modal-insight-plate[data-detail]:hover::before,
+.modal-insight-plate[data-detail]:focus-visible::after,
+.modal-insight-plate[data-detail]:focus-visible::before {
+    opacity: 1;
 }
 
 .modal-insight-plate:hover {
@@ -528,6 +581,19 @@ body.light-theme .modal-insight-plate {
     color: #0f172a;
     border-color: rgba(148, 163, 184, 0.4);
     box-shadow: 0 8px 24px rgba(148, 163, 184, 0.25);
+}
+
+body.light-theme .modal-insight-plate[data-detail]::after {
+    background: rgba(248, 250, 252, 0.98);
+    color: #0f172a;
+    border-color: rgba(148, 163, 184, 0.45);
+    box-shadow: 0 18px 40px rgba(148, 163, 184, 0.35);
+}
+
+body.light-theme .modal-insight-plate[data-detail]::before {
+    background: rgba(248, 250, 252, 0.98);
+    border-left-color: rgba(148, 163, 184, 0.45);
+    border-top-color: rgba(148, 163, 184, 0.45);
 }
 
 body.light-theme .modal-insight-plate:hover {

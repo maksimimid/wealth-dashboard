@@ -4995,14 +4995,25 @@ function renderTransactionMeta(position, data){
         position.avgPrice
     ].map(value=> Number(value)).filter(value=> Number.isFinite(value) && Math.abs(value) > 1e-9);
     const currentPrice = currentPriceCandidates.length ? currentPriceCandidates[0] : fallbackAverage;
+    const purchaseCount = purchases.length;
+    const createPlate = (html, detail = '')=> ({ html, detail });
+    const netQtyDetail = `Buys ${formatQty(summary.totalBuys)} minus sells ${formatQty(summary.totalSells)} equals ${formatQty(summary.netQty)} net units.`;
+    const avgPriceDetail = purchaseCount
+        ? `${purchaseCount} buy${purchaseCount === 1 ? '' : 's'} averaged (sum of fill prices ÷ count) = ${money(avgPurchasePrice)}.`
+        : `No recorded buys; fallback price ${money(fallbackAverage)} used for averages.`;
+    const currentPriceDetail = `Comparison price picked from display → current → last known → last purchase → avg. Using ${money(currentPrice)} for insights.`;
+    const totalBoughtDetail = `Aggregate quantity across buy operations: ${formatQty(summary.totalBuys)}.`;
+    const totalSoldDetail = `Aggregate quantity across sell operations: ${formatQty(summary.totalSells)}.`;
+    const investedDetail = `Absolute cash paid for buys. Sum of spends = ${money(summary.totalSpent)}.`;
+    const returnedDetail = `Cash received from sells/refunds. Sum of proceeds = ${money(summary.totalProceeds)}.`;
     const primaryStats = [
-        `<strong>Avg buy price:</strong> ${money(avgPurchasePrice)}`,
-        `<strong>Current price:</strong> ${money(currentPrice)}`,
-        `<strong>Net quantity:</strong> ${formatQty(summary.netQty)}`,
-        `<strong>Total bought:</strong> ${formatQty(summary.totalBuys)}`,
-        `<strong>Total sold:</strong> ${formatQty(summary.totalSells)}`,
-        `<strong>Cash invested:</strong> ${money(summary.totalSpent)}`,
-        `<strong>Cash returned:</strong> ${money(summary.totalProceeds)}`
+        createPlate(`<strong>Avg buy price:</strong> ${money(avgPurchasePrice)}`, avgPriceDetail),
+        createPlate(`<strong>Current price:</strong> ${money(currentPrice)}`, currentPriceDetail),
+        createPlate(`<strong>Net quantity:</strong> ${formatQty(summary.netQty)}`, netQtyDetail),
+        createPlate(`<strong>Total bought:</strong> ${formatQty(summary.totalBuys)}`, totalBoughtDetail),
+        createPlate(`<strong>Total sold:</strong> ${formatQty(summary.totalSells)}`, totalSoldDetail),
+        createPlate(`<strong>Cash invested:</strong> ${money(summary.totalSpent)}`, investedDetail),
+        createPlate(`<strong>Cash returned:</strong> ${money(summary.totalProceeds)}`, returnedDetail)
     ];
     const insightItems = buildPurchaseInsightItems(purchases, avgPurchasePrice, currentPrice, summary.totalSpent, summary.totalProceeds);
     const combinedItems = [...primaryStats, ...insightItems];
@@ -5010,6 +5021,29 @@ function renderTransactionMeta(position, data){
         transactionModalMeta.innerHTML = '';
         return;
     }
+    const normalizedPlates = combinedItems.map(item => {
+        if(!item){
+            return null;
+        }
+        if(typeof item === 'string'){
+            return { html: item, detail: '' };
+        }
+        if(typeof item === 'object' && typeof item.html === 'string'){
+            return {
+                html: item.html,
+                detail: typeof item.detail === 'string' ? item.detail : ''
+            };
+        }
+        return { html: String(item), detail: '' };
+    }).filter(Boolean);
+    if(!normalizedPlates.length){
+        transactionModalMeta.innerHTML = '';
+        return;
+    }
+    const platesMarkup = normalizedPlates.map(plate => {
+        const detailAttr = plate.detail ? ` data-detail="${escapeHtmlAttribute(plate.detail)}"` : '';
+        return `<div class="modal-insight-plate"${detailAttr}>${plate.html}</div>`;
+    }).join('');
     transactionModalMeta.innerHTML = `
         <details class="modal-insights">
             <summary>
@@ -5017,7 +5051,7 @@ function renderTransactionMeta(position, data){
                 <span class="insight-hint">tap to expand</span>
             </summary>
             <div class="modal-insights-plates">
-                ${combinedItems.map(item => `<div class="modal-insight-plate">${item}</div>`).join('')}
+                ${platesMarkup}
             </div>
         </details>
     `;
@@ -5056,7 +5090,11 @@ function buildPurchaseInsightItems(purchases, avgPrice, currentPrice, totalSpent
         })
         .filter(Boolean)
         .sort((a,b)=> a.date - b.date);
+    const totalPriceSum = priceValues.reduce((sum, value)=> sum + value, 0);
     const items = [];
+    const addInsight = (html, detail = '')=>{
+        items.push({ html, detail });
+    };
 
     if(firstPurchase && lastPurchase){
         const inclusiveDays = Math.max(1, Math.floor(Math.abs(lastPurchase - firstPurchase) / DAY_IN_MS) + 1);
@@ -5067,7 +5105,8 @@ function buildPurchaseInsightItems(purchases, avgPrice, currentPrice, totalSpent
                 ? formatDateShort(firstPurchase)
                 : `${formatDateShort(firstPurchase)} → ${formatDateShort(lastPurchase)}`;
             const daysLabel = inclusiveDays === 1 ? 'day' : 'days';
-            items.push(`<strong>DCA projection:</strong> ${money(netCashInvested)} allocated across ${inclusiveDays} ${daysLabel}${rangeLabel ? ` · ${rangeLabel}` : ''}`);
+            const projectionDetail = `Assumes ${money(netCashInvested)} split evenly (${money(projectedDailyBuy)}/day) from ${rangeLabel}.`;
+            addInsight(`<strong>DCA projection:</strong> ${money(netCashInvested)} allocated across ${inclusiveDays} ${daysLabel}${rangeLabel ? ` · ${rangeLabel}` : ''}`, projectionDetail);
             const fallbackPriceForDca = pricePoints.length
                 ? pricePoints[0].price
                 : (Number.isFinite(currentPrice) && currentPrice > EPS ? currentPrice : (Number.isFinite(avgPrice) ? avgPrice : projectedDailyBuy));
@@ -5096,8 +5135,9 @@ function buildPurchaseInsightItems(purchases, avgPrice, currentPrice, totalSpent
             }
             const perDayAllocation = projectedDailyBuy;
             let projectedDcaAvgPrice = fallbackPriceForDca;
+            let totalUnits = 0;
             if(normalizedPrices.length){
-                const totalUnits = normalizedPrices.reduce((sum, price)=> price > EPS ? sum + (perDayAllocation / price) : sum, 0);
+                totalUnits = normalizedPrices.reduce((sum, price)=> price > EPS ? sum + (perDayAllocation / price) : sum, 0);
                 if(totalUnits > EPS){
                     projectedDcaAvgPrice = netCashInvested / totalUnits;
                 }
@@ -5105,7 +5145,10 @@ function buildPurchaseInsightItems(purchases, avgPrice, currentPrice, totalSpent
             if(!(projectedDcaAvgPrice > EPS)){
                 projectedDcaAvgPrice = perDayAllocation;
             }
-            items.push(`<strong>DCA AVG:</strong> ${money(projectedDailyBuy)} per day · projected avg ${money(projectedDcaAvgPrice)}`);
+            const dcaAvgDetail = normalizedPrices.length
+                ? `Simulated ${inclusiveDays} equal buys created ${formatQty(totalUnits)} projected units. ${money(netCashInvested)} ÷ ${formatQty(totalUnits)} = ${money(projectedDcaAvgPrice)}.`
+                : `Using fallback price ${money(fallbackPriceForDca)} to approximate per-day accumulation.`;
+            addInsight(`<strong>DCA AVG:</strong> ${money(projectedDailyBuy)} per day · projected avg ${money(projectedDcaAvgPrice)}`, dcaAvgDetail);
         }
     }
 
@@ -5113,48 +5156,68 @@ function buildPurchaseInsightItems(purchases, avgPrice, currentPrice, totalSpent
         const countAboveAvg = priceValues.filter(value => value > avgPrice + EPS).length;
         const countBelowAvg = priceValues.filter(value => value < avgPrice - EPS).length;
         const countNearAvg = priceValues.length - countAboveAvg - countBelowAvg;
-        items.push(`<strong>Vs avg:</strong> ${countAboveAvg} buys above · ${countBelowAvg} below${countNearAvg > 0 ? ` · ${countNearAvg} near` : ''}`);
+        const avgDetail = `${priceValues.length} buys benchmarked against ${money(avgPrice)}: ${countAboveAvg} above, ${countBelowAvg} below, ${countNearAvg} near.`;
+        addInsight(`<strong>Vs avg:</strong> ${countAboveAvg} buys above · ${countBelowAvg} below${countNearAvg > 0 ? ` · ${countNearAvg} near` : ''}`, avgDetail);
     }
     if(Number.isFinite(currentPrice)){
         const countAboveCurrent = priceValues.filter(value => value > currentPrice + EPS).length;
         const countBelowCurrent = priceValues.filter(value => value < currentPrice - EPS).length;
-        items.push(`<strong>Vs current:</strong> ${countAboveCurrent} buys above · ${countBelowCurrent} below`);
+        const currentDetail = `${priceValues.length} buys compared to current ${money(currentPrice)}: ${countAboveCurrent} bought higher, ${countBelowCurrent} bought lower.`;
+        addInsight(`<strong>Vs current:</strong> ${countAboveCurrent} buys above · ${countBelowCurrent} below`, currentDetail);
     }
     const medianPrice = computeMedian(priceValues);
     const priceStdDev = computeStdDeviation(priceValues);
     const minPrice = Math.min(...priceValues);
     const maxPrice = Math.max(...priceValues);
-    items.push(`<strong>Median buy:</strong> ${money(medianPrice)} · σ ${money(priceStdDev)}`);
-    items.push(`<strong>Price span:</strong> ${money(minPrice)} – ${money(maxPrice)} (${money(maxPrice - minPrice)})`);
+    const medianDetail = `Median of buy prices after sorting; σ is sample std dev (${money(priceStdDev)}).`;
+    const spanDetail = `Range from ${money(minPrice)} to ${money(maxPrice)} equals ${money(maxPrice - minPrice)} spread.`;
+    addInsight(`<strong>Median buy:</strong> ${money(medianPrice)} · σ ${money(priceStdDev)}`, medianDetail);
+    addInsight(`<strong>Price span:</strong> ${money(minPrice)} – ${money(maxPrice)} (${money(maxPrice - minPrice)})`, spanDetail);
     if(purchaseDates.length >= 2){
         let totalDiff = 0;
         for(let i=1;i<purchaseDates.length;i+=1){
             totalDiff += Math.abs(purchaseDates[i] - purchaseDates[i-1]);
         }
         const avgDiff = totalDiff / (purchaseDates.length - 1);
-        items.push(`<strong>Avg spacing:</strong> ${formatDuration(avgDiff)}`);
+        const approxDays = Math.max(1, Math.round(avgDiff / DAY_IN_MS));
+        const spacingDetail = `${purchaseDates.length} timestamps → average gap ${formatDuration(avgDiff)} (~${approxDays} day${approxDays === 1 ? '' : 's'}).`;
+        addInsight(`<strong>Avg spacing:</strong> ${formatDuration(avgDiff)}`, spacingDetail);
     }
     if(purchaseDates.length){
         const latestPurchase = purchaseDates[purchaseDates.length - 1];
-        items.push(`<strong>Last buy:</strong> ${formatDateShort(latestPurchase)}`);
+        const lastBuyDetail = `Most recent buy recorded on ${latestPurchase.toLocaleString()}.`;
+        addInsight(`<strong>Last buy:</strong> ${formatDateShort(latestPurchase)}`, lastBuyDetail);
     }
     if(priceValues.length >= 3){
         const sorted = priceValues.slice().sort((a,b)=> b - a);
         const topCount = Math.min(3, sorted.length);
         const topSum = sorted.slice(0, topCount).reduce((sum, value)=> sum + value, 0);
-        const totalSum = priceValues.reduce((sum, value)=> sum + value, 0);
+        const totalSum = totalPriceSum;
         if(totalSum !== 0){
             const share = (topSum / totalSum) * 100;
-            items.push(`<strong>Top buys share:</strong> ${share.toFixed(1)}% of buy capital in top ${topCount}`);
+            const topDetail = `Top ${topCount} buys total ${money(topSum)} of ${money(totalSum)} spent (${share.toFixed(1)}%).`;
+            addInsight(`<strong>Top buys share:</strong> ${share.toFixed(1)}% of buy capital in top ${topCount}`, topDetail);
         }
     }
     if(Number.isFinite(currentPrice)){
         const deltas = priceValues.map(value => currentPrice - value);
         const best = Math.max(...deltas);
         const worst = Math.min(...deltas);
-        items.push(`<strong>Best vs current:</strong> ${money(best)} · worst ${money(worst)}`);
+        const deltaDetail = `Best gain: buy at ${money(currentPrice - best)} now up ${money(best)}. Worst: buy at ${money(currentPrice - worst)} trails by ${money(Math.abs(worst))}.`;
+        addInsight(`<strong>Best vs current:</strong> ${money(best)} · worst ${money(worst)}`, deltaDetail);
     }
     return items;
+}
+
+function escapeHtmlAttribute(value){
+    if(value === undefined || value === null){
+        return '';
+    }
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
 }
 
 function computeMedian(values){
