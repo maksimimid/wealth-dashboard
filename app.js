@@ -5035,12 +5035,27 @@ function buildPurchaseInsightItems(purchases, avgPrice, currentPrice, totalSpent
     }
     const EPS = 1e-9;
     const DAY_IN_MS = 24 * 60 * 60 * 1000;
+    const toStartOfDayMs = date => {
+        if(!(date instanceof Date)) return NaN;
+        return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+    };
     const purchaseDates = purchases
         .map(point => point.date instanceof Date ? point.date : (point.x ? new Date(point.x) : null))
         .filter(date => date instanceof Date && !Number.isNaN(date.getTime()))
         .sort((a,b)=> a - b);
     const firstPurchase = purchaseDates[0] || null;
     const lastPurchase = purchaseDates[purchaseDates.length - 1] || null;
+    const pricePoints = purchases
+        .map(point=>{
+            const rawDate = point.date instanceof Date ? point.date : (point.x ? new Date(point.x) : null);
+            const price = Number(point.price ?? point.y ?? point.value ?? 0);
+            if(!(rawDate instanceof Date) || Number.isNaN(rawDate.getTime()) || !Number.isFinite(price) || price <= EPS){
+                return null;
+            }
+            return { date: rawDate, price };
+        })
+        .filter(Boolean)
+        .sort((a,b)=> a.date - b.date);
     const items = [];
 
     if(firstPurchase && lastPurchase){
@@ -5053,8 +5068,44 @@ function buildPurchaseInsightItems(purchases, avgPrice, currentPrice, totalSpent
                 : `${formatDateShort(firstPurchase)} → ${formatDateShort(lastPurchase)}`;
             const daysLabel = inclusiveDays === 1 ? 'day' : 'days';
             items.push(`<strong>DCA projection:</strong> ${money(netCashInvested)} allocated across ${inclusiveDays} ${daysLabel}${rangeLabel ? ` · ${rangeLabel}` : ''}`);
-            const projectedAvgPrice = priceValues.length ? priceValues.reduce((sum, price)=> sum + price, 0) / priceValues.length : projectedDailyBuy;
-            items.push(`<strong>DCA AVG:</strong> ${money(projectedDailyBuy)} per day · projected avg ${money(projectedAvgPrice)}`);
+            const fallbackPriceForDca = pricePoints.length
+                ? pricePoints[0].price
+                : (Number.isFinite(currentPrice) && currentPrice > EPS ? currentPrice : (Number.isFinite(avgPrice) ? avgPrice : projectedDailyBuy));
+            const startDayMs = toStartOfDayMs(firstPurchase);
+            const endDayMs = toStartOfDayMs(lastPurchase);
+            let cursorMs = Number.isFinite(startDayMs) ? startDayMs : NaN;
+            let pointer = 0;
+            let lastKnownPrice = fallbackPriceForDca > EPS ? fallbackPriceForDca : projectedDailyBuy;
+            const normalizedPrices = [];
+            if(Number.isFinite(cursorMs) && Number.isFinite(endDayMs)){
+                while(cursorMs <= endDayMs){
+                    while(pointer < pricePoints.length){
+                        const candidate = toStartOfDayMs(pricePoints[pointer].date);
+                        if(Number.isFinite(candidate) && candidate <= cursorMs){
+                            if(pricePoints[pointer].price > EPS){
+                                lastKnownPrice = pricePoints[pointer].price;
+                            }
+                            pointer += 1;
+                        }else{
+                            break;
+                        }
+                    }
+                    normalizedPrices.push(lastKnownPrice > EPS ? lastKnownPrice : fallbackPriceForDca || projectedDailyBuy);
+                    cursorMs += DAY_IN_MS;
+                }
+            }
+            const perDayAllocation = projectedDailyBuy;
+            let projectedDcaAvgPrice = fallbackPriceForDca;
+            if(normalizedPrices.length){
+                const totalUnits = normalizedPrices.reduce((sum, price)=> price > EPS ? sum + (perDayAllocation / price) : sum, 0);
+                if(totalUnits > EPS){
+                    projectedDcaAvgPrice = netCashInvested / totalUnits;
+                }
+            }
+            if(!(projectedDcaAvgPrice > EPS)){
+                projectedDcaAvgPrice = perDayAllocation;
+            }
+            items.push(`<strong>DCA AVG:</strong> ${money(projectedDailyBuy)} per day · projected avg ${money(projectedDcaAvgPrice)}`);
         }
     }
 
