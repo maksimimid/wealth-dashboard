@@ -54,8 +54,24 @@
                         <option value="airtable">Live Airtable</option>
                         <option value="snapshot">Cached snapshot</option>
                         <option value="fallback">Offline test data</option>
+                        <option value="csv">Local CSV</option>
                     </select>
                 </label>
+                <div class="data-source-actions" role="group" aria-label="CSV data actions">
+                    <button type="button" id="export-csv-button" class="data-source-action" title="Download current data as CSV">
+                        <span class="sr-only">Download current data as CSV</span>
+                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                            <path d="M12 3a1 1 0 0 1 1 1v9.586l2.293-2.293a1 1 0 0 1 1.414 1.414l-4.001 4.001a1 1 0 0 1-1.412 0l-4.001-4.001a1 1 0 0 1 1.414-1.414L11 13.586V4a1 1 0 0 1 1-1zM5 18a1 1 0 0 1 1-1h12a1 1 0 1 1 0 2H6a1 1 0 0 1-1-1z"></path>
+                        </svg>
+                    </button>
+                    <button type="button" id="import-csv-button" class="data-source-action" title="Load data from CSV">
+                        <span class="sr-only">Load data from CSV</span>
+                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                            <path d="M12 21a1 1 0 0 1-1-1v-9.586l-2.293 2.293a1 1 0 1 1-1.414-1.414l4.001-4.001a1 1 0 0 1 1.412 0l4.001 4.001a1 1 0 0 1-1.414 1.414L13 10.414V20a1 1 0 0 1-1 1zM5 6a1 1 0 0 1 1-1h12a1 1 0 1 1 0 2H6a1 1 0 0 1-1-1z"></path>
+                        </svg>
+                    </button>
+                    <input type="file" id="import-csv-input" class="sr-only" accept=".csv,text/csv" />
+                </div>
             </div>
             <h1>Wealth Intelligence Hub</h1>
             <p class="subtitle">Live holdings pulled directly from Airtable Operations and enriched with Finnhub market data. Track allocations, intraday moves, and long-term performance in one glass dashboard.</p>

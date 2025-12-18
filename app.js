@@ -78,7 +78,8 @@ const DATA_SOURCE_LABELS = {
     loading: 'Loading data…',
     airtable: 'Live Airtable',
     snapshot: 'Cached snapshot',
-    fallback: 'Offline test data'
+    fallback: 'Offline test data',
+    csv: 'Imported CSV'
 };
 const PNL_CHART_TIME_CONFIG = {
     '1D': { unit: 'hour', displayFormats: { hour: 'ha' }, maxTicks: 6 },
@@ -165,6 +166,9 @@ const SPARKLINE_PROJECTED_SMOOTHING = 0.32;
 let pnlPercentageToggleButton = null;
 let showPnlPercentages = false;
 const PNL_PERCENTAGE_STORAGE_KEY = 'showPnlPercentages';
+
+let csvDatasetName = '';
+let csvImportInProgress = false;
 const MILLION_TARGET = 1_000_000;
 let netWorthBubbleToggleButton = null;
 let netWorthInlineViewMode = 'chart';
@@ -553,6 +557,234 @@ function parseLocalHistoricalCsv(text){
         series,
         lastDate
     };
+}
+
+function formatDateISO(date){
+    if(!(date instanceof Date) || Number.isNaN(date.getTime())){
+        return '';
+    }
+    return date.toISOString().split('T')[0];
+}
+
+function quoteCsvField(value){
+    const raw = value === undefined || value === null ? '' : String(value);
+    if(/["\n,]/.test(raw)){
+        return `"${raw.replace(/"/g,'""')}"`;
+    }
+    return raw;
+}
+
+function buildCsvFromPositions(){
+    if(!Array.isArray(positions) || !positions.length){
+        return '';
+    }
+    const header = ['Asset','Category','Operation','Amount','Price','Spent','Date','Tags'];
+    const rows = [header.join(',')];
+    positions.forEach(position=>{
+        const ops = Array.isArray(position?.operations) ? position.operations : [];
+        if(!ops.length){
+            return;
+        }
+        const assetName = position.displayName || position.Name || position.Asset || position.id || position.Symbol || '';
+        const category = position.type || position.Category || '';
+        ops.forEach(op=>{
+            const tags = Array.isArray(op.tags) ? op.tags.join('|') : '';
+            const opDate = op.date instanceof Date ? op.date : (op.rawDate ? new Date(op.rawDate) : null);
+            const row = [
+                assetName,
+                category,
+                op.type || 'PurchaseSell',
+                Number.isFinite(op.amount) ? op.amount : '',
+                Number.isFinite(op.price) ? op.price : '',
+                Number.isFinite(op.spent) ? op.spent : '',
+                formatDateISO(opDate) || (typeof op.rawDate === 'string' ? op.rawDate : ''),
+                tags
+            ].map(quoteCsvField);
+            rows.push(row.join(','));
+        });
+    });
+    if(rows.length === 1){
+        return '';
+    }
+    return rows.join('\n');
+}
+
+function downloadTextFile(text, filename){
+    if(typeof window === 'undefined'){
+        return;
+    }
+    const blob = new Blob([text], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(()=> URL.revokeObjectURL(url), 0);
+}
+
+function exportCurrentDataAsCsv(){
+    const csv = buildCsvFromPositions();
+    if(!csv){
+        setStatus('No operations available to export.');
+        return;
+    }
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `wealth-data-${timestamp}.csv`;
+    downloadTextFile(csv, filename);
+    setStatus(`CSV exported · ${filename}`);
+}
+
+function coerceCsvNumber(value){
+    if(value === undefined || value === null){
+        return null;
+    }
+    const normalized = String(value).trim();
+    if(!normalized){
+        return null;
+    }
+    const numeric = Number(normalized.replace(/,/g,''));
+    return Number.isFinite(numeric) ? numeric : null;
+}
+
+function normalizeCsvHeader(name){
+    return String(name || '').trim().replace(/^"|"$/g,'').toLowerCase();
+}
+
+function stripCsvValue(value){
+    return String(value || '').replace(/^"|"$/g,'').trim();
+}
+
+function parseOperationsCsv(text){
+    if(typeof text !== 'string'){
+        return [];
+    }
+    const normalized = text.replace(/\r\n/g,'\n').replace(/\r/g,'\n');
+    const lines = normalized.split('\n').map(line=>line.trim()).filter(line=>line.length);
+    if(!lines.length){
+        return [];
+    }
+    const headerRaw = splitCsvLine(lines.shift());
+    const columnIndex = new Map();
+    headerRaw.forEach((name, idx)=>{
+        columnIndex.set(normalizeCsvHeader(name), idx);
+    });
+    const getValue = (parts, key)=>{
+        const idx = columnIndex.get(key);
+        if(idx === undefined || idx >= parts.length){
+            return '';
+        }
+        return stripCsvValue(parts[idx]);
+    };
+    const records = [];
+    lines.forEach((line, lineIndex)=>{
+        if(!line){
+            return;
+        }
+        const parts = splitCsvLine(line);
+        const asset = getValue(parts, 'asset');
+        if(!asset){
+            return;
+        }
+        const category = getValue(parts, 'category');
+        const operation = getValue(parts, 'operation') || getValue(parts, 'type') || 'PurchaseSell';
+        const amountValue = coerceCsvNumber(getValue(parts, 'amount'));
+        const priceValue = coerceCsvNumber(getValue(parts, 'price'));
+        const spentValue = coerceCsvNumber(getValue(parts, 'spent'));
+        const dateValue = getValue(parts, 'date');
+        const tagsRaw = getValue(parts, 'tags');
+        const tags = tagsRaw ? tagsRaw.split('|').map(tag=>tag.trim()).filter(Boolean) : [];
+        let isoDate = '';
+        if(dateValue){
+            const parsedDate = new Date(dateValue);
+            if(parsedDate instanceof Date && !Number.isNaN(parsedDate.getTime())){
+                isoDate = parsedDate.toISOString();
+            }else{
+                isoDate = dateValue;
+            }
+        }
+        const fields = {
+            Asset: asset,
+            Category: category,
+            'Operation type': operation,
+            Amount: amountValue ?? '',
+            Price: priceValue ?? '',
+            'Asset price on invest date': priceValue ?? '',
+            'Spent on operation': spentValue ?? '',
+            Date: isoDate,
+            Tags: tags
+        };
+        records.push({
+            id: `csv-${lineIndex}-${Date.now()}`,
+            fields
+        });
+    });
+    return records;
+}
+
+function applyCsvRecords(records, sourceLabel){
+    if(!Array.isArray(records) || !records.length){
+        setStatus('CSV file contained no valid rows.');
+        return false;
+    }
+    positions = transformOperations(records, null);
+    netContributionTotal = positions.reduce((sum, p)=> sum + Number(p.cashflow || 0), 0);
+    rebuildSymbolIndex();
+    operationsMeta = {
+        count: records.length,
+        fetchedAt: new Date(),
+        source: sourceLabel || 'CSV import'
+    };
+    dataSourceMode = 'csv';
+    csvDatasetName = sourceLabel || 'CSV import';
+    rangeDirty = true;
+    assetYearSeriesDirty = true;
+    realEstateRentSeriesDirty = true;
+    updateDataSourceBadge();
+    scheduleUIUpdate({ immediate: true });
+    if(typeof subscribeAll === 'function'){
+        subscribeAll();
+    }
+    const select = document.getElementById('data-source-select');
+    if(select){
+        select.disabled = false;
+        if(select.value !== 'csv'){
+            select.value = 'csv';
+        }
+    }
+    setStatus(`CSV data loaded${sourceLabel ? ` · ${sourceLabel}` : ''}`);
+    return true;
+}
+
+async function loadCsvDataFromText(text, sourceLabel){
+    const records = parseOperationsCsv(text);
+    return applyCsvRecords(records, sourceLabel);
+}
+
+async function importCsvFile(file){
+    if(!file){
+        return;
+    }
+    csvImportInProgress = true;
+    try{
+        if(loadingOverlay){
+            setLoadingState('visible','Loading CSV…');
+        }
+        const text = await file.text();
+        const success = await loadCsvDataFromText(text, file.name);
+        if(!success){
+            setStatus('CSV file did not contain any valid records.');
+        }
+    }catch(error){
+        console.error('CSV import failed', error);
+        setStatus('CSV import failed');
+    }finally{
+        csvImportInProgress = false;
+        if(loadingOverlay){
+            setLoadingState('hidden');
+        }
+    }
 }
 
 async function loadLocalHistoricalSeries(position){
@@ -2780,6 +3012,7 @@ async function loadPositions(){
         if(!positions.length){
             throw new Error('No positions available after transformation');
         }
+        csvDatasetName = '';
         dataSourceMode = 'airtable';
         updateDataSourceBadge();
     }catch(err){
@@ -2790,6 +3023,7 @@ async function loadPositions(){
             netContributionTotal = positions.reduce((sum,p)=>sum + Number(p.cashflow || 0),0);
             rebuildSymbolIndex();
             operationsMeta = {count: snapshotRecords.length, fetchedAt: getSnapshotSavedAt()};
+            csvDatasetName = '';
             setStatus('Cached Airtable snapshot loaded');
             dataSourceMode = 'snapshot';
         }else{
@@ -2798,6 +3032,7 @@ async function loadPositions(){
             netContributionTotal = positions.reduce((sum,p)=>sum + Number(p.cashflow || 0),0);
             rebuildSymbolIndex();
             operationsMeta = {count: 0, fetchedAt: null};
+            csvDatasetName = '';
             dataSourceMode = 'fallback';
         }
         setLoadingState('error','Airtable unavailable — showing demo data');
@@ -2810,6 +3045,10 @@ async function loadPositions(){
 }
 
 async function switchDataSource(mode){
+    if(mode === 'csv'){
+        setStatus('Use the CSV import controls to load a file.');
+        return;
+    }
     const target = mode === 'fallback' ? 'fallback' : mode === 'snapshot' ? 'snapshot' : 'airtable';
     if(isSwitchingDataSource) return;
     if(target === dataSourceMode && target !== 'loading') return;
@@ -2826,6 +3065,7 @@ async function switchDataSource(mode){
             rangeDirty = true;
             assetYearSeriesDirty = true;
             realEstateRentSeriesDirty = true;
+        csvDatasetName = '';
             dataSourceMode = 'fallback';
             setStatus('Offline test data loaded');
             updateDataSourceBadge();
@@ -2845,6 +3085,7 @@ async function switchDataSource(mode){
                 rangeDirty = true;
                 assetYearSeriesDirty = true;
                 realEstateRentSeriesDirty = true;
+            csvDatasetName = '';
                 dataSourceMode = 'snapshot';
                 setStatus('Cached Airtable snapshot loaded');
                 updateDataSourceBadge();
@@ -2869,6 +3110,7 @@ async function switchDataSource(mode){
         rangeDirty = true;
         assetYearSeriesDirty = true;
         realEstateRentSeriesDirty = true;
+        csvDatasetName = '';
         dataSourceMode = 'airtable';
         updateDataSourceBadge();
         scheduleUIUpdate({immediate:true});
@@ -2879,6 +3121,7 @@ async function switchDataSource(mode){
         netContributionTotal = positions.reduce((sum,p)=>sum + Number(p.cashflow || 0),0);
         rebuildSymbolIndex();
         operationsMeta = {count: 0, fetchedAt: null};
+        csvDatasetName = '';
         dataSourceMode = 'fallback';
         updateDataSourceBadge();
         setStatus('Offline test data loaded');
@@ -3243,7 +3486,8 @@ function updateDataSourceBadge(){
     if(typeof document === 'undefined') return;
     const select = document.getElementById('data-source-select');
     if(!select) return;
-    const normalized = (dataSourceMode === 'airtable' || dataSourceMode === 'fallback' || dataSourceMode === 'snapshot') ? dataSourceMode : 'loading';
+    const allowedSources = new Set(['airtable','fallback','snapshot','csv']);
+    const normalized = allowedSources.has(dataSourceMode) ? dataSourceMode : 'loading';
     select.setAttribute('data-source', normalized);
     if(normalized === 'loading'){
         let loadingOption = select.querySelector('option[value="loading"]');
@@ -3267,7 +3511,10 @@ function updateDataSourceBadge(){
             select.value = normalized;
         }
     }
-    select.title = DATA_SOURCE_LABELS[dataSourceMode] || DATA_SOURCE_LABELS.loading;
+    const label = dataSourceMode === 'csv' && csvDatasetName
+        ? `${DATA_SOURCE_LABELS.csv} (${csvDatasetName})`
+        : (DATA_SOURCE_LABELS[dataSourceMode] || DATA_SOURCE_LABELS.loading);
+    select.title = label;
 }
 
 function computeRealEstateAnalytics(){
@@ -4995,14 +5242,34 @@ function renderTransactionMeta(position, data){
         position.avgPrice
     ].map(value=> Number(value)).filter(value=> Number.isFinite(value) && Math.abs(value) > 1e-9);
     const currentPrice = currentPriceCandidates.length ? currentPriceCandidates[0] : fallbackAverage;
+    const purchaseCount = purchases.length;
+    const reinvestedQty = Math.max(0, Number(position?.reinvested || 0));
+    const inferredReinvestValue = Number(position?.reinvestedValue);
+    const reinvestedValue = Number.isFinite(inferredReinvestValue)
+        ? inferredReinvestValue
+        : (Number.isFinite(currentPrice) && reinvestedQty > 0 ? reinvestedQty * currentPrice : 0);
+    const createPlate = (html, detail = '')=> ({ html, detail });
+    const netQtyDetail = `Buys ${formatQty(summary.totalBuys)} minus sells ${formatQty(summary.totalSells)} equals ${formatQty(summary.netQty)} net units.`;
+    const avgPriceDetail = purchaseCount
+        ? `${purchaseCount} buy${purchaseCount === 1 ? '' : 's'} averaged (sum of fill prices ÷ count) = ${money(avgPurchasePrice)}.`
+        : `No recorded buys; fallback price ${money(fallbackAverage)} used for averages.`;
+    const currentPriceDetail = `Comparison price picked from display → current → last known → last purchase → avg. Using ${money(currentPrice)} for insights.`;
+    const totalBoughtDetail = `Aggregate quantity across buy operations: ${formatQty(summary.totalBuys)}.`;
+    const totalSoldDetail = `Aggregate quantity across sell operations: ${formatQty(summary.totalSells)}.`;
+    const investedDetail = `Absolute cash paid for buys. Sum of spends = ${money(summary.totalSpent)}.`;
+    const returnedDetail = `Cash received from sells/refunds. Sum of proceeds = ${money(summary.totalProceeds)}.`;
+    const reinvestedDetail = reinvestedQty > 0
+        ? `Reinvesting tag accumulated ${formatQty(reinvestedQty)} units. Using ${money(reinvestedValue)} (qty × reference price).`
+        : 'No reinvesting operations captured for this asset.';
     const primaryStats = [
-        `<strong>Avg buy price:</strong> ${money(avgPurchasePrice)}`,
-        `<strong>Current price:</strong> ${money(currentPrice)}`,
-        `<strong>Net quantity:</strong> ${formatQty(summary.netQty)}`,
-        `<strong>Total bought:</strong> ${formatQty(summary.totalBuys)}`,
-        `<strong>Total sold:</strong> ${formatQty(summary.totalSells)}`,
-        `<strong>Cash invested:</strong> ${money(summary.totalSpent)}`,
-        `<strong>Cash returned:</strong> ${money(summary.totalProceeds)}`
+        createPlate(`<strong>Avg buy price:</strong> ${money(avgPurchasePrice)}`, avgPriceDetail),
+        createPlate(`<strong>Current price:</strong> ${money(currentPrice)}`, currentPriceDetail),
+        createPlate(`<strong>Net quantity:</strong> ${formatQty(summary.netQty)}`, netQtyDetail),
+        createPlate(`<strong>Total bought:</strong> ${formatQty(summary.totalBuys)}`, totalBoughtDetail),
+        createPlate(`<strong>Total sold:</strong> ${formatQty(summary.totalSells)}`, totalSoldDetail),
+        createPlate(`<strong>Cash invested:</strong> ${money(summary.totalSpent)}`, investedDetail),
+        createPlate(`<strong>Cash returned:</strong> ${money(summary.totalProceeds)}`, returnedDetail),
+        createPlate(`<strong>Reinvested:</strong> ${money(reinvestedValue)} · ${formatQty(reinvestedQty)}`, reinvestedDetail)
     ];
     const insightItems = buildPurchaseInsightItems(purchases, avgPurchasePrice, currentPrice, summary.totalSpent, summary.totalProceeds);
     const combinedItems = [...primaryStats, ...insightItems];
@@ -5010,6 +5277,29 @@ function renderTransactionMeta(position, data){
         transactionModalMeta.innerHTML = '';
         return;
     }
+    const normalizedPlates = combinedItems.map(item => {
+        if(!item){
+            return null;
+        }
+        if(typeof item === 'string'){
+            return { html: item, detail: '' };
+        }
+        if(typeof item === 'object' && typeof item.html === 'string'){
+            return {
+                html: item.html,
+                detail: typeof item.detail === 'string' ? item.detail : ''
+            };
+        }
+        return { html: String(item), detail: '' };
+    }).filter(Boolean);
+    if(!normalizedPlates.length){
+        transactionModalMeta.innerHTML = '';
+        return;
+    }
+    const platesMarkup = normalizedPlates.map(plate => {
+        const detailAttr = plate.detail ? ` data-detail="${escapeHtmlAttribute(plate.detail)}"` : '';
+        return `<div class="modal-insight-plate"${detailAttr}>${plate.html}</div>`;
+    }).join('');
     transactionModalMeta.innerHTML = `
         <details class="modal-insights">
             <summary>
@@ -5017,10 +5307,23 @@ function renderTransactionMeta(position, data){
                 <span class="insight-hint">tap to expand</span>
             </summary>
             <div class="modal-insights-plates">
-                ${combinedItems.map(item => `<div class="modal-insight-plate">${item}</div>`).join('')}
+                ${platesMarkup}
             </div>
         </details>
     `;
+    bindInsightPlateDetails(transactionModalMeta);
+    const insightsDetails = transactionModalMeta.querySelector('.modal-insights');
+    if(insightsDetails && !insightsDetails.dataset.scrollBound){
+        insightsDetails.addEventListener('toggle', ()=>{
+            if(insightsDetails.open){
+                ensureInsightsSectionVisible(insightsDetails);
+            }
+        });
+        insightsDetails.dataset.scrollBound = 'true';
+    }
+    if(insightsDetails && insightsDetails.open){
+        ensureInsightsSectionVisible(insightsDetails);
+    }
 }
 
 function buildPurchaseInsightItems(purchases, avgPrice, currentPrice, totalSpent = 0, totalProceeds = 0){
@@ -5034,66 +5337,267 @@ function buildPurchaseInsightItems(purchases, avgPrice, currentPrice, totalSpent
         return [];
     }
     const EPS = 1e-9;
+    const DAY_IN_MS = 24 * 60 * 60 * 1000;
+    const toStartOfDayMs = date => {
+        if(!(date instanceof Date)) return NaN;
+        return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+    };
+    const purchaseDates = purchases
+        .map(point => point.date instanceof Date ? point.date : (point.x ? new Date(point.x) : null))
+        .filter(date => date instanceof Date && !Number.isNaN(date.getTime()))
+        .sort((a,b)=> a - b);
+    const firstPurchase = purchaseDates[0] || null;
+    const lastPurchase = purchaseDates[purchaseDates.length - 1] || null;
+    const pricePoints = purchases
+        .map(point=>{
+            const rawDate = point.date instanceof Date ? point.date : (point.x ? new Date(point.x) : null);
+            const price = Number(point.price ?? point.y ?? point.value ?? 0);
+            if(!(rawDate instanceof Date) || Number.isNaN(rawDate.getTime()) || !Number.isFinite(price) || price <= EPS){
+                return null;
+            }
+            return { date: rawDate, price };
+        })
+        .filter(Boolean)
+        .sort((a,b)=> a.date - b.date);
+    const totalPriceSum = priceValues.reduce((sum, value)=> sum + value, 0);
     const items = [];
+    const addInsight = (html, detail = '')=>{
+        items.push({ html, detail });
+    };
+
+    if(firstPurchase && lastPurchase){
+        const inclusiveDays = Math.max(1, Math.floor(Math.abs(lastPurchase - firstPurchase) / DAY_IN_MS) + 1);
+        const netCashInvested = Number(totalSpent || 0) - Number(totalProceeds || 0);
+        if(netCashInvested > EPS){
+            const projectedDailyBuy = netCashInvested / inclusiveDays;
+            const rangeLabel = firstPurchase.getTime() === lastPurchase.getTime()
+                ? formatDateShort(firstPurchase)
+                : `${formatDateShort(firstPurchase)} → ${formatDateShort(lastPurchase)}`;
+            const daysLabel = inclusiveDays === 1 ? 'day' : 'days';
+            const projectionDetail = `Assumes ${money(netCashInvested)} split evenly (${money(projectedDailyBuy)}/day) from ${rangeLabel}.`;
+            addInsight(`<strong>DCA projection:</strong> ${money(netCashInvested)} allocated across ${inclusiveDays} ${daysLabel}${rangeLabel ? ` · ${rangeLabel}` : ''}`, projectionDetail);
+            const fallbackPriceForDca = pricePoints.length
+                ? pricePoints[0].price
+                : (Number.isFinite(currentPrice) && currentPrice > EPS ? currentPrice : (Number.isFinite(avgPrice) ? avgPrice : projectedDailyBuy));
+            const startDayMs = toStartOfDayMs(firstPurchase);
+            const endDayMs = toStartOfDayMs(lastPurchase);
+            let cursorMs = Number.isFinite(startDayMs) ? startDayMs : NaN;
+            let pointer = 0;
+            let lastKnownPrice = fallbackPriceForDca > EPS ? fallbackPriceForDca : projectedDailyBuy;
+            const normalizedPrices = [];
+            if(Number.isFinite(cursorMs) && Number.isFinite(endDayMs)){
+                while(cursorMs <= endDayMs){
+                    while(pointer < pricePoints.length){
+                        const candidate = toStartOfDayMs(pricePoints[pointer].date);
+                        if(Number.isFinite(candidate) && candidate <= cursorMs){
+                            if(pricePoints[pointer].price > EPS){
+                                lastKnownPrice = pricePoints[pointer].price;
+                            }
+                            pointer += 1;
+                        }else{
+                            break;
+                        }
+                    }
+                    normalizedPrices.push(lastKnownPrice > EPS ? lastKnownPrice : fallbackPriceForDca || projectedDailyBuy);
+                    cursorMs += DAY_IN_MS;
+                }
+            }
+            const perDayAllocation = projectedDailyBuy;
+            let projectedDcaAvgPrice = fallbackPriceForDca;
+            let totalUnits = 0;
+            if(normalizedPrices.length){
+                totalUnits = normalizedPrices.reduce((sum, price)=> price > EPS ? sum + (perDayAllocation / price) : sum, 0);
+                if(totalUnits > EPS){
+                    projectedDcaAvgPrice = netCashInvested / totalUnits;
+                }
+            }
+            if(!(projectedDcaAvgPrice > EPS)){
+                projectedDcaAvgPrice = perDayAllocation;
+            }
+            const dcaAvgDetail = normalizedPrices.length
+                ? `Simulated ${inclusiveDays} equal buys created ${formatQty(totalUnits)} projected units. ${money(netCashInvested)} ÷ ${formatQty(totalUnits)} = ${money(projectedDcaAvgPrice)}.`
+                : `Using fallback price ${money(fallbackPriceForDca)} to approximate per-day accumulation.`;
+            addInsight(`<strong>DCA AVG:</strong> ${money(projectedDailyBuy)} per day · projected avg ${money(projectedDcaAvgPrice)}`, dcaAvgDetail);
+        }
+    }
+
     if(Number.isFinite(avgPrice)){
         const countAboveAvg = priceValues.filter(value => value > avgPrice + EPS).length;
         const countBelowAvg = priceValues.filter(value => value < avgPrice - EPS).length;
         const countNearAvg = priceValues.length - countAboveAvg - countBelowAvg;
-        items.push(`<strong>Vs avg:</strong> ${countAboveAvg} buys above · ${countBelowAvg} below${countNearAvg > 0 ? ` · ${countNearAvg} near` : ''}`);
+        const avgDetail = `${priceValues.length} buys benchmarked against ${money(avgPrice)}: ${countAboveAvg} above, ${countBelowAvg} below, ${countNearAvg} near.`;
+        addInsight(`<strong>Vs avg:</strong> ${countAboveAvg} buys above · ${countBelowAvg} below${countNearAvg > 0 ? ` · ${countNearAvg} near` : ''}`, avgDetail);
     }
     if(Number.isFinite(currentPrice)){
         const countAboveCurrent = priceValues.filter(value => value > currentPrice + EPS).length;
         const countBelowCurrent = priceValues.filter(value => value < currentPrice - EPS).length;
-        items.push(`<strong>Vs current:</strong> ${countAboveCurrent} buys above · ${countBelowCurrent} below`);
+        const currentDetail = `${priceValues.length} buys compared to current ${money(currentPrice)}: ${countAboveCurrent} bought higher, ${countBelowCurrent} bought lower.`;
+        addInsight(`<strong>Vs current:</strong> ${countAboveCurrent} buys above · ${countBelowCurrent} below`, currentDetail);
     }
     const medianPrice = computeMedian(priceValues);
     const priceStdDev = computeStdDeviation(priceValues);
     const minPrice = Math.min(...priceValues);
     const maxPrice = Math.max(...priceValues);
-    items.push(`<strong>Median buy:</strong> ${money(medianPrice)} · σ ${money(priceStdDev)}`);
-    items.push(`<strong>Price span:</strong> ${money(minPrice)} – ${money(maxPrice)} (${money(maxPrice - minPrice)})`);
-    const purchaseDates = purchases
-        .map(point => point.date instanceof Date ? point.date : (point.x ? new Date(point.x) : null))
-        .filter(date => date instanceof Date && !Number.isNaN(date.getTime()))
-        .sort((a,b)=> a - b);
+    const medianDetail = `Median of buy prices after sorting; σ is sample std dev (${money(priceStdDev)}).`;
+    const spanDetail = `Range from ${money(minPrice)} to ${money(maxPrice)} equals ${money(maxPrice - minPrice)} spread.`;
+    addInsight(`<strong>Median buy:</strong> ${money(medianPrice)} · σ ${money(priceStdDev)}`, medianDetail);
+    addInsight(`<strong>Price span:</strong> ${money(minPrice)} – ${money(maxPrice)} (${money(maxPrice - minPrice)})`, spanDetail);
     if(purchaseDates.length >= 2){
         let totalDiff = 0;
         for(let i=1;i<purchaseDates.length;i+=1){
             totalDiff += Math.abs(purchaseDates[i] - purchaseDates[i-1]);
         }
         const avgDiff = totalDiff / (purchaseDates.length - 1);
-        items.push(`<strong>Avg spacing:</strong> ${formatDuration(avgDiff)}`);
-        
-        const firstPurchase = purchaseDates[0];
-        const lastPurchase = purchaseDates[purchaseDates.length - 1];
-        const daysDiff = Math.max(1, Math.ceil((lastPurchase - firstPurchase) / (1000 * 60 * 60 * 24)));
-        const netCashInvested = Number(totalSpent || 0) - Number(totalProceeds || 0);
-        if(netCashInvested > 0 && daysDiff > 0){
-            const dcaProjection = netCashInvested / daysDiff;
-            items.push(`<strong>DCA projection:</strong> ${money(dcaProjection)}/day over ${daysDiff} days`);
-        }
+        const approxDays = Math.max(1, Math.round(avgDiff / DAY_IN_MS));
+        const spacingDetail = `${purchaseDates.length} timestamps → average gap ${formatDuration(avgDiff)} (~${approxDays} day${approxDays === 1 ? '' : 's'}).`;
+        addInsight(`<strong>Avg spacing:</strong> ${formatDuration(avgDiff)}`, spacingDetail);
     }
     if(purchaseDates.length){
         const latestPurchase = purchaseDates[purchaseDates.length - 1];
-        items.push(`<strong>Last buy:</strong> ${formatDateShort(latestPurchase)}`);
+        const lastBuyDetail = `Most recent buy recorded on ${latestPurchase.toLocaleString()}.`;
+        addInsight(`<strong>Last buy:</strong> ${formatDateShort(latestPurchase)}`, lastBuyDetail);
     }
     if(priceValues.length >= 3){
         const sorted = priceValues.slice().sort((a,b)=> b - a);
         const topCount = Math.min(3, sorted.length);
         const topSum = sorted.slice(0, topCount).reduce((sum, value)=> sum + value, 0);
-        const totalSum = priceValues.reduce((sum, value)=> sum + value, 0);
+        const totalSum = totalPriceSum;
         if(totalSum !== 0){
             const share = (topSum / totalSum) * 100;
-            items.push(`<strong>Top buys share:</strong> ${share.toFixed(1)}% of buy capital in top ${topCount}`);
+            const topDetail = `Top ${topCount} buys total ${money(topSum)} of ${money(totalSum)} spent (${share.toFixed(1)}%).`;
+            addInsight(`<strong>Top buys share:</strong> ${share.toFixed(1)}% of buy capital in top ${topCount}`, topDetail);
         }
     }
     if(Number.isFinite(currentPrice)){
         const deltas = priceValues.map(value => currentPrice - value);
         const best = Math.max(...deltas);
         const worst = Math.min(...deltas);
-        items.push(`<strong>Best vs current:</strong> ${money(best)} · worst ${money(worst)}`);
+        const deltaDetail = `Best gain: buy at ${money(currentPrice - best)} now up ${money(best)}. Worst: buy at ${money(currentPrice - worst)} trails by ${money(Math.abs(worst))}.`;
+        addInsight(`<strong>Best vs current:</strong> ${money(best)} · worst ${money(worst)}`, deltaDetail);
     }
     return items;
+}
+
+function escapeHtmlAttribute(value){
+    if(value === undefined || value === null){
+        return '';
+    }
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function bindInsightPlateDetails(container){
+    if(!container){
+        return;
+    }
+    if(typeof container.__insightCleanup === 'function'){
+        container.__insightCleanup();
+        container.__insightCleanup = null;
+    }
+    const plates = Array.from(container.querySelectorAll('.modal-insight-plate[data-detail]'));
+    if(!plates.length){
+        return;
+    }
+    const closeAll = ()=>{
+        plates.forEach(plate => plate.classList.remove('detail-open'));
+    };
+    const updatePlacementDirections = ()=>{
+        if(!plates.length){
+            return;
+        }
+        const tops = plates.map(plate => plate.offsetTop);
+        const firstRowTop = tops.length ? Math.min(...tops) : 0;
+        plates.forEach(plate=>{
+            const isFirstRow = Math.abs(plate.offsetTop - firstRowTop) < 4;
+            plate.classList.toggle('detail-position-below', isFirstRow);
+            plate.classList.toggle('detail-position-above', !isFirstRow);
+        });
+    };
+    const schedulePlacementUpdate = ()=>{
+        window.requestAnimationFrame(updatePlacementDirections);
+    };
+    schedulePlacementUpdate();
+    plates.forEach(plate=>{
+        if(plate.dataset.detailPrepared === 'true'){
+            return;
+        }
+        const detailText = plate.getAttribute('data-detail');
+        if(detailText && !plate.querySelector('.modal-insight-detail')){
+            const detailEl = document.createElement('div');
+            detailEl.className = 'modal-insight-detail';
+            detailEl.textContent = detailText;
+            plate.appendChild(detailEl);
+        }
+        plate.setAttribute('tabindex', '0');
+        plate.dataset.detailPrepared = 'true';
+        plate.addEventListener('click', event=>{
+            const wasOpen = plate.classList.contains('detail-open');
+            closeAll();
+            if(!wasOpen){
+                plate.classList.add('detail-open');
+            }
+            schedulePlacementUpdate();
+            event.stopPropagation();
+        });
+        plate.addEventListener('keydown', event=>{
+            if(event.key === 'Enter' || event.key === ' '){
+                event.preventDefault();
+                plate.click();
+            }
+        });
+    });
+    const outsideHandler = event=>{
+        if(!container.contains(event.target)){
+            closeAll();
+        }
+    };
+    const keyHandler = event=>{
+        if(event.key === 'Escape'){
+            closeAll();
+        }
+    };
+    document.addEventListener('click', outsideHandler, true);
+    document.addEventListener('keydown', keyHandler, true);
+    const resizeHandler = ()=>{
+        schedulePlacementUpdate();
+    };
+    window.addEventListener('resize', resizeHandler);
+    const mutationObserver = new MutationObserver(()=>{
+        schedulePlacementUpdate();
+    });
+    mutationObserver.observe(container, { childList: true, subtree: true, attributes: true });
+    container.__insightCleanup = ()=>{
+        document.removeEventListener('click', outsideHandler, true);
+        document.removeEventListener('keydown', keyHandler, true);
+        window.removeEventListener('resize', resizeHandler);
+        mutationObserver.disconnect();
+    };
+}
+
+function ensureInsightsSectionVisible(detailsEl){
+    if(!detailsEl){
+        return;
+    }
+    const plates = detailsEl.querySelector('.modal-insights-plates') || detailsEl;
+    requestAnimationFrame(()=>{
+        const container = transactionModalMeta ? transactionModalMeta.closest('.modal-content') : null;
+        if(container){
+            const containerRect = container.getBoundingClientRect();
+            const targetRect = plates.getBoundingClientRect();
+            if(targetRect.bottom > containerRect.bottom){
+                const delta = (targetRect.bottom - containerRect.bottom) + 16;
+                container.scrollBy({ top: delta, behavior: 'smooth' });
+            }else if(targetRect.top < containerRect.top){
+                const delta = (targetRect.top - containerRect.top) - 16;
+                container.scrollBy({ top: delta, behavior: 'smooth' });
+            }
+        }else if(typeof plates.scrollIntoView === 'function'){
+            plates.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+        }
+    });
 }
 
 function computeMedian(values){
@@ -6039,6 +6543,15 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
         };
     });
 
+    const bubbleArea = nodesData.reduce((sum, node)=> sum + (node.size * node.size), 0);
+    const allowedBubbleArea = Math.max(1, width * height * 0.35);
+    const bubbleAreaScale = bubbleArea > allowedBubbleArea ? Math.sqrt(allowedBubbleArea / bubbleArea) : 1;
+    if(bubbleAreaScale < 1){
+        nodesData.forEach(node=>{
+            node.size = Math.max(48, Math.round(node.size * bubbleAreaScale));
+        });
+    }
+
     const mainDetail = total > 0 ? 'Total value' : 'Awaiting data';
     const mainTitle = total > 0 ? `Total value: ${money(total)}` : 'Awaiting data';
     const mainDisplayValue = total === 0 ? '$0' : formatCompactMoney(total);
@@ -6046,15 +6559,22 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
     const sizeLimit = Math.max(110, Math.min(minDimension - 24, 220));
     const baseMainSize = Math.min(sizeLimit, Math.max(110, Math.min(minDimension * 0.6, 200)));
     const mainSize = Math.max(94, Math.min(sizeLimit, Math.round(baseMainSize * 0.85)));
+    const minSpacing = Math.max(18, Math.min(34, minDimension * 0.08));
+    const boundaryPadding = Math.max(16, Math.min(32, minDimension * 0.08));
 
-    const maxDiameter = nodesData.reduce((max, node)=> Math.max(max, node.size), 0);
-    const availableRadius = Math.max(110, Math.min(width, height) / 2 - 30);
-    const minSpacingForRadius = 24;
-    const radius = Math.max(
-        availableRadius * 0.85,
-        availableRadius - (mainSize * 0.5) - (maxDiameter * 0.3),
-        (mainSize * 0.65) + maxDiameter * 0.5 + minSpacingForRadius * 2
-    );
+    const calculateRadius = ()=>{
+        const currentMaxDiameter = nodesData.reduce((max, node)=> Math.max(max, node.size), 0);
+        const availableRadius = Math.max(110, Math.min(width, height) / 2 - 30);
+        const perimeterNeed = nodesData.reduce((sum, node)=> sum + node.size + minSpacing, 0);
+        const radiusFromPerimeter = perimeterNeed > 0 ? perimeterNeed / (Math.PI * 2) : 0;
+        const minRequiredRadius = (mainSize * 0.5) + (currentMaxDiameter * 0.5) + minSpacing * 2;
+        const rawRadius = Math.max(minRequiredRadius, radiusFromPerimeter);
+        return Math.min(availableRadius, Math.max(rawRadius, availableRadius * 0.55));
+    };
+    let dynamicRadius = calculateRadius();
+    const refreshRadius = ()=>{
+        dynamicRadius = calculateRadius();
+    };
 
     const mainNode = createMindmapNode({
         label: 'Net Worth',
@@ -6079,68 +6599,168 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
     }
 
     const twoPi = Math.PI * 2;
-    const placedBubbles = [{ x: centerX, y: centerY, half: mainSize / 2 }];
-    const minSpacing = 18;
-    
-    nodesData.forEach((node, index)=>{
-        const angle = twoPi * (index / nodesData.length) - Math.PI / 2;
-        const half = node.size / 2;
-        let rawX = centerX + Math.cos(angle) * radius;
-        let rawY = centerY + Math.sin(angle) * radius;
-        
-        let attempts = 0;
-        let finalX = rawX;
-        let finalY = rawY;
-        let hasCollision = true;
-        const maxAttempts = 100;
-        
-        while(hasCollision && attempts < maxAttempts){
-            hasCollision = false;
-            finalX = Math.min(width - half - 10, Math.max(half + 10, rawX));
-            finalY = Math.min(height - half - 10, Math.max(half + 10, rawY));
-            
-            for(const placed of placedBubbles){
-                const dx = finalX - placed.x;
-                const dy = finalY - placed.y;
-                const distance = Math.sqrt(dx * dx + dy * dy);
-                const minDistance = half + placed.half + minSpacing;
-                
-                if(distance < minDistance){
-                    hasCollision = true;
-                    if(distance < 0.1){
-                        const pushAngle = angle + (Math.random() - 0.5) * 0.5;
-                        rawX = centerX + Math.cos(pushAngle) * (radius + (attempts * 5));
-                        rawY = centerY + Math.sin(pushAngle) * (radius + (attempts * 5));
-                    }else{
-                        const angleToPlaced = Math.atan2(dy, dx);
-                        const pushDistance = (minDistance - distance) * 1.5 + 3;
-                        rawX = finalX + Math.cos(angleToPlaced) * pushDistance;
-                        rawY = finalY + Math.sin(angleToPlaced) * pushDistance;
-                    }
-                    attempts++;
-                    break;
+    const anchorBubble = { x: centerX, y: centerY, half: mainSize / 2 + minSpacing };
+    const buildBasePlacements = ()=>{
+        return nodesData.map((node, index)=>{
+            const fraction = nodesData.length ? (index / nodesData.length) : 0;
+            const angle = twoPi * fraction - Math.PI / 2;
+            const jitterDirection = index % 2 === 0 ? 1 : -1;
+            return { node, angle, jitterDirection };
+        });
+    };
+    let basePlacements = buildBasePlacements();
+    const refreshBasePlacements = ()=>{
+        basePlacements = buildBasePlacements();
+    };
+
+    const createPlacementSet = (multiplier = 1)=>{
+        const radialBoost = dynamicRadius * multiplier;
+        return basePlacements.map(base=>{
+            const jitter = base.jitterDirection * base.node.size * 0.12;
+            const offset = Math.max(0, radialBoost + jitter);
+            return {
+                node: base.node,
+                x: centerX + Math.cos(base.angle) * offset,
+                y: centerY + Math.sin(base.angle) * offset,
+                half: base.node.size / 2
+            };
+        });
+    };
+
+    const clampBubble = bubble=>{
+        const prevX = bubble.x;
+        const prevY = bubble.y;
+        const minX = bubble.half + boundaryPadding;
+        const maxX = Math.max(minX, width - bubble.half - boundaryPadding);
+        const minY = bubble.half + boundaryPadding;
+        const maxY = Math.max(minY, height - bubble.half - boundaryPadding);
+        bubble.x = Math.max(minX, Math.min(maxX, bubble.x));
+        bubble.y = Math.max(minY, Math.min(maxY, bubble.y));
+        return prevX !== bubble.x || prevY !== bubble.y;
+    };
+
+    const separateBubbles = (a, b, lockSecond = false)=>{
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const minDistance = a.half + b.half + minSpacing;
+        if(distance >= minDistance){
+            return false;
+        }
+        const overlap = Math.max(minDistance - (distance || 0), minSpacing);
+        const angle = distance === 0 ? Math.random() * twoPi : Math.atan2(dy, dx);
+        const pushX = Math.cos(angle) * overlap;
+        const pushY = Math.sin(angle) * overlap;
+        if(lockSecond){
+            a.x += pushX;
+            a.y += pushY;
+        }else{
+            a.x += pushX / 2;
+            a.y += pushY / 2;
+            b.x -= pushX / 2;
+            b.y -= pushY / 2;
+        }
+        return true;
+    };
+
+    const resolveMindmapCollisions = bubbles=>{
+        const iterations = 120;
+        for(let iter = 0; iter < iterations; iter+=1){
+            let moved = false;
+            for(let i = 0; i < bubbles.length; i+=1){
+                for(let j = i + 1; j < bubbles.length; j+=1){
+                    moved = separateBubbles(bubbles[i], bubbles[j]) || moved;
                 }
             }
-            
-            if(!hasCollision){
-                const dx = finalX - centerX;
-                const dy = finalY - centerY;
-                const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
-                const minDistanceFromMain = mainSize / 2 + half + minSpacing;
-                if(distanceFromCenter < minDistanceFromMain){
-                    hasCollision = true;
-                    const angleFromCenter = Math.atan2(dy, dx);
-                    rawX = centerX + Math.cos(angleFromCenter) * (minDistanceFromMain + 2);
-                    rawY = centerY + Math.sin(angleFromCenter) * (minDistanceFromMain + 2);
-                    attempts++;
+            for(const bubble of bubbles){
+                moved = separateBubbles(bubble, anchorBubble, true) || moved;
+                moved = clampBubble(bubble) || moved;
+            }
+            if(!moved){
+                break;
+            }
+        }
+    };
+
+    const hasOverlap = bubbles=>{
+        for(let i = 0; i < bubbles.length; i+=1){
+            for(let j = i + 1; j < bubbles.length; j+=1){
+                const dx = bubbles[i].x - bubbles[j].x;
+                const dy = bubbles[i].y - bubbles[j].y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                const minDistance = bubbles[i].half + bubbles[j].half + (minSpacing - 2);
+                if(distance < minDistance){
+                    return true;
                 }
             }
         }
-        
-        const clampedX = finalX;
-        const clampedY = finalY;
-        placedBubbles.push({ x: clampedX, y: clampedY, half: half });
-        
+        return false;
+    };
+
+    const computePlacements = ()=>{
+        if(!basePlacements.length){
+            return [];
+        }
+        let attempt = 0;
+        let placements = createPlacementSet(1);
+        const maxAttempts = 5;
+        while(attempt < maxAttempts){
+            resolveMindmapCollisions(placements);
+            if(!hasOverlap(placements)){
+                break;
+            }
+            attempt += 1;
+            const multiplier = 1 + attempt * 0.2;
+            placements = createPlacementSet(multiplier);
+        }
+        return placements;
+    };
+
+    const isOutOfBounds = placements => placements.some(p=>
+        (p.x - p.half < boundaryPadding) ||
+        (p.x + p.half > width - boundaryPadding) ||
+        (p.y - p.half < boundaryPadding) ||
+        (p.y + p.half > height - boundaryPadding)
+    );
+
+    const getPlacementsWithFit = ()=>{
+        let attempts = 0;
+        let placements = [];
+        while(attempts < 5){
+            refreshRadius();
+            placements = computePlacements();
+            if(!placements || !placements.length){
+                break;
+            }
+            if(!isOutOfBounds(placements)){
+                break;
+            }
+            nodesData.forEach(node=>{
+                node.size = Math.max(48, Math.round(node.size * 0.9));
+            });
+            refreshBasePlacements();
+            attempts += 1;
+        }
+        return placements;
+    };
+
+    const finalPlacements = getPlacementsWithFit();
+    if(!finalPlacements || !finalPlacements.length){
+        lastMindmapRenderHash = hash;
+        lastMindmapDimensions = { width, height };
+        return true;
+    }
+
+    const clampPlacementsToBounds = placements=>{
+        placements.forEach(placement=>{
+            placement.x = Math.min(width - placement.half - boundaryPadding, Math.max(boundaryPadding + placement.half, placement.x));
+            placement.y = Math.min(height - placement.half - boundaryPadding, Math.max(boundaryPadding + placement.half, placement.y));
+        });
+    };
+    clampPlacementsToBounds(finalPlacements);
+
+    finalPlacements.forEach((placement, index)=>{
+        const node = placement.node;
         const percentLabel = node.percent > 0 ? `${node.percent.toFixed(1)}%` : '';
         const valueWithPercent = percentLabel
             ? `${formatCompactMoney(node.value)} (${percentLabel})`
@@ -6154,8 +6774,8 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
             size: node.size,
             styles: colorTheme
         });
-        bubble.node.style.left = `${clampedX}px`;
-        bubble.node.style.top = `${clampedY}px`;
+        bubble.node.style.left = `${placement.x}px`;
+        bubble.node.style.top = `${placement.y}px`;
         const titlePercent = percentLabel ? ` (${percentLabel})` : '';
         bubble.node.title = `${node.fullLabel}: ${money(node.value)}${titlePercent}`;
         bubble.node.setAttribute('aria-hidden', 'true');
@@ -6166,8 +6786,8 @@ function renderNetWorthMindmap(categoryMap = {}, totalValue = 0, attempt = 0){
         const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
         line.setAttribute('x1', centerX);
         line.setAttribute('y1', centerY);
-        line.setAttribute('x2', clampedX);
-        line.setAttribute('y2', clampedY);
+        line.setAttribute('x2', placement.x);
+        line.setAttribute('y2', placement.y);
         line.setAttribute('stroke-width', '2');
         line.setAttribute('stroke-dasharray', '6 6');
         line.setAttribute('stroke-linecap', 'round');
@@ -7684,7 +8304,18 @@ document.addEventListener('DOMContentLoaded', ()=>{
     }
     registerZoomPluginIfNeeded();
     updateDataSourceBadge();
+    const importCsvInput = document.getElementById('import-csv-input');
     const dataSourceSelect = document.getElementById('data-source-select');
+    const importCsvButton = document.getElementById('import-csv-button');
+    const exportCsvButton = document.getElementById('export-csv-button');
+    const requestCsvImport = ()=>{
+        if(importCsvInput){
+            importCsvInput.value = '';
+            importCsvInput.click();
+        }else{
+            setStatus('CSV import is not available in this environment.');
+        }
+    };
     if(dataSourceSelect){
         dataSourceSelect.addEventListener('change', event=>{
             const value = event.target.value;
@@ -7692,7 +8323,41 @@ document.addEventListener('DOMContentLoaded', ()=>{
                 event.target.value = dataSourceMode;
                 return;
             }
+            if(value === 'csv'){
+                event.target.value = dataSourceMode;
+                if(csvImportInProgress){
+                    setStatus('CSV import already in progress…');
+                    return;
+                }
+                requestCsvImport();
+                return;
+            }
             switchDataSource(value);
+        });
+    }
+    if(importCsvButton){
+        importCsvButton.addEventListener('click', ()=>{
+            if(csvImportInProgress){
+                setStatus('CSV import already in progress…');
+                return;
+            }
+            requestCsvImport();
+        });
+    }
+    if(importCsvInput){
+        importCsvInput.addEventListener('change', event=>{
+            const file = event.target.files && event.target.files[0];
+            if(!file){
+                return;
+            }
+            importCsvFile(file).finally(()=>{
+                event.target.value = '';
+            });
+        });
+    }
+    if(exportCsvButton){
+        exportCsvButton.addEventListener('click', ()=>{
+            exportCurrentDataAsCsv();
         });
     }
     ensureTransactionModalElements();
